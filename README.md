@@ -259,12 +259,16 @@ In the constellation, zooming out gathers people by their latest recorded activi
 
 In timeline settings, open **Audience Groups** to turn optional groups on or off. **Account size** starts off. When enabled, it saves follower counts only when X includes them with a new event; it never looks up profiles. An older event or a missing count appears as **Unknown**. Enable it to add Account size to the spyglass picker alongside Activity and Ungrouped.
 
-These groups describe the loaded history, not a complete or current follower list. Loading older events can add people or fill out a group. Turning a group off stops its metadata capture and removes its lens; your recorded history stays saved. Group changes save automatically and keep the listener running.
+**Previous encounters** also starts off. Enable it to group events as **First appearance**, **Seen before**, or **Followed again**. It uses this account’s full saved log, including records outside the page or filter you are viewing. Followed again requires a recorded unfollow followed by a follow; subscription changes alone do not count as a return. First appearance means first in this log, not their first-ever interaction on X. Tracking gaps and activity before recording began are not reconstructed. This group makes no X requests and can use history saved before you enabled it.
+
+These groups describe the loaded history, not a complete or current follower list. Loading older events can add people or fill out a group. Turning a group off stops its extra processing and removes its lens; your recorded history stays saved. Group changes save automatically and keep the listener running.
 
 <details>
 <summary>Adding an Audience Group as a developer</summary>
 
 Each built-in group is a small, trusted Python module in `src/xflog/audience_groups/`. Register an `AudienceGroup` with a unique key, label, description, bucket definitions and an `assign(event)` function. Include an `unknown` bucket. An optional `capture(source)` function can return the small metadata snapshot to keep from an incoming event. Set `default_enabled=False` for optional features.
+
+History-derived modules can supply an async `prepare(events, lookup)` hook. The callback returns local context for the page’s event sequences: whether the actor appeared earlier and the last earlier follower-event kind. Previous encounters demonstrates this path. Lookups cover the full account log and run only while the module is enabled; prepared metadata is returned to the UI without rewriting saved events. The demo supplies its own in-memory history context.
 
 Import the module explicitly in the package’s `__init__.py`. The API catalog supplies its settings switch, lens option and overview buckets automatically; no feature-specific frontend code is needed. Follow the existing Account size module and its tests. Capture runs only while that group is enabled, and missing data must remain unknown.
 

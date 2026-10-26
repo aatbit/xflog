@@ -15,10 +15,15 @@ from xflog.storage import SCHEMA, Store
 
 def test_defaults_and_explicit_module_registration(monkeypatch):
     monkeypatch.setattr(groups, "MODULES", dict(groups.MODULES))
-    assert groups.preferences() == {"account-size": False, "activity": True}
+    assert groups.preferences() == {
+        "account-size": False,
+        "activity": True,
+        "previous-encounters": False,
+    }
     assert groups.preferences({"account-size": "true", "activity": False}) == {
         "account-size": False,
         "activity": False,
+        "previous-encounters": False,
     }
     module = groups.AudienceGroup(
         "sample",
@@ -149,6 +154,7 @@ async def test_group_settings_are_protected_and_do_not_restart_or_call_x(tmp_pat
         assert await collector.store.setting("audience_groups") == {
             "activity": False,
             "account-size": True,
+            "previous-encounters": False,
         }
         raw = envelope(identity="captured")
         raw["data"]["payload"]["source"]["data"]["public_metrics"] = {"followers_count": 0}

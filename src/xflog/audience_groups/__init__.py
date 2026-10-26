@@ -1,8 +1,11 @@
-"""Trusted, event-only grouping modules; no network or token access is provided."""
+"""Trusted event/history grouping modules; no X client or tokens are provided."""
 
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
+
+HistoryLookup = Callable[[list[dict]], Awaitable[dict[int, dict]]]
+HistoryPreparation = Callable[[list[dict], HistoryLookup], Awaitable[list[dict]]]
 
 
 @dataclass(frozen=True)
@@ -21,6 +24,7 @@ class AudienceGroup:
     assign: Callable[[dict], str]
     capture: Callable[[dict], dict] | None = None
     default_enabled: bool = False
+    prepare: HistoryPreparation | None = None
 
 
 MODULES: dict[str, AudienceGroup] = {}
@@ -53,7 +57,7 @@ def catalog(saved=None) -> list[dict]:
             "label": module.label,
             "description": module.description,
             "enabled": enabled[key],
-            "data_policy": "received_events_only",
+            "data_policy": "recorded_history" if module.prepare else "received_events_only",
             "buckets": [asdict(bucket) for bucket in module.buckets],
         }
         for key, module in sorted(MODULES.items(), key=lambda item: not item[1].default_enabled)
@@ -81,5 +85,15 @@ def decorate(event: dict, saved=None) -> dict:
     return {**event, "audience_groups": groups}
 
 
+async def decorate_history(events: list[dict], saved, lookup: HistoryLookup) -> list[dict]:
+    if not events:
+        return []
+    enabled = preferences(saved)
+    for key, module in MODULES.items():
+        if enabled[key] and module.prepare:
+            events = await module.prepare(events, lookup)
+    return [decorate(event, enabled) for event in events]
+
+
 # Explicit imports are the allowlist; registering a module never installs third-party code.
-from . import account_size, activity  # noqa: E402, F401
+from . import account_size, activity, previous_encounters  # noqa: E402, F401

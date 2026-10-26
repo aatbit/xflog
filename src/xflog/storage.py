@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS events (
  UNIQUE(account_id, event_id)
 );
 CREATE INDEX IF NOT EXISTS event_account_sequence ON events(account_id, sequence DESC);
+CREATE INDEX IF NOT EXISTS event_actor_sequence ON events(account_id, actor_id, sequence DESC);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS subscriptions (
  id TEXT PRIMARY KEY, kind TEXT NOT NULL, account_id TEXT NOT NULL,
@@ -136,6 +137,34 @@ class Store:
         ) as cursor:
             counts = {row["kind"]: row["count"] for row in await cursor.fetchall()}
         return {kind: counts.get(kind, 0) for kind in EVENT_TYPES}
+
+    async def encounter_context(self, events: list[dict]) -> dict[int, dict]:
+        if not events:
+            return {}
+        account_id = events[0]["account_id"]
+        if any(event["account_id"] != account_id for event in events):
+            raise ValueError("History context must belong to one account.")
+        sequences = [event["sequence"] for event in events]
+        placeholders = ",".join("?" for _ in sequences)
+        async with self.db.execute(
+            f"""SELECT current.sequence,
+            EXISTS (SELECT 1 FROM events prior
+                WHERE prior.account_id=current.account_id AND prior.actor_id=current.actor_id
+                AND prior.sequence<current.sequence) AS seen_before,
+            (SELECT prior.kind FROM events prior
+                WHERE prior.account_id=current.account_id AND prior.actor_id=current.actor_id
+                AND prior.sequence<current.sequence AND prior.kind IN ('follow.follow','follow.unfollow')
+                ORDER BY prior.sequence DESC LIMIT 1) AS previous_follow_kind
+            FROM events current WHERE current.account_id=? AND current.sequence IN ({placeholders})""",
+            (account_id, *sequences),
+        ) as cursor:
+            return {
+                row["sequence"]: {
+                    "seen_before": bool(row["seen_before"]),
+                    "previous_follow_kind": row["previous_follow_kind"],
+                }
+                for row in await cursor.fetchall()
+            }
 
     async def subscriptions(self) -> list[dict]:
         async with self.db.execute("SELECT * FROM subscriptions") as cursor:

@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from .events import Event
+from .events import FOLLOW_TYPES, Event
 
 PEOPLE = [
     ("Maya Chen", "mayamakes"),
@@ -20,7 +20,7 @@ PEOPLE = [
 ]
 
 
-def demo_history(query: dict) -> dict:
+def demo_events() -> list[dict]:
     anchor = datetime(2026, 10, 26, 10, 42, tzinfo=timezone.utc)
     events = []
     for index in range(76):
@@ -50,6 +50,29 @@ def demo_history(query: dict) -> dict:
             event["group_data"] = {"account-size": {"followers_count": count}}
         event["sequence"] = 76 - index
         events.append(event)
+    return events
+
+
+async def encounter_context(events: list[dict]) -> dict[int, dict]:
+    if any(event["account_id"] != "demo" for event in events):
+        return {}
+    wanted = {event["sequence"] for event in events}
+    seen, followers, contexts = set(), {}, {}
+    for event in reversed(demo_events()):
+        actor = (event["account_id"], event["actor_id"])
+        if event["sequence"] in wanted:
+            contexts[event["sequence"]] = {
+                "seen_before": actor in seen,
+                "previous_follow_kind": followers.get(actor),
+            }
+        seen.add(actor)
+        if event["kind"] in FOLLOW_TYPES:
+            followers[actor] = event["kind"]
+    return contexts
+
+
+def demo_history(query: dict) -> dict:
+    events = demo_events()
     prefix = "subscriptions." if query.get("subject") == "subscriptions" else "follow."
     filtered = [event for event in events if event["kind"].startswith(prefix)]
     counts = {

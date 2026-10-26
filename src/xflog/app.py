@@ -18,6 +18,7 @@ from . import audience_groups
 from .collector import DEFAULT_SELECTION, Collector
 from .config import ASSETS, Config
 from .demo import demo_history
+from .demo import encounter_context as demo_encounter_context
 from .errors import SetupError
 from .storage import Store
 from .transport import ProviderError, XClient
@@ -205,7 +206,9 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
             account["id"], {"kind": kind, "subject": subject, "before": before}
         )
         groups = await store.setting("audience_groups", {})
-        result["events"] = [audience_groups.decorate(event, groups) for event in result["events"]]
+        result["events"] = await audience_groups.decorate_history(
+            result["events"], groups, store.encounter_context
+        )
         return result
 
     @app.get("/api/demo")
@@ -218,7 +221,9 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
             raise HTTPException(422, "Invalid demo filter.")
         result = demo_history({"kind": kind, "subject": subject, "before": before})
         groups = await store.setting("audience_groups", {})
-        result["events"] = [audience_groups.decorate(event, groups) for event in result["events"]]
+        result["events"] = await audience_groups.decorate_history(
+            result["events"], groups, demo_encounter_context
+        )
         return result
 
     @app.post("/api/audience-groups")
