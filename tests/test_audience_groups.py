@@ -16,14 +16,18 @@ from xflog.storage import SCHEMA, Store
 def test_defaults_and_explicit_module_registration(monkeypatch):
     monkeypatch.setattr(groups, "MODULES", dict(groups.MODULES))
     assert groups.preferences() == {
+        "account-age": False,
         "account-size": False,
         "activity": True,
         "previous-encounters": False,
+        "verification": False,
     }
     assert groups.preferences({"account-size": "true", "activity": False}) == {
+        "account-age": False,
         "account-size": False,
         "activity": False,
         "previous-encounters": False,
+        "verification": False,
     }
     module = groups.AudienceGroup(
         "sample",
@@ -147,31 +151,50 @@ async def test_group_settings_are_protected_and_do_not_restart_or_call_x(tmp_pat
         responses = await asyncio.gather(
             *(
                 browser.post("/api/audience-groups", json={"enabled": enabled}, headers=headers)
-                for enabled in ({"activity": False}, {"account-size": True})
+                for enabled in (
+                    {"activity": False},
+                    {"account-size": True, "account-age": True, "verification": True},
+                )
             )
         )
         assert all(response.status_code == 200 for response in responses)
         assert await collector.store.setting("audience_groups") == {
             "activity": False,
+            "account-age": True,
             "account-size": True,
             "previous-encounters": False,
+            "verification": True,
         }
         raw = envelope(identity="captured")
         raw["data"]["payload"]["source"]["data"]["public_metrics"] = {"followers_count": 0}
+        raw["data"]["payload"]["source"]["data"].update(
+            created_at="2020-01-01T00:00:00Z", verified=True, verified_type="blue"
+        )
         await provider.body.queue.put(json.dumps(raw).encode() + b"\n")
         await asyncio.wait_for(provider.body.queue.join(), timeout=2)
         history = (await browser.get("/api/events")).json()["events"]
-        assert history[0]["audience_groups"] == {"account-size": "under-100"}
-        assert history[0]["group_data"] == {"account-size": {"followers_count": 0}}
+        assert history[0]["audience_groups"] == {
+            "account-size": "under-100",
+            "account-age": "3-plus-years",
+            "verification": "blue",
+        }
+        snapshot = {
+            "account-size": {"followers_count": 0},
+            "account-age": {"created_at": "2020-01-01T00:00:00+00:00"},
+            "verification": {"verified": True, "verified_type": "blue"},
+        }
+        assert history[0]["group_data"] == snapshot
         await browser.post(
-            "/api/audience-groups", json={"enabled": {"account-size": False}}, headers=headers
+            "/api/audience-groups",
+            json={"enabled": dict.fromkeys(snapshot, False)},
+            headers=headers,
         )
         raw["data"]["event_uuid"] = "not-captured"
         await provider.body.queue.put(json.dumps(raw).encode() + b"\n")
         await asyncio.wait_for(provider.body.queue.join(), timeout=2)
         rows = (await browser.get("/api/events")).json()["events"]
         assert rows[0]["group_data"] == {} and rows[0]["audience_groups"] == {}
-        assert rows[1]["group_data"] == {"account-size": {"followers_count": 0}}
+        assert rows[1]["group_data"] == snapshot
         assert collector.task is task and not task.done()
         assert provider.requests == requests and provider.streams == 1
         assert await collector.store.setting("tracking")

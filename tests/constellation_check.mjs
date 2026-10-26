@@ -34,10 +34,12 @@ const events = Array.from({ length: 50 }, (_, index) => ({
   actor_id: String(index % 19),
   event_id: String(index),
   sequence: index,
-  audience_groups: {
-    activity: index % 2 ? "follow.follow" : "follow.unfollow",
-    "account-size": modules[1].buckets[index % 5].key,
-  },
+  audience_groups: Object.fromEntries(
+    modules.map((module) => [
+      module.key,
+      module.buckets[index % module.buckets.length].key,
+    ]),
+  ),
 })).reverse();
 assert.equal(peopleFromEvents(events).length, 19);
 assert.equal(
@@ -47,7 +49,7 @@ assert.equal(
 );
 for (const width of [320, 390, 798, 1440])
   for (const height of [560, 772, 920]) {
-    for (const lens of ["activity", "account-size", "none"])
+    for (const lens of [...modules.map((module) => module.key), "none"])
       for (const zoom of [0, 0.25, 0.3, 0.55, 1, 2]) {
         const layout = constellationLayout({
           events,

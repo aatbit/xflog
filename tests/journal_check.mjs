@@ -168,6 +168,20 @@ assert.deepEqual(
   events.map((event) => event.event_id),
   "Ungrouped retains the full input order.",
 );
+for (const module of modules.filter((module) => module.enabled)) {
+  const records = module.buckets.map((bucket, index) => ({
+    ...events[0],
+    event_id: `${module.key}-${index}`,
+    audience_groups: { [module.key]: bucket.key },
+  }));
+  journal.render(records, { ...options, lens: module.key });
+  assert.equal(element.groups.length, module.buckets.length);
+  assert.deepEqual(
+    element.buttons.map((button) => button.dataset.event),
+    records.map((event) => event.event_id),
+    `${module.label} renders all registered buckets and keeps every record.`,
+  );
+}
 journal.render([{ ...events[0], name: '<img src=x onerror="bad()">' }], {
   ...options,
   modules: [extension],

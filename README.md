@@ -261,6 +261,13 @@ In timeline settings, open **Audience Groups** to turn optional groups on or off
 
 **Previous encounters** also starts off. Enable it to group events as **First appearance**, **Seen before**, or **Followed again**. It uses this account’s full saved log, including records outside the page or filter you are viewing. Followed again requires a recorded unfollow followed by a follow; subscription changes alone do not count as a return. First appearance means first in this log, not their first-ever interaction on X. Tracking gaps and activity before recording began are not reconstructed. This group makes no X requests and can use history saved before you enabled it.
 
+**Account age** and **Verification** start off too. Enable either to save the relevant fields when X includes them with a new event. They work in both the constellation and Journal, without extra profile requests.
+
+- **Account age:** Under 1 year, 1–3 years, or 3+ years, measured when XFlog received the event. Old events keep their original age group.
+- **Verification:** Blue, business or government badges when supplied, otherwise Verified with type unknown, Unverified, or Unknown. This records the badge status delivered with the event, not a live check of the profile.
+
+Missing or invalid fields, and older events saved without them, appear as **Unknown**. XFlog does not fetch missing details. These fields are documented in [X’s user data dictionary](https://docs.x.com/x-api/fundamentals/data-dictionary) and [Activity event examples](https://docs.x.com/x-api/activity/event-payloads).
+
 These groups describe the loaded history, not a complete or current follower list. Loading older events can add people or fill out a group. Turning a group off stops its extra processing and removes its lens; your recorded history stays saved. Group changes save automatically and keep the listener running.
 
 <details>

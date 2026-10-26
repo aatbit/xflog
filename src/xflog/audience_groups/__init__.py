@@ -96,4 +96,4 @@ async def decorate_history(events: list[dict], saved, lookup: HistoryLookup) -> 
 
 
 # Explicit imports are the allowlist; registering a module never installs third-party code.
-from . import account_size, activity, previous_encounters  # noqa: E402, F401
+from . import account_age, account_size, activity, previous_encounters, verification  # noqa: E402, F401

@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
+from . import audience_groups
 from .events import FOLLOW_TYPES, Event
 
 PEOPLE = [
@@ -18,6 +19,23 @@ PEOPLE = [
     ("Isla Morgan", "islamorgan"),
     ("Jules Martin", "julesdesign"),
 ]
+
+
+def profile_metadata(index: int) -> dict:
+    person = index % len(PEOPLE)
+    count = (0, 43, 189, 650, 1200, 5900, 15000, 42000, None, 88, 300, 11000)[person]
+    created = ("2026-07-01T12:00:00Z", "2024-05-01T12:00:00Z", "2018-01-01T12:00:00Z", None)[
+        person % 4
+    ]
+    verification = (
+        {"verified": True, "verified_type": "blue"},
+        {"verified": True, "verified_type": "business"},
+        {"verified": True, "verified_type": "government"},
+        {"verified": True},
+        {"verified": False},
+        {},
+    )[person % 6]
+    return {"public_metrics": {"followers_count": count}, "created_at": created, **verification}
 
 
 def demo_events() -> list[dict]:
@@ -43,11 +61,9 @@ def demo_events() -> list[dict]:
             provider.isoformat() if index % 9 else None,
             (provider + timedelta(seconds=4)).isoformat(),
         ).public()
-        count = (0, 43, 189, 650, 1200, 5900, 15000, 42000, None, 88, 300, 11000)[
-            index % len(PEOPLE)
-        ]
-        if count is not None:
-            event["group_data"] = {"account-size": {"followers_count": count}}
+        event["group_data"] = audience_groups.capture(
+            profile_metadata(index), dict.fromkeys(audience_groups.MODULES, True)
+        )
         event["sequence"] = 76 - index
         events.append(event)
     return events
