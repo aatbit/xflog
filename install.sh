@@ -210,12 +210,16 @@ install_native() {
   start_runtime
 }
 
-load_installation() {
-  [[ -f $install_dir/.env && ! -L $install_dir/.env ]] || die 'A regular saved .env is required; it will never be executed.'
+verify_checkout() {
   [[ $(git -C "$install_dir" rev-parse --show-toplevel) == "$install_dir" ]] || die 'Choose the root of the installed checkout.'
   local remote
   remote=$(git -C "$install_dir" remote get-url origin)
   [[ $remote == https://github.com/aatbit/xflog.git || $remote == git@github.com:aatbit/xflog.git ]] || die 'The checkout must use the official aatbit/xflog origin.'
+}
+
+load_installation() {
+  [[ -f $install_dir/.env && ! -L $install_dir/.env ]] || die 'A regular saved .env is required; it will never be executed.'
+  verify_checkout
   if [[ $mode == docker ]]; then
     project=$(saved_setting COMPOSE_PROJECT_NAME '')
     [[ $project =~ ^[a-z0-9][a-z0-9_-]*$ ]] || die 'Saved COMPOSE_PROJECT_NAME is required to identify the existing stack safely.'
@@ -311,9 +315,76 @@ manage_installation() (
   if [[ $action == update ]]; then update_installation; else uninstall_installation; fi
 )
 
+choose_installation() {
+  while :; do
+    ask "Installation directory? [$HOME/.local/share/xflog/app]"
+    install_dir=${reply:-$HOME/.local/share/xflog/app}
+    install_dir=${install_dir/#\~/$HOME}; install_dir=${install_dir%/}
+    valid_path "$install_dir" || { printf 'Use an absolute path with letters, digits, /, ., _ and - only.\n' >&3; continue; }
+    if [[ $action == install ]]; then
+      [[ ! -e $install_dir ]] || die 'Installation path already exists. Choose a fresh path; existing data is never overwritten.'
+    else
+      [[ -d $install_dir ]] || die 'Choose an existing installer checkout.'
+      install_dir=$(cd "$install_dir" && pwd -P)
+    fi
+    break
+  done
+}
+
+check_updates() (
+  local temporary installed latest current_installer latest_installer installer_path comparison=0
+  verify_checkout
+  temporary=$(mktemp -d "${TMPDIR:-/tmp}/xflog-update-check.XXXXXX")
+  trap 'rm -rf -- "$temporary"' EXIT
+  git init --quiet "$temporary"
+  git -C "$temporary" fetch --quiet --depth 1 "$install_dir" HEAD || die 'Could not read the installed revision; nothing changed.'
+  installed=$(git -C "$temporary" rev-parse 'FETCH_HEAD^{commit}')
+  git -C "$temporary" fetch --quiet --depth 1 https://github.com/aatbit/xflog.git "$reference" || die 'Could not check GitHub. Check your connection and source reference; nothing changed.'
+  latest=$(git -C "$temporary" rev-parse 'FETCH_HEAD^{commit}')
+  latest_installer=$(git -C "$temporary" rev-parse "$latest:install.sh")
+  git -C "$temporary" show "$latest:install.sh" > "$temporary/install.sh" || die 'The selected source has no installer; nothing changed.'
+  bash -n "$temporary/install.sh" || die 'The downloaded installer failed its syntax check; nothing changed.'
+  installer_path=${BASH_SOURCE[0]:-}
+  if [[ -f $installer_path ]]; then
+    current_installer=$(git hash-object --no-filters -- "$installer_path")
+  else
+    # A pipe has no reusable script file; compare the installed installer instead.
+    current_installer=$(git -C "$temporary" rev-parse --verify "$installed:install.sh" 2>/dev/null) || current_installer=''
+  fi
+  printf '\nChecking source: %s\nInstalled: %.12s  Available: %.12s\n' "$reference" "$installed" "$latest" >&3
+  if ! git -C "$install_dir" diff --quiet || ! git -C "$install_dir" diff --cached --quiet; then
+    printf 'Local app files have edits; save or move them before an app update.\n' >&3
+  fi
+  git -C "$temporary" diff --quiet "$installed" "$latest" -- . ':!install.sh' ':!README.md' || comparison=$?
+  if [[ $comparison == 0 ]]; then
+    printf 'XFlog app: up to date.\n' >&3
+  elif [[ $comparison == 1 ]]; then
+    printf 'XFlog app: update available (files differ from the selected source).\nTo update, run:\n' >&3
+    printf 'curl -fsSL https://raw.githubusercontent.com/aatbit/xflog/%s/install.sh | XFLOG_REF=%q bash\nThen choose update and installation folder: %s\n' "$latest" "$reference" "$install_dir" >&3
+  else
+    die 'Could not compare application files; no update applied.'
+  fi
+  if [[ $current_installer == "$latest_installer" ]]; then
+    printf 'Installer: up to date.\n' >&3
+  else
+    if [[ -n $current_installer ]]; then
+      printf 'Installer: update available.\n' >&3
+    else
+      printf 'Installer: no saved version to compare; the latest copy is ready to run.\n' >&3
+    fi
+    printf 'Settings, history and running services stay unchanged.\n' >&3
+    ask 'Run the updated installer now and reopen its menu? [y/N]'
+    if [[ $reply == y || $reply == Y ]]; then
+      XFLOG_REF="$reference" bash "$temporary/install.sh"
+    else
+      printf 'Installer refresh canceled.\n' >&3
+    fi
+  fi
+)
+
 main() {
   if [[ ${1:-} == --help ]]; then
-    printf '%s\n' 'XFlog interactive install/update/uninstall: Docker Compose or native Linux/systemd user service.' \
+    printf '%s\n' 'XFlog interactive install/update/uninstall/check: Docker Compose or native Linux/systemd user service.' \
       'Requires Bash, git and an interactive terminal. Docker mode needs Docker Compose v2.' \
       'Native mode needs Python 3.12+, venv/pip and a working systemd user session.' \
       'Optional: XFLOG_REF=branch/tag/commit (default: main). Updates preserve settings/history; uninstall asks before deletion.'
@@ -327,10 +398,12 @@ main() {
   [[ $reference =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || die 'Invalid XFLOG_REF.'
   printf '\nXFlog — interactive setup\nFollower tracking needs an app bearer token and account ID. Paid subscription tracking also needs a user access token. The offline demo needs no X credentials.\n' >&3
   while :; do
-    ask 'Action: install, update or uninstall? [install]'
+    ask 'Action: install, update, uninstall or check for updates (check)? [install]'
     action=${reply:-install}
-    [[ $action == install || $action == update || $action == uninstall ]] && break
+    [[ $action != 'check for updates' ]] || action=check
+    [[ $action == install || $action == update || $action == uninstall || $action == check ]] && break
   done
+  if [[ $action == check ]]; then choose_installation; check_updates; return; fi
   while :; do
     ask 'Run with Docker or native Linux? [docker]'
     mode=${reply:-docker}
@@ -352,19 +425,7 @@ main() {
       [[ ! -e $unit_dir/xflog.service ]] || die 'A user xflog.service already exists; not overwriting it.'
     fi
   fi
-  while :; do
-    ask "Installation directory? [$HOME/.local/share/xflog/app]"
-    install_dir=${reply:-$HOME/.local/share/xflog/app}
-    install_dir=${install_dir/#\~/$HOME}; install_dir=${install_dir%/}
-    valid_path "$install_dir" || { printf 'Use an absolute path with letters, digits, /, ., _ and - only.\n' >&3; continue; }
-    if [[ $action == install ]]; then
-      [[ ! -e $install_dir ]] || die 'Installation path already exists. Choose a fresh path; existing data is never overwritten.'
-    else
-      [[ -d $install_dir ]] || die 'Choose an existing installer checkout.'
-      install_dir=$(cd "$install_dir" && pwd -P)
-    fi
-    break
-  done
+  choose_installation
   if [[ $action != install ]]; then manage_installation; return; fi
   while :; do
     ask 'Local port (localhost only)? [7860]'
