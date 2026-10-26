@@ -116,3 +116,12 @@ def test_activity_readings_and_period_request_order():
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_selected_signal_readout_uses_current_event_and_receipt_time():
+    result = subprocess.run(
+        ["node", str(Path(__file__).with_name("selected_signal_check.mjs")), str(ASSETS)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr

@@ -121,6 +121,34 @@
             </svg>
           </button>
         </nav>
+        <button
+          type="button"
+          id="selected-signal"
+          class="selected-signal"
+          aria-label="Open selected signal details"
+          aria-describedby="signal-handle signal-activity signal-received"
+          hidden
+        >
+          <svg class="signal-target" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="6" />
+            <path d="M12 2v4m0 12v4M2 12h4m12 0h4" />
+          </svg>
+          <span class="signal-person">
+            <strong id="signal-name"></strong>
+            <span id="signal-handle"></span>
+          </span>
+          <span class="signal-activity">
+            <small>Activity</small>
+            <span id="signal-activity"></span>
+          </span>
+          <span class="signal-time">
+            <small>Last signal</small>
+            <time id="signal-received"></time>
+          </span>
+          <svg class="signal-open" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m9 5 7 7-7 7" />
+          </svg>
+        </button>
       </div>
       <div class="scene-controls">
         <div id="scene-control-content" class="controls-content">

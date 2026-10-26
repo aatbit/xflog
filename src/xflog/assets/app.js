@@ -140,6 +140,18 @@
     api,
     context: () => ({ demo: state.demo, subject: state.subject }),
   });
+  const { createSelectedSignal } = await import(
+    "/static/xf/selected-signal.js"
+  );
+  const selectedSignal = createSelectedSignal({
+    root,
+    label: eventLabel,
+    gained,
+    date: dateFormat,
+    time: timeFormat,
+    fullDate: fullFormat,
+    onOpen: (identity) => selectEvent(identity, true),
+  });
   const announce = (text) => {
     $("#announcer").textContent = text;
   };
@@ -332,6 +344,7 @@
       `${state.subject === "followers" ? "Follower" : "Paid subscription"} event timeline`,
     );
     if (!state.events.length) {
+      selectedSignal.render(null);
       const isSubs = state.subject === "subscriptions";
       let title = "Your next chapter starts here.";
       let copy =
@@ -392,6 +405,7 @@
     const event = state.events.find((event) => event.event_id === identity);
     if (!event) return;
     state.selected = identity;
+    selectedSignal.render(event);
     $$("[data-event]").forEach((button) =>
       button.setAttribute("aria-pressed", button.dataset.event === identity),
     );
@@ -430,9 +444,11 @@
       before: String(append ? state.next || 0 : 0),
     });
     const demo = state.demo;
-    if (!append && !state.events.length)
+    if (!append && !state.events.length) {
+      selectedSignal.render(null);
       $("#history").innerHTML =
         '<div class="loading-state"><span class="loading-dot" aria-hidden="true"></span>Loading local history…</div>';
+    }
     $("#history").setAttribute("aria-busy", "true");
     try {
       const result = await api(`/api/${demo ? "demo" : "events"}?${params}`);
