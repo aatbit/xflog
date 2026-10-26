@@ -1,3 +1,4 @@
+import asyncio
 import sqlite3
 from dataclasses import replace
 
@@ -160,6 +161,32 @@ async def test_restart_without_private_token_does_not_create_partial_subscriptio
         assert collector.task is None
         assert "X_USER_ACCESS_TOKEN" in collector.message
     finally:
+        await store.close()
+
+
+@pytest.mark.parametrize("resume", [False, True])
+async def test_followers_can_start_and_resume_without_user_access_token(hosted_config, resume):
+    assert not hosted_config.user_token
+    store = Store(hosted_config.database)
+    await store.open()
+    collector = Collector(store, XClient(hosted_config, None))
+    entered = asyncio.Event()
+
+    async def waiting():
+        entered.set()
+        await asyncio.Event().wait()
+
+    collector.run = waiting
+    try:
+        await store.save_setting("tracking", resume)
+        await collector.initialize()
+        assert collector.connected
+        if not resume:
+            await collector.start()
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        assert await store.setting("tracking")
+    finally:
+        await collector.shutdown()
         await store.close()
 
 

@@ -12,7 +12,29 @@ The current X UI shows unfollow metrics but does not have a direct way to view u
 
 ## Getting started
 
-### Interactive install
+### X prerequisites
+
+**The demo works without X credentials. For a real account, the settings you need depend on what you want to track:**
+
+| Setting | What to put here |
+| --- | --- |
+| `X_APP_BEARER_TOKEN` | Your developer app's bearer token. Required for live tracking. |
+| `X_USER_ID` | The number that identifies the X account you want to track. Required for live tracking; this is not its `@handle`. |
+| `X_USER_ACCESS_TOKEN` | An OAuth 2.0 access token granted by that account to your app. **Required for paid-subscription tracking; optional for followers only.** |
+
+To get ready:
+
+1. **Create an X developer app.** Open the [X Developer Console](https://console.x.com) and check that your app can use [X Activity](https://docs.x.com/x-api/activity/quickstart).
+2. **Get the app token and account ID.** Generate the app's bearer token in the console. Find the numeric ID of the account you want to track; X's quickstart explains how to look it up.
+3. **For paid-subscription tracking, also get a user access token.** Use an external [OAuth 2.0 authorization flow](https://docs.x.com/fundamentals/authentication/oauth-2-0/authorization-code) to let that same X account approve your app. Request `follows.read` and save the returned access token as `X_USER_ACCESS_TOKEN`. Both tokens must belong to the same developer app, and the user token must belong to `X_USER_ID`. You can skip this step for followers only. XFlog does not perform this sign-in or refresh tokens for you.
+4. **Check your X API balance and spending limit.** Add enough credits in the Developer Console before you start. Check whether automatic credit top-ups are enabled, and set a spending limit you are comfortable with.
+
+**X charges for API usage.** Check the current [Activity prices](https://docs.x.com/x-api/activity/event-pricing) and [credit/spending-limit rules](https://docs.x.com/x-api/getting-started/pricing) before turning tracking on. Running XFlog on your own machine or in Docker does not remove those charges. XFlog's event count does not limit your X bill.
+
+Put the required values in `.env` or enter them in the installer. Tracking starts when you confirm **Start tracking** in the app. Followers are enabled by default; paid subscription tracking stays off until you enable it in Profile. Without the user access token, XFlog will refuse to start or resume paid-subscription tracking when paid-subscription tracking is enabled. 
+To try the offline demo instead, leave all X settings blank—no X API calls are made.
+
+### Installation
 
 Run as your regular user in a terminal:
 
@@ -43,19 +65,6 @@ To uninstall, choose **uninstall** and the same mode/directory. This removes the
 
 A retained or restored database keeps its saved Start choice, so remove credentials or pause before activation if collection should stay stopped. Manual Docker `down` keeps history; **`down -v` deletes it**. Environment changes require container recreation (`docker compose up -d --force-recreate`) or a native service restart. If maintenance was interrupted, remove `.xflog-maintenance.lock` only after verifying that no updater/uninstaller is still running.
 
-### X prerequisites and costs
-
-Before you install and start collection, please ensure the below steps are completed:
-
-1. Create an approved app in [X Developer Console](https://console.x.com) and confirm that its API access permits X Activity.
-2. Generate its app bearer token and determine the target account's numeric user ID.
-3. **For full functionality, supply `X_USER_ACCESS_TOKEN`: an OAuth 2.0 user-context token for `X_USER_ID`, from the same developer app, with `follows.read`.** Obtain and refresh it through your external authorization flow. App bearer plus user ID supports public follower tracking; paid events require the user token. This repository does not implement X login or token acquisition.
-4. **Make sure your developer account has the required credits/billing access. Review current event pricing, configure a provider spending limit, and review auto-recharge.** A local event count is not a billing cap.
-
-No developer-account signup, credit purchase or API entitlement is provisioned by XFlog. Running Docker does not remove X API requirements or charges. The UI requires a separate, explicit **Start tracking** confirmation. No follower-roster polling, scraping or historical reconstruction is used.
-
-Official references: [Activity prerequisites](https://docs.x.com/x-api/activity/quickstart), [private-event authentication](https://docs.x.com/x-api/activity/create-x-activity-subscription), [event pricing](https://docs.x.com/x-api/activity/event-pricing), [credits and spending limits](https://docs.x.com/x-api/getting-started/pricing). Live entitlement, delivery and account pricing remain unverified.
-
 ## Docker Compose
 
 Docker Engine with the Compose plugin is sufficient; Python and Node do not need to be installed on the host.
@@ -65,7 +74,7 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Set `X_APP_BEARER_TOKEN`, `X_USER_ID`, and, for full functionality, `X_USER_ACCESS_TOKEN`. Set a strong random `XFLOG_ADMIN_PASSWORD` of at least 16 ASCII characters. This password protects the private instance; it is **not** your X password. For example, generate one using:
+For follower tracking, set `X_APP_BEARER_TOKEN` and `X_USER_ID`. Add `X_USER_ACCESS_TOKEN` if you want paid-subscription tracking too. Leave all X settings blank for the offline demo. Set a strong random `XFLOG_ADMIN_PASSWORD` of at least 16 ASCII characters. This password protects the private instance; it is **not** your X password. For example, generate one using:
 
 ```bash
 docker run --rm python:3.12-slim-bookworm python -c 'import secrets; print(secrets.token_urlsafe(32))'
@@ -116,9 +125,9 @@ docker compose up -d --force-recreate
 
 | Variable | Purpose |
 | --- | --- |
-| `X_APP_BEARER_TOKEN` | App-only credential for follower subscription management and the central Activity stream. |
-| `X_USER_ID` | Numeric target account ID, not an @handle. |
-| `X_USER_ACCESS_TOKEN` | User-context OAuth 2.0 token required for full functionality, including paid-subscription events. Externally obtained and maintained. |
+| `X_APP_BEARER_TOKEN` | Required for live tracking. App credential for public subscriptions and the Activity stream. |
+| `X_USER_ID` | Required for live tracking. Numeric target account ID, not an @handle. |
+| `X_USER_ACCESS_TOKEN` | Required for paid-subscription tracking; optional for followers only. OAuth 2.0 token for the target account; obtain and refresh it externally. |
 | `XFLOG_ADMIN_PASSWORD` | Instance access password; required for Docker/network binding and HTTPS origins. Browser username is `xflog`. Optional for native loopback-only use. |
 | `XFLOG_ORIGIN` | Browser origin. Default `http://127.0.0.1:7860`; use HTTPS for a public domain. |
 | `XFLOG_PUBLISH_PORT` | Compose host port, default `7860`. Update `XFLOG_ORIGIN` to match local port changes. |

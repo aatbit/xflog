@@ -204,6 +204,23 @@ def test_token_whitespace_is_rejected_without_writing_secrets(installer_environm
     assert not destination.exists()
 
 
+@pytest.mark.parametrize("user_token", ["", "fake-paid-token"])
+def test_follower_install_accepts_optional_user_access_token(
+    installer_environment, tmp_path, user_token
+):
+    destination = tmp_path / "followers"
+    answers = docker_answers(destination)
+    answers[7:9] = [
+        ("X app bearer token", "fake-app-token"),
+        ("Numeric target X user ID", "111"),
+        ("X user access token", user_token),
+    ]
+    code, transcript = interactive_run(installer_environment, answers)
+    assert code == 0, transcript
+    assert f'X_USER_ACCESS_TOKEN="{user_token}"' in (destination / ".env").read_text()
+    assert "fake-app-token" not in transcript
+
+
 @pytest.mark.skipif(not shutil.which("docker"), reason="Optional Docker Compose parser integration")
 def test_compose_env_round_trips_shell_special_characters(tmp_path):
     value = "fake-1234567890$()${UNSET}`echo bad`\"\\' # literal"

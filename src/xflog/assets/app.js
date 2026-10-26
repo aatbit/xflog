@@ -460,11 +460,11 @@
       return;
     }
     if (!state.status?.connected) {
-      notice("Instance setup is incomplete. Configure the environment and restart.");
+      notice(state.status?.message || "Configure all required X credentials and restart.");
       return;
     }
     dialog(
-      '<h2 id="dialog-title">Start tracking</h2><p>X Activity can incur charges. The published follower event price is $0.01 per event; paid subscription events are listed as not billed. Verify stream pricing and your eligibility in the Developer Console.</p><p>Set a provider spending limit and review auto-recharge before continuing. A local count is not a billing cap.</p><p>Collection resumes after an app restart until you pause. Offline events may be missed.</p><label><input type="checkbox" id="accept-costs"><span>I reviewed X pricing and set my provider spending limit.</span></label><button type="button" class="button primary" id="confirm-start" disabled>Start tracking →</button>',
+      '<h2 id="dialog-title">Start tracking</h2><p>X charges for API usage. Check the current Activity prices in your X Developer Console and add enough credits before starting.</p><p>Set a spending limit and check whether automatic credit top-ups are enabled. XFlog does not set or enforce your X spending limit.</p><p>Tracking resumes after a restart until you pause it. Activity while offline may be missed.</p><label><input type="checkbox" id="accept-costs"><span>I checked X pricing, credits and my spending limit.</span></label><button type="button" class="button primary" id="confirm-start" disabled>Start tracking →</button>',
     );
     $("#accept-costs").addEventListener("change", () => {
       $("#confirm-start").disabled = !$("#accept-costs").checked;

@@ -321,7 +321,7 @@ main() {
   local action mode port origin install_dir bearer user_id user_token password database='' network='' project='' python='' data_dir='' unit_dir=''
   local reference=${XFLOG_REF:-main}
   [[ $reference =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || die 'Invalid XFLOG_REF.'
-  printf '\nXFlog — interactive setup\nNo X login is performed. Full functionality requires an externally obtained user access token.\n' >&3
+  printf '\nXFlog — interactive setup\nFollower tracking needs an app bearer token and account ID. Paid subscription tracking also needs a user access token. The offline demo needs no X credentials.\n' >&3
   while :; do
     ask 'Action: install, update or uninstall? [install]'
     action=${reply:-install}
@@ -410,7 +410,7 @@ main() {
       [[ $reply =~ ^[0-9]{1,19}$ ]] && { user_id=$reply; break; }
     done
   fi
-  secret 'X user access token (required for full functionality; blank to skip):'
+  secret 'X user access token (required for paid subscriptions; blank for followers only or demo):'
   user_token=$reply
   [[ $user_token != *[!\!-~]* ]] || die 'Tokens must contain only printable ASCII without spaces.'
   [[ -n $bearer || -z $user_token ]] || die 'A user token also requires the app bearer token and user ID.'

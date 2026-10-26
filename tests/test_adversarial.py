@@ -69,10 +69,10 @@ async def test_stop_discovers_subscription_created_before_lost_response(opened_s
         raise AssertionError("Unexpected mocked request")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        client = XClient(Config(tmp_path / "test.sqlite3", app_bearer="fake-app"), http)
-
+        config = Config(tmp_path / "test.sqlite3", app_bearer="fake-app", user_id="111")
+        client = XClient(config, http)
         collector = Collector(opened_store, client)
-        collector.connected = True
+        await collector.initialize()
         await collector.stop()
     assert removed == ["/2/activity/subscriptions/remote-only"]
 
