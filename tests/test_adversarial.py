@@ -239,7 +239,7 @@ async def test_stop_during_accepted_create_discovers_and_deletes_remote(opened_s
             return httpx.Response(200, json={"data": {"deleted": True}})
         raise AssertionError("Unexpected request")
 
-    config = Config(tmp_path / "test.sqlite3", app_bearer="fake-app")
+    config = Config(tmp_path / "test.sqlite3", app_bearer="fake-app", user_id="111")
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         client = XClient(config, http)
 

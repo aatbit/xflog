@@ -190,6 +190,8 @@
           <p id="profile-message">
             Tracking is paused.
           </p>
+          <ul id="profile-missing-settings" class="missing-settings" hidden></ul>
+          <p id="profile-environment" hidden></p>
         </div>
       </div>
       <form id="preferences-form">
@@ -203,8 +205,7 @@
           <div class="settings-panel">
             <label class="switch-row"
               ><span
-                ><strong>Follower events</strong
-                ><small>Followers gained and lost. On by default.</small></span
+                ><strong>Follower events</strong></span
               ><input
                 type="checkbox"
                 role="switch"
@@ -220,16 +221,10 @@
                 name="subscriptions" /></label
             ><label class="switch-row"
               ><span
-                ><strong>In-app activity notifications</strong
-                ><small
-                  >A quiet notice when new events arrive in an open tab.</small
-                ></span
+                ><strong>Activity notifications</strong></span
               ><input type="checkbox" role="switch" name="notifications"
             /></label>
             <div class="preference-actions">
-              <p class="small">
-                Saving pauses tracking. Start again when you’re ready.
-              </p>
               <button type="submit" class="button primary">
                 Save preferences
               </button>

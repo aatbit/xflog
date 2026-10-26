@@ -54,6 +54,20 @@
   color: var(--muted);
   font-size: 13px;
 }
+
+#xf .missing-settings {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.8;
+}
+#xf .missing-settings code,
+#xf #profile-environment code {
+  overflow-wrap: anywhere;
+  color: var(--accent);
+  font-size: inherit;
+}
 #profile-state {
   display: flex;
   align-items: center;
@@ -137,13 +151,8 @@
   margin-top: 16px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 16px;
-}
-#xf .preference-actions .small {
-  margin: 0 !important;
-  font-size: 12px;
-  max-width: 240px;
 }
 .preference-actions .button {
   flex-shrink: 0;

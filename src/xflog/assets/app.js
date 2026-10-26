@@ -13,8 +13,8 @@
     status: null,
     csrf: "",
     generation: 0,
-    busy: false,
   };
+  const pendingActions = new WeakSet();
   const esc = (value) =>
     String(value ?? "").replace(
       /[&<>"']/g,
@@ -66,6 +66,9 @@
       .toUpperCase();
   const { createStrand } = await import("/static/xf/strand.js");
   const { normalizeTwistSpeed } = await import("/static/xf/strand-life.js");
+  const { requestBrowserNotifications, notifyActivity, clearActivityNotification, activityDelta } =
+    await import("/static/xf/notifications.js");
+  window.addEventListener("pagehide", clearActivityNotification);
   function setTwistSpeed(value) {
     const speed = normalizeTwistSpeed(value);
     root.dataset.twistSpeed = String(speed);
@@ -135,8 +138,8 @@
     return result;
   }
   async function action(button, callback) {
-    if (state.busy) return;
-    state.busy = true;
+    if (pendingActions.has(button)) return;
+    pendingActions.add(button);
     button.disabled = true;
     try {
       await callback();
@@ -153,8 +156,8 @@
         errorLine.textContent = message;
       } else notice(message);
     } finally {
-      state.busy = false;
-      button.disabled = false;
+      pendingActions.delete(button);
+      button.disabled = button.id === "tracking-button" && state.demo;
     }
   }
   function view(name) {
@@ -205,7 +208,7 @@
     $("#tracking-button").textContent = active
       ? "Pause tracking"
       : "Start tracking →";
-    $("#tracking-button").disabled = state.demo;
+    $("#tracking-button").disabled = state.demo || pendingActions.has($("#tracking-button"));
     const account = status.account;
     $("#scope-name").textContent = state.demo
       ? "Mira Studio"
@@ -223,15 +226,17 @@
     if (status.cleanup_warning) notice(status.cleanup_warning);
     else if (["reconnecting", "reconnect", "error"].includes(status.state))
       notice(status.message);
-    if (
-      previous &&
-      status.notification_sequence > previous.notification_sequence &&
-      status.selection.notifications &&
-      !state.demo
-    )
+    else if (status.preference_warning) notice(status.preference_warning);
+    else if (previous?.preference_warning && $("#notice").textContent === previous.preference_warning)
+      notice("");
+    const newActivity = state.demo ? 0 : activityDelta(previous, status);
+    if (newActivity) {
       notice(
         "New activity arrived. Refresh local history to see the latest events.",
       );
+      notifyActivity(newActivity);
+    }
+    if (state.demo || !status.selection.notifications) clearActivityNotification();
     if (
       previous &&
       !previous.connected &&
@@ -239,6 +244,7 @@
       status.message !== previous.message
     )
       notice(status.message);
+    if (!$("#profile-view").hidden) fillProfileStatus(status);
   }
   function renderSummary(counts) {
     const subscription = state.subject === "subscriptions";
@@ -431,16 +437,42 @@
     $("#dialog-body").innerHTML = html;
     $("#action-dialog").showModal();
   }
-  function fillProfile() {
-    const status = state.status;
-    if (!status) return;
+  function fillProfileStatus(status) {
     $("#profile-account").textContent = status.account
       ? `${status.account.name || status.account.username || "X account"} · ${status.account.username ? "@" + status.account.username : status.account.id}`
       : "No account configured.";
-    $("#profile-state").textContent = status.connected
+    const missing = status.missing_settings || [];
+    $("#profile-state").textContent = !missing.length && status.connected
       ? "Configured"
       : "Setup missing";
-    $("#profile-message").textContent = status.message;
+    $("#profile-message").textContent = missing.length
+      ? "Add the missing settings to your server configuration, then restart XFlog."
+      : status.preference_warning || status.message;
+    const list = $("#profile-missing-settings");
+    list.replaceChildren();
+    list.hidden = !missing.length;
+    for (const key of missing) {
+      const item = document.createElement("li");
+      const name = document.createElement("code");
+      name.textContent = key;
+      item.append(name, document.createTextNode(" — not set"));
+      list.append(item);
+    }
+    const environment = $("#profile-environment");
+    environment.hidden = !missing.length;
+    environment.replaceChildren();
+    if (status.environment_file) {
+      const path = document.createElement("code");
+      path.textContent = status.environment_file;
+      environment.append(document.createTextNode("Configuration file: "), path);
+    } else {
+      environment.textContent = "Configuration source: server environment (.env path not provided).";
+    }
+  }
+  function fillProfile() {
+    const status = state.status;
+    if (!status) return;
+    fillProfileStatus(status);
     for (const key of ["followers", "subscriptions", "notifications"])
       $(`#preferences-form [name="${key}"]`).checked = Boolean(
         status.selection[key],
@@ -459,8 +491,8 @@
       });
       return;
     }
-    if (!state.status?.connected) {
-      notice(state.status?.message || "Configure all required X credentials and restart.");
+    if (!state.status?.connected || state.status?.missing_settings?.length) {
+      notice(state.status?.setup_message || state.status?.message || "Configure all required X credentials and restart.");
       return;
     }
     dialog(
@@ -535,14 +567,22 @@
     event.preventDefault();
     action($('#preferences-form button[type="submit"]'), async () => {
       const form = event.currentTarget;
-      await api("/api/preferences", {
+      const selection = {
         followers: form.elements.followers.checked,
         subscriptions: form.elements.subscriptions.checked,
         notifications: form.elements.notifications.checked,
-      });
+      };
+      const permission = selection.notifications
+        ? requestBrowserNotifications()
+        : Promise.resolve(null);
+      const result = await api("/api/preferences", selection);
       renderStatus(await api("/api/status"));
-      fillProfile();
-      notice("Preferences saved. Tracking is paused until you start it.");
+      if (!result.saved) fillProfile();
+      notice(result.message);
+      permission.then((value) => {
+        if (result.saved && value && value !== "granted" && state.status?.selection.notifications)
+          notice(result.message + " Browser alerts are blocked or unavailable; in-app notifications still work.");
+      });
     });
   });
   $("#view-gaps").addEventListener("click", () => {
@@ -619,7 +659,7 @@
       strand.destroy();
       return;
     }
-    if (!document.hidden && !state.busy) {
+    if (!document.hidden || state.status?.selection.notifications) {
       try {
         renderStatus(await api("/api/status"));
       } catch (error) {

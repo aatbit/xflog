@@ -50,8 +50,46 @@ def test_unsafe_hosted_configuration_is_rejected(hosted_config, change):
 
 
 def test_network_binding_requires_password_even_with_loopback_origin(tmp_path):
-    with pytest.raises(ValueError, match="Hosted binding"):
+    with pytest.raises(ValueError, match="Remote access"):
         Config(tmp_path / "history.sqlite3", host="0.0.0.0")
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {},
+        {"origin": "https://localhost:7860"},
+        {"host": "0.0.0.0", "loopback_published": True},
+    ],
+)
+async def test_local_blank_password_opens_ui_without_basic_auth(tmp_path, settings):
+    config = Config(tmp_path / "local.sqlite3", **settings)
+    app = create_app(config, transport=httpx.MockTransport(forbid_x), mount_ui=False)
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url=config.origin
+        ) as browser,
+    ):
+        response = await browser.get("/")
+        assert response.status_code == 200
+        assert "www-authenticate" not in response.headers
+        assert (await browser.get("/api/status")).status_code == 200
+
+
+def test_loopback_publication_does_not_disable_remote_password_requirement(tmp_path):
+    with pytest.raises(ValueError, match="Remote access"):
+        Config(
+            tmp_path / "remote.sqlite3",
+            host="0.0.0.0",
+            origin="https://xf.example",
+            loopback_published=True,
+        )
+
+
+def test_loopback_publication_flag_cannot_be_a_truthy_string(tmp_path):
+    with pytest.raises(ValueError, match="boolean"):
+        Config(tmp_path / "remote.sqlite3", host="0.0.0.0", loopback_published="false")
 
 
 def test_config_repr_never_contains_secrets(hosted_config):

@@ -159,6 +159,7 @@ def test_pipe_style_installer_reads_tty_and_sets_up_docker(installer_environment
     assert code == 0, transcript
     assert "fake-private-password-12345" not in transcript
     assert (destination / ".env").stat().st_mode & 0o777 == 0o600
+    assert f'XFLOG_ENV_FILE="{destination}/.env"' in (destination / ".env").read_text()
     assert "external: true" in (destination / "compose.override.yaml").read_text()
     assert 'name: "proxy"' in (destination / "compose.override.yaml").read_text()
     assert " up -d --build --wait" in Path(installer_environment["CALL_LOG"]).read_text()
@@ -171,6 +172,32 @@ def test_declining_activation_does_not_start_docker(installer_environment, tmp_p
     assert code == 0, transcript
     assert "Canceled before activation" in transcript
     assert " up -d" not in Path(installer_environment["CALL_LOG"]).read_text()
+
+
+def test_blank_local_password_disables_protection_without_generating_a_secret(
+    installer_environment, tmp_path
+):
+    destination = tmp_path / "local"
+    answers = docker_answers(destination)
+    answers[-2] = ("Instance password", "")
+    code, transcript = interactive_run(installer_environment, answers)
+    assert code == 0, transcript
+    assert 'XFLOG_ADMIN_PASSWORD=""' in (destination / ".env").read_text()
+    assert "password protection is disabled" in transcript
+
+
+def test_remote_installer_requires_password_when_enter_is_pressed(installer_environment, tmp_path):
+    destination = tmp_path / "remote"
+    answers = docker_answers(destination)
+    answers[4] = ("Browser-facing origin", "https://xf.example")
+    answers[-2:-1] = [
+        ("Instance password", ""),
+        ("Instance password", "fake-remote-password-12345"),
+    ]
+    code, transcript = interactive_run(installer_environment, answers)
+    assert code == 0, transcript
+    assert "password is required for remote access" in transcript
+    assert 'XFLOG_ADMIN_PASSWORD="fake-remote-password-12345"' in (destination / ".env").read_text()
 
 
 def test_existing_install_is_not_overwritten(installer_environment, tmp_path):
@@ -378,6 +405,7 @@ def test_update_preserves_settings_and_network_and_adds_only_missing_defaults(
     assert code == 0, transcript
     assert (destination / ".env").read_text().startswith(original)
     assert "NEW_OPTION=default-value" in (destination / ".env").read_text()
+    assert f'XFLOG_ENV_FILE="{destination}/.env"' in (destination / ".env").read_text()
     assert (destination / "compose.override.yaml").read_text() == "# operator network settings\n"
     assert "fake-saved-password-12345" not in transcript
     assert not (destination / ".xflog-maintenance.lock").exists()

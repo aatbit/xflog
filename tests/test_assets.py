@@ -171,3 +171,16 @@ def test_strand_renders_every_display_frame_and_resumes_after_profile():
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_browser_notification_permission_and_fallbacks():
+    result = subprocess.run(
+        [
+            "node",
+            str(Path(__file__).with_name("notifications_check.mjs")),
+            str(ASSETS / "notifications.js"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr

@@ -164,12 +164,17 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
     @app.get("/api/status")
     async def status(request: Request):
         account = await store.setting("account")
+        selection = await store.setting("selection", DEFAULT_SELECTION)
         return {
             "account": account,
             "connected": collector.connected,
             "state": collector.state,
             "message": collector.message,
-            "selection": await store.setting("selection", DEFAULT_SELECTION),
+            "selection": selection,
+            "missing_settings": config.missing_settings(selection),
+            "setup_message": config.setup_message(selection),
+            "environment_file": config.environment_file,
+            "preference_warning": collector.preference_warning,
             "tracking": await store.setting("tracking", False),
             "counts": await store.summary(account["id"]) if account else {},
             "gaps": await store.gaps(account["id"]) if account else [],
@@ -205,13 +210,7 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
 
     @app.post("/api/preferences")
     async def preferences(selection: Selection):
-        async with controls:
-            await collector.stop()
-            await store.save_setting("selection", selection.model_dump())
-        return {
-            "saved": True,
-            "message": "Preferences saved. Start tracking when ready.",
-        }
+        return await collector.save_preferences(selection.model_dump())
 
     @app.post("/api/start")
     async def start(body: StartRequest):

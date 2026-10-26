@@ -14,6 +14,7 @@ secret() {
 }
 valid_port() { [[ $1 =~ ^[0-9]{1,5}$ ]] && ((10#$1 >= 1 && 10#$1 <= 65535)); }
 valid_path() { [[ $1 == /* && $1 != / && $1 =~ ^/[A-Za-z0-9_./-]+$ ]]; }
+local_origin() { [[ $origin =~ ^https?://(127\.0\.0\.1|localhost)(:[0-9]+)?$ ]]; }
 valid_origin() {
   local address=$1 origin_port
   if [[ $address =~ ^http://(127\.0\.0\.1|localhost):([0-9]+)$ ]]; then
@@ -36,12 +37,15 @@ env_line() {
 }
 
 write_environment() {
+  # The destination path is printed as metadata, never read by env_line.
+  # shellcheck disable=SC2094
   {
     env_line X_APP_BEARER_TOKEN "$bearer"
     env_line X_USER_ID "$user_id"
     env_line X_USER_ACCESS_TOKEN "$user_token"
     env_line XFLOG_ADMIN_PASSWORD "$password"
     env_line XFLOG_ORIGIN "$origin"
+    env_line XFLOG_ENV_FILE "$install_dir/.env"
     if [[ $mode == docker ]]; then
       env_line COMPOSE_PROJECT_NAME "$project"
       env_line XFLOG_PUBLISH_PORT "$port"
@@ -87,9 +91,9 @@ merge_defaults() (
     done < "$temporary"
     $found && continue
     case $key in
-      XFLOG_ADMIN_PASSWORD) value=$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n'); line=$(env_line "$key" "$value");;
       XFLOG_ORIGIN) line=$(env_line "$key" "$origin");;
       XFLOG_PUBLISH_PORT) line=$(env_line "$key" "$port");;
+      XFLOG_ENV_FILE) line=$(env_line "$key" "$install_dir/.env");;
     esac
     printf '\n%s\n' "$line" >> "$temporary"
     printf 'Added missing setting: %s (default saved; value hidden).\n' "$key" >&3
@@ -415,10 +419,12 @@ main() {
   [[ $user_token != *[!\!-~]* ]] || die 'Tokens must contain only printable ASCII without spaces.'
   [[ -n $bearer || -z $user_token ]] || die 'A user token also requires the app bearer token and user ID.'
   while :; do
-    secret 'Instance password, 16+ ASCII characters (blank to generate and save privately):'
+    secret 'Instance password, 16+ ASCII characters (blank disables protection for localhost):'
     password=$reply
     if [[ -z $password ]]; then
-      password=$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')
+      if local_origin; then break; fi
+      printf 'A password is required for remote access.\n' >&3
+      continue
     fi
     [[ ${#password} -ge 16 && $password != *[!\ -~]* ]] && break
     printf 'Use at least 16 printable ASCII characters.\n' >&3
@@ -447,7 +453,12 @@ main() {
   else
     install_native
   fi
-  printf '\nXFlog is running at %s\nInstance username: xflog. Password is saved in %s/.env\n' "$origin" "$install_dir" >&3
+  printf '\nXFlog is running at %s\n' "$origin" >&3
+  if [[ -n $password ]]; then
+    printf 'Browser username: xflog. Password is saved in %s/.env\n' "$install_dir" >&3
+  else
+    printf 'Local password protection is disabled.\n' >&3
+  fi
 }
 
 if [[ ${BASH_SOURCE[0]:-} == "$0" || -z ${BASH_SOURCE[0]:-} ]]; then main "$@"; fi

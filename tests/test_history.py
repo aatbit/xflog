@@ -206,7 +206,7 @@ async def test_multiple_tabs_start_one_collector(tmp_path):
     await store.open()
 
     class ConfiguredClient:
-        config = Config(tmp_path / "history.sqlite3", app_bearer="fake")
+        config = Config(tmp_path / "history.sqlite3", app_bearer="fake", user_id="111")
 
     collector = Collector(store, ConfiguredClient())
     collector.connected = True
@@ -293,6 +293,7 @@ async def test_reconnect_rate_limit_records_gap_without_duplicate_tasks(tmp_path
 
     collector.reconcile = reconcile
     monkeypatch.setattr(module.asyncio, "sleep", sleep)
+    await store.save_setting("tracking", True)
     collector.task = asyncio.create_task(collector.run())
     try:
         await waiting.wait()

@@ -14,6 +14,12 @@ from .transport import ProviderError, subscription_identity, subscription_result
 DEFAULT_SELECTION = {"followers": True, "subscriptions": False, "notifications": False}
 
 
+def selected_kinds(selection: dict) -> tuple:
+    return (FOLLOW_TYPES if selection["followers"] else ()) + (
+        SUBSCRIPTION_TYPES if selection["subscriptions"] else ()
+    )
+
+
 class Collector:
     """One application-owned consumer; browser tabs only read its committed history."""
 
@@ -21,11 +27,14 @@ class Collector:
         self.store = store
         self.client = client
         self.lock = asyncio.Lock()
+        self.subscription_lock = asyncio.Lock()
         self.task = None
+        self.preference_task = None
         self.state = "stopped"
         self.message = "Tracking is stopped."
         self.connected = False
         self.notifications = 0
+        self.preference_warning = ""
 
     async def initialize(self):
         account = await self.store.setting("account")
@@ -39,55 +48,119 @@ class Collector:
                 )
             account = {"id": target}
             await self.store.save_setting("account", account)
+        selection = await self.store.setting("selection", DEFAULT_SELECTION)
+        setup_message = self.client.config.setup_message(selection)
         self.connected = bool(target and self.client.config.app_bearer)
-        self.message = (
-            "Ready. Tracking is paused."
-            if self.connected
-            else "Instance setup is incomplete. Check the server configuration."
-        )
+        self.message = setup_message or "Ready. Tracking is paused."
         if (
             account
             and await self.store.setting("tracking", False)
             and not await self.store.restart_blocked()
         ):
-            selection = await self.store.setting("selection", DEFAULT_SELECTION)
-            if selection["subscriptions"] and not self.client.config.user_token:
+            if setup_message:
                 self.state = "reconnect"
-                self.message = (
-                    "Supply X_USER_ACCESS_TOKEN before resuming paid subscription events."
-                )
                 return
             await self.store.gap(
                 account["id"], "Application was offline; recovery is not guaranteed."
             )
-            if self.connected:
-                self.task = asyncio.create_task(self.run())
-            else:
-                self.state = "reconnect"
-                self.message = "Update the environment credentials and restart to resume."
+            self.task = asyncio.create_task(self.run())
+
+    def validate_selection(self, selection: dict):
+        if message := self.client.config.setup_message(selection):
+            raise SetupError(message)
+        if not selected_kinds(selection):
+            raise SetupError("Enable at least one event category, or Pause tracking first.")
 
     async def start(self):
         async with self.lock:
             if self.task and not self.task.done():
                 return
-            if not self.connected or not await self.store.setting("account"):
-                raise SetupError("Configure X_USER_ID and X_APP_BEARER_TOKEN, then restart.")
-            if not self.client.config.app_bearer:
-                raise SetupError("Set X_APP_BEARER_TOKEN for this developer app before starting.")
             selection = await self.store.setting("selection", DEFAULT_SELECTION)
-            if not selection["followers"] and not selection["subscriptions"]:
-                raise SetupError("Enable at least one event category in Profile.")
-            if selection["subscriptions"] and not self.client.config.user_token:
-                raise SetupError(
-                    "Paid subscription events require an externally authorized X_USER_ACCESS_TOKEN."
-                )
+            self.validate_selection(selection)
+            if not await self.store.setting("account"):
+                raise SetupError("Configure X_USER_ID and restart XFlog.")
             await self.store.save_setting("tracking", True)
             await self.store.allow_restart()
             self.state = "connecting"
             self.message = "Connecting to X Activity…"
             self.task = asyncio.create_task(self.run())
 
+    async def save_preferences(self, selection: dict) -> dict:
+        async with self.lock:
+            if self.preference_task and not self.preference_task.done():
+                raise SetupError(
+                    "A preferences update is still running. Wait for it, or Pause tracking."
+                )
+            update = asyncio.create_task(self.apply_preferences(selection))
+            self.preference_task = update
+        try:
+            # Own persistence and application before either can outlive the saving browser.
+            await asyncio.shield(update)
+        except asyncio.CancelledError:
+            if not update.cancelled():
+                raise
+        finally:
+            if update.done():
+                async with self.lock:
+                    if self.preference_task is update:
+                        self.preference_task = None
+        async with self.lock:
+            if await self.store.setting("selection", DEFAULT_SELECTION) != selection:
+                return {
+                    "saved": False,
+                    "message": "This save was interrupted or replaced. Review your preferences and save again.",
+                }
+            message = "Preferences saved. Tracking remains stopped."
+            if self.is_running() and await self.store.setting("tracking", False):
+                message = "Preferences saved. Tracking continues."
+            return {"saved": True, "message": self.preference_warning or message}
+
+    def is_running(self) -> bool:
+        return (
+            self.task is not None
+            and not self.task.done()
+            and self.state in {"connecting", "tracking", "reconnecting"}
+        )
+
+    async def apply_preferences(self, selection: dict):
+        async with self.lock:
+            previous = await self.store.setting("selection", DEFAULT_SELECTION)
+            running = self.is_running()
+            if running:
+                self.validate_selection(selection)
+            try:
+                await self.store.save_setting("selection", selection)
+            except sqlite3.Error:
+                self.preference_warning = (
+                    "Preferences could not be saved. Check server storage and save again."
+                )
+                raise
+            if not running:
+                self.preference_warning = ""
+                return
+            if (
+                selected_kinds(previous) == selected_kinds(selection)
+                and not self.preference_warning
+            ):
+                return
+            account = await self.store.setting("account")
+        try:
+            await self.refresh_subscriptions(account)
+        except (ProviderError, httpx.HTTPError, SetupError, ValueError, KeyError, sqlite3.Error):
+            self.preference_warning = (
+                "Preferences saved locally, but the event changes have not been fully applied. "
+                "Check X access and server storage, then save again to retry."
+            )
+
+    async def cancel_preference_update(self):
+        update = self.preference_task
+        self.preference_task = None
+        if update:
+            update.cancel()
+            await asyncio.gather(update, return_exceptions=True)
+
     async def cancel_task(self):
+        await self.cancel_preference_update()
         if self.task:
             self.task.cancel()
             result = (await asyncio.gather(self.task, return_exceptions=True))[0]
@@ -106,6 +179,7 @@ class Collector:
         async with self.lock:
             await self.cancel_task()
             self.state = "stopped"
+            self.preference_warning = ""
             self.message = "Tracking is stopped. History is kept."
             persistence_error = None
             restart_blocked = False
@@ -184,6 +258,14 @@ class Collector:
                 return owned
         raise SetupError("X subscription pagination exceeded its safety bound.")
 
+    async def remove_subscription(self, identity: str):
+        try:
+            await self.client.delete_subscription(identity)
+        except ProviderError as error:
+            if error.status != 404:
+                raise
+        await self.store.forget_subscription(identity)
+
     async def remove_subscriptions(self):
         failures = 0
         saved = {item["id"]: item for item in await self.store.subscriptions()}
@@ -201,13 +283,9 @@ class Collector:
             except sqlite3.Error as error:
                 persistence_error = error
             try:
-                await self.client.delete_subscription(subscription["id"])
-                await self.store.forget_subscription(subscription["id"])
-            except ProviderError as error:
-                if error.status == 404:
-                    await self.store.forget_subscription(subscription["id"])
-                else:
-                    failures += 1
+                await self.remove_subscription(subscription["id"])
+            except ProviderError:
+                failures += 1
             except (httpx.HTTPError, SetupError, ValueError):
                 failures += 1
             except sqlite3.Error as error:
@@ -230,10 +308,6 @@ class Collector:
             await self.store.save_setting("tag", tag)
         for item in await self.discover_owned(account):
             await self.store.save_subscription(item)
-        for saved in await self.store.subscriptions():
-            if saved["account_id"] != account["id"] or saved["kind"] not in kinds:
-                await self.client.delete_subscription(saved["id"])
-                await self.store.forget_subscription(saved["id"])
         expires = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
         for kind in kinds:
             # Bound orphan lifetime; repeating POST refreshes the documented subscription identity.
@@ -260,18 +334,34 @@ class Collector:
                     "tag": tag,
                 }
             )
+        # Keep existing coverage until newly selected event subscriptions are ready.
+        for saved in await self.store.subscriptions():
+            if saved["account_id"] != account["id"] or saved["kind"] not in kinds:
+                await self.remove_subscription(saved["id"])
+
+    async def refresh_subscriptions(self, account: dict):
+        async with self.subscription_lock:
+            if not self.is_running() or not await self.store.setting("tracking", False):
+                return False
+            selection = await self.store.setting("selection", DEFAULT_SELECTION)
+            await self.reconcile(account, selected_kinds(selection))
+            self.preference_warning = ""
+            return True
 
     async def run(self):
+        try:
+            await self.listen()
+        finally:
+            await self.cancel_preference_update()
+
+    async def listen(self):
         delay = 1
         account = await self.store.setting("account")
-        selection = await self.store.setting("selection", DEFAULT_SELECTION)
-        kinds = (FOLLOW_TYPES if selection["followers"] else ()) + (
-            SUBSCRIPTION_TYPES if selection["subscriptions"] else ()
-        )
         while True:
             try:
                 self.state = "connecting"
-                await self.reconcile(account, kinds)
+                if not await self.refresh_subscriptions(account):
+                    return
                 # Reconnect every six hours to refresh the 24-hour subscription lease.
                 async with asyncio.timeout(6 * 3600):
                     async for raw in self.client.stream():
@@ -281,7 +371,12 @@ class Collector:
                             await self.store.end_gap(account["id"])
                             continue
                         event = parse_event(raw, account["id"])
-                        if event and event.kind in kinds and await self.store.insert(event):
+                        selection = await self.store.setting("selection", DEFAULT_SELECTION)
+                        if (
+                            event
+                            and event.kind in selected_kinds(selection)
+                            and await self.store.insert(event)
+                        ):
                             self.notifications += 1
                         delay = 1
                 raise httpx.ReadError("Stream ended")

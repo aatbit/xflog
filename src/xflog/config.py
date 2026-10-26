@@ -18,6 +18,8 @@ class Config:
     host: str = "127.0.0.1"
     port: int = 7860
     admin_password: str = field(default="", repr=False)
+    environment_file: str = ""
+    loopback_published: bool = False
 
     def __post_init__(self):
         parsed = urlsplit(self.origin)
@@ -48,14 +50,31 @@ class Config:
             len(self.admin_password) < 16 or not self.admin_password.isascii()
         ):
             raise ValueError("XFLOG_ADMIN_PASSWORD must contain at least 16 ASCII characters.")
-        if (
-            self.secure or self.host not in {"127.0.0.1", "localhost", "::1"}
-        ) and not self.admin_password:
-            raise ValueError("Hosted binding requires XFLOG_ADMIN_PASSWORD.")
+        if not isinstance(self.loopback_published, bool):
+            raise ValueError("loopback_published must be a boolean deployment setting.")
+        local_origin = parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+        local_binding = self.host in {"127.0.0.1", "localhost", "::1"} or self.loopback_published
+        if not self.admin_password and not (local_origin and local_binding):
+            raise ValueError("Remote access requires XFLOG_ADMIN_PASSWORD.")
 
     @property
     def secure(self) -> bool:
         return urlsplit(self.origin).scheme == "https"
+
+    def missing_settings(self, selection: dict) -> list[str]:
+        required = {"X_APP_BEARER_TOKEN": self.app_bearer, "X_USER_ID": self.user_id}
+        if selection.get("subscriptions"):
+            required["X_USER_ACCESS_TOKEN"] = self.user_token
+        return [name for name, value in required.items() if not value.strip()]
+
+    def setup_message(self, selection: dict) -> str:
+        missing = self.missing_settings(selection)
+        return (
+            f"Missing server settings: {', '.join(missing)}. "
+            f"Set them in {self.environment_file or 'the server environment'} and restart XFlog."
+            if missing
+            else ""
+        )
 
     @classmethod
     def from_env(cls):
@@ -70,4 +89,6 @@ class Config:
             host=os.getenv("XFLOG_HOST", "127.0.0.1"),
             port=int(os.getenv("XFLOG_PORT", "7860")),
             admin_password=os.getenv("XFLOG_ADMIN_PASSWORD", ""),
+            environment_file=os.getenv("XFLOG_ENV_FILE", ""),
+            loopback_published=os.getenv("XFLOG_LOOPBACK_PUBLISHED", "").lower() in {"1", "true"},
         )
