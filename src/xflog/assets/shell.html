@@ -1,0 +1,468 @@
+<div id="xf" data-motion="on" data-route="timeline">
+  <a class="skip" href="#main">Skip to timeline</a>
+  <header class="scene-header">
+    <a class="brand" href="/" aria-label="XFlog home" title="XFlog"
+      ><img src="/static/xf/mark.svg" width="32" height="32" alt=""
+    /></a>
+    <div class="workspace">
+      <span class="workspace-avatar" aria-hidden="true">X</span
+      ><span
+        ><strong id="scope-name">Your workspace</strong
+        ><span id="scope-handle">Local to this device</span></span
+      >
+    </div>
+    <div class="header-actions">
+      <button
+        type="button"
+        id="explore-button"
+        class="text-button"
+        aria-haspopup="dialog"
+        aria-label="Timeline settings"
+        title="Timeline settings"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 7h16M4 17h16" />
+          <circle cx="9" cy="7" r="3" />
+          <circle cx="15" cy="17" r="3" />
+        </svg></button
+      ><button
+        type="button"
+        class="text-button"
+        data-nav="profile"
+        aria-label="Open profile"
+        title="Profile"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="8" r="4" />
+          <path d="M4 21v-2a8 8 0 0 1 16 0v2" />
+        </svg>
+      </button>
+    </div>
+  </header>
+  <main id="main" tabindex="-1">
+    <div id="notice" class="notice" role="status" hidden></div>
+    <section id="timeline-view" aria-labelledby="timeline-title">
+      <h1 id="timeline-title" class="sr-only">Audience history</h1>
+      <div
+        id="history"
+        class="history horizontal"
+        role="region"
+        aria-label="Follower event timeline"
+        tabindex="0"
+      >
+        <div class="empty-state">
+          <h2>Every connection<br />has a chapter.</h2>
+          <p>Your follower history begins when you start tracking.</p>
+          <button class="button primary" type="button" id="empty-demo">
+            Explore the demo <span aria-hidden="true">→</span>
+          </button>
+        </div>
+      </div>
+      <div class="strand-controls">
+        <button
+          type="button"
+          id="controls-toggle"
+          class="controls-toggle"
+          aria-label="Timeline controls"
+          title="Timeline controls"
+          aria-expanded="false"
+          aria-controls="strand-control-content"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m6 14 6-6 6 6" />
+          </svg>
+        </button>
+        <div id="strand-control-content" class="controls-content">
+          <div class="journey-bar">
+            <div class="journey-date">
+              <span id="journey-date">Your story starts here</span
+              ><span id="journey-position" class="sr-only"
+                >No memories yet</span
+              >
+            </div>
+            <div class="journey-actions">
+              <button
+                type="button"
+                id="memory-next"
+                class="icon-button"
+                aria-label="Older memory"
+              >
+                ←</button
+              ><button
+                type="button"
+                id="view-memory"
+                class="button subtle"
+                disabled
+              >
+                Open memory <span aria-hidden="true">↗</span></button
+              ><button
+                type="button"
+                id="memory-previous"
+                class="icon-button"
+                aria-label="Newer memory"
+              >
+                →
+              </button>
+            </div>
+            <div class="journey-help">
+              <span>Scroll or swipe to travel</span
+              ><span>← Older · Newer →</span>
+            </div>
+          </div>
+          <div class="zoom-strip">
+            <div class="zoom-controls" role="group" aria-label="Strand zoom">
+              <button type="button" id="zoom-fit" aria-pressed="false">
+                Fit</button
+              ><button
+                type="button"
+                id="zoom-out"
+                aria-label="Zoom out of strand"
+              >
+                −</button
+              ><label class="sr-only" for="strand-zoom">Strand zoom</label
+              ><input
+                id="strand-zoom"
+                type="range"
+                min="0"
+                max="2"
+                step="0.05"
+                value="1"
+              /><button
+                type="button"
+                id="zoom-in"
+                aria-label="Zoom into strand"
+              >
+                +</button
+              ><output id="zoom-value" for="strand-zoom">100%</output>
+            </div>
+            <span class="gesture-hint">Wheel to drift · drag to explore</span>
+          </div>
+          <div class="scrubber">
+            <label class="sr-only" for="memory-scrubber"
+              >Move through loaded history</label
+            >
+            <div class="navigator-track">
+              <div id="navigator-marks" aria-hidden="true"></div>
+              <span id="navigator-window" aria-hidden="true"></span
+              ><span id="navigator-cursor" aria-hidden="true"></span
+              ><input
+                id="memory-scrubber"
+                type="range"
+                min="0"
+                max="0"
+                value="0"
+                disabled
+              />
+            </div>
+            <div>
+              <button type="button" id="jump-latest" class="text-button">
+                Latest</button
+              ><span id="history-count">0 events loaded</span
+              ><button type="button" id="load-more" class="text-button" hidden>
+                ← Load older memories
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <button
+      type="button"
+      class="back-button text-button"
+      aria-label="Return to the strand"
+      title="Return to the strand"
+      data-nav="timeline"
+      hidden
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M19 12H5m7-7-7 7 7 7" />
+      </svg>
+    </button>
+    <section id="profile-view" hidden aria-labelledby="profile-title">
+      <h1 id="profile-title" class="sr-only">Profile & settings</h1>
+      <div class="settings-row">
+        <div>
+          <h2>Tracked account</h2>
+          <p id="profile-account">No account configured.</p>
+        </div>
+        <div class="settings-panel">
+          <div id="profile-state">Setup missing</div>
+          <p id="profile-message">
+            Tracking is paused.
+          </p>
+        </div>
+      </div>
+      <form id="preferences-form">
+        <div class="settings-row">
+          <div>
+            <h2>Activity</h2>
+            <p>
+              Choose the activity recorded by this instance.
+            </p>
+          </div>
+          <div class="settings-panel">
+            <label class="switch-row"
+              ><span
+                ><strong>Follower events</strong
+                ><small>Followers gained and lost. On by default.</small></span
+              ><input
+                type="checkbox"
+                role="switch"
+                name="followers"
+                checked /></label
+            ><label class="switch-row"
+              ><span
+                ><strong>Paid subscription events</strong
+                ><small>New subscribers and expired subscriptions.</small></span
+              ><input
+                type="checkbox"
+                role="switch"
+                name="subscriptions" /></label
+            ><label class="switch-row"
+              ><span
+                ><strong>In-app activity notifications</strong
+                ><small
+                  >A quiet notice when new events arrive in an open tab.</small
+                ></span
+              ><input type="checkbox" role="switch" name="notifications"
+            /></label>
+            <div class="preference-actions">
+              <p class="small">
+                Saving pauses tracking. Start again when you’re ready.
+              </p>
+              <button type="submit" class="button primary">
+                Save preferences
+              </button>
+            </div>
+          </div>
+        </div>
+      </form>
+    </section>
+    <section id="about-view" hidden aria-labelledby="about-title">
+      <div class="page-heading">
+        <div>
+          <h1 id="about-title">A little more signal.</h1>
+          <p>XFlog — X Follower Log.</p>
+        </div>
+      </div>
+      <div class="about-story">
+        <img
+          src="/static/xf/mark.svg"
+          width="96"
+          height="96"
+          alt="XFlog crossing paths mark"
+        />
+        <h2>People come. People go.<br />Keep the story.</h2>
+        <p>
+          A local event journal for the changes in your X audience. Incoming
+          follower activity is the default. Paid subscriber history is an
+          optional, separate view.
+        </p>
+        <p>
+          XFlog uses the official X Activity API. It never scrapes your account,
+          requests your password, or builds follower-list snapshots.
+        </p>
+        <a href="/static/xf/brand.html" target="_blank" rel="noopener"
+          >Explore the brand ↗</a
+        >
+      </div>
+    </section>
+  </main>
+  <dialog
+    id="explore-dialog"
+    class="explore-drawer"
+    aria-labelledby="explore-title"
+  >
+    <header class="panel-header">
+      <h2 id="explore-title" class="sr-only">Timeline settings</h2>
+      <form method="dialog">
+        <button class="dialog-close" aria-label="Close timeline settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m6 6 12 12M6 18 18 6" />
+          </svg>
+        </button>
+      </form>
+    </header>
+    <div class="panel-body">
+      <section class="panel-section" aria-labelledby="history-settings-title">
+        <h3 id="history-settings-title">History</h3>
+        <div class="setting-block">
+          <span class="setting-label" id="audience-label">Audience</span>
+          <div
+            class="segmented subject-tabs"
+            role="group"
+            aria-labelledby="audience-label"
+          >
+            <button type="button" data-subject="followers" aria-pressed="true">
+              Followers
+            </button>
+            <button
+              type="button"
+              data-subject="subscriptions"
+              aria-pressed="false"
+            >
+              Paid subscribers
+            </button>
+          </div>
+        </div>
+        <div class="setting-block">
+          <span class="setting-label" id="events-label">Events</span>
+          <div
+            class="segmented filters"
+            role="group"
+            aria-labelledby="events-label"
+          >
+            <button type="button" data-filter="all" aria-pressed="true">
+              All events
+            </button>
+            <button type="button" data-filter="gained" aria-pressed="false">
+              Gained
+            </button>
+            <button type="button" data-filter="lost" aria-pressed="false">
+              Lost
+            </button>
+          </div>
+        </div>
+      </section>
+      <section class="panel-section" aria-labelledby="appearance-title">
+        <h3 id="appearance-title">Appearance</h3>
+        <div class="setting-block">
+          <span class="setting-label" id="layout-label">Layout</span>
+          <div
+            class="segmented layout-control"
+            role="group"
+            aria-labelledby="layout-label"
+          >
+            <button
+              type="button"
+              data-layout="horizontal"
+              aria-pressed="true"
+              aria-label="Horizontal timeline"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 8c6 0 12 8 18 8M3 16c6 0 12-8 18-8" /></svg
+              >Strand
+            </button>
+            <button
+              type="button"
+              data-layout="vertical"
+              aria-pressed="false"
+              aria-label="Vertical timeline"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M8 5h13M8 12h13M8 19h13M3 5h.01M3 12h.01M3 19h.01"
+                /></svg
+              >Journal
+            </button>
+          </div>
+        </div>
+        <button
+          type="button"
+          id="motion-toggle"
+          class="motion-switch"
+          aria-pressed="true"
+          aria-describedby="motion-description"
+        >
+          Ambient motion on
+        </button>
+        <p id="motion-description" class="setting-description">
+          Smooth travel and subtle strand drift.
+        </p>
+        <div class="twist-speed-control">
+          <div>
+            <label for="twist-speed">Twist speed</label>
+            <output id="twist-speed-value" for="twist-speed">1× · 12s per turn</output>
+          </div>
+          <input id="twist-speed" type="range" min="0.25" max="2" step="0.25" value="1" />
+        </div>
+      </section>
+      <section class="panel-section" aria-labelledby="recorded-title">
+        <h3 id="recorded-title">Recorded events</h3>
+        <div class="summary" aria-label="Event history totals">
+          <div>
+            <strong id="net-value">0</strong
+            ><span id="net-label">Net follower events</span>
+          </div>
+          <div>
+            <strong id="gained-value">0</strong
+            ><span id="gained-label">Followers gained</span>
+          </div>
+          <div>
+            <strong id="lost-value">0</strong
+            ><span id="lost-label">Followers lost</span>
+          </div>
+        </div>
+        <p class="setting-description">Since tracking began.</p>
+      </section>
+      <details class="workspace-settings">
+        <summary>
+          Workspace<svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m9 5 7 7-7 7" />
+          </svg>
+        </summary>
+        <div class="workspace-controls">
+          <button
+            type="button"
+            id="refresh-button"
+            class="setting-action"
+            aria-label="Refresh local history"
+          >
+            <span>Refresh local history</span
+            ><svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M20 7v5h-5M4 17v-5h5M6 6a8 8 0 0 1 13 3M18 18a8 8 0 0 1-13-3"
+              />
+            </svg>
+          </button>
+          <button type="button" id="view-gaps" class="setting-action">
+            <span>Connection history</span
+            ><svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m9 5 7 7-7 7" />
+            </svg>
+          </button>
+          <button type="button" id="demo-toggle" class="setting-action">
+            Explore demo ↗
+          </button>
+          <div class="workspace-buttons">
+            <button type="button" id="tracking-button" class="button primary">
+              Start tracking →
+            </button>
+          </div>
+          <p id="history-end" class="setting-description">
+            Only activity received while tracking appears here.
+          </p>
+        </div>
+      </details>
+    </div>
+    <footer class="panel-footer">
+      <span id="connection-label" class="connection">Setup missing</span
+      ><button type="button" data-nav="about" class="text-button">
+        About XFlog ↗
+      </button>
+    </footer>
+  </dialog>
+  <dialog id="action-dialog" aria-labelledby="dialog-title">
+    <form method="dialog">
+      <button class="dialog-close" aria-label="Close dialog">×</button>
+    </form>
+    <div id="dialog-body"></div>
+  </dialog>
+  <dialog id="detail-dialog" aria-label="Event detail">
+    <form method="dialog">
+      <button class="dialog-close" aria-label="Close event detail">×</button>
+    </form>
+    <div id="mobile-detail"></div>
+  </dialog>
+  <div id="detail-panel" hidden></div>
+  <button id="exit-demo" hidden type="button">Exit demo</button
+  ><button id="mobile-profile" hidden type="button">Profile</button>
+  <div id="page-crumb" hidden></div>
+  <div
+    class="sr-only"
+    id="announcer"
+    role="status"
+    aria-live="polite"
+    aria-atomic="true"
+  ></div>
+</div>

@@ -1,0 +1,642 @@
+(async () => {
+  const root = element.querySelector("#xf");
+  const $ = (selector) => root.querySelector(selector);
+  const $$ = (selector) => [...root.querySelectorAll(selector)];
+  const state = {
+    demo: false,
+    subject: "followers",
+    filter: "all",
+    layout: "horizontal",
+    events: [],
+    next: null,
+    selected: null,
+    status: null,
+    csrf: "",
+    generation: 0,
+    busy: false,
+  };
+  const esc = (value) =>
+    String(value ?? "").replace(
+      /[&<>"']/g,
+      (char) =>
+        ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        })[char],
+    );
+  const dateFormat = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  const timeFormat = new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const fullFormat = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  });
+  const gained = (event) =>
+    ["follow.follow", "subscriptions.subscribe"].includes(event.kind);
+  const eventLabel = (event) =>
+    event.kind.startsWith("subscriptions.")
+      ? gained(event)
+        ? "Subscribed"
+        : "Expired"
+      : gained(event)
+        ? "Followed you"
+        : "Unfollowed";
+  const displayDate = (event) =>
+    new Date(event.provider_at || event.received_at);
+  const initials = (event) =>
+    (event.name || event.handle || "?")
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((word) => word[0])
+      .join("")
+      .toUpperCase();
+  const { createStrand } = await import("/static/xf/strand.js");
+  const { normalizeTwistSpeed } = await import("/static/xf/strand-life.js");
+  function setTwistSpeed(value) {
+    const speed = normalizeTwistSpeed(value);
+    root.dataset.twistSpeed = String(speed);
+    $("#twist-speed").value = speed;
+    const duration = Number((12 / speed).toFixed(1));
+    $("#twist-speed-value").textContent = `${speed}× · ${duration}s per turn`;
+    $("#twist-speed").setAttribute(
+      "aria-valuetext",
+      `${speed} times, ${duration} seconds per turn`,
+    );
+  }
+  try {
+    setTwistSpeed(localStorage.getItem("xflog.twist-speed") ?? 1);
+  } catch {
+    setTwistSpeed(1);
+  }
+  $("#twist-speed").addEventListener("input", (event) => {
+    setTwistSpeed(event.currentTarget.value);
+    try {
+      localStorage.setItem("xflog.twist-speed", root.dataset.twistSpeed);
+    } catch {
+      // Restricted browser storage must not prevent changing the current speed.
+    }
+  });
+  const strand = createStrand({
+    element: $("#history"),
+    root,
+    escape: esc,
+    label: eventLabel,
+    initials,
+    date: dateFormat,
+    time: timeFormat,
+    gained,
+    onSelect: (identity) => selectEvent(identity),
+    onOpen: (identity) => selectEvent(identity, true),
+  });
+  const announce = (text) => {
+    $("#announcer").textContent = text;
+  };
+  function notice(message) {
+    $("#notice").textContent = message;
+    $("#notice").hidden = !message;
+    announce(message);
+  }
+  async function api(path, body) {
+    const response = await fetch(path, {
+      credentials: "same-origin",
+      cache: "no-store",
+      ...(body !== undefined
+        ? {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-XFlog-CSRF": state.csrf,
+            },
+            body: JSON.stringify(body),
+          }
+        : {}),
+    });
+    const result = await response.json();
+    if (!response.ok)
+      throw new Error(
+        typeof result.detail === "string"
+          ? result.detail
+          : "The request failed. Reload XFlog and retry.",
+      );
+    return result;
+  }
+  async function action(button, callback) {
+    if (state.busy) return;
+    state.busy = true;
+    button.disabled = true;
+    try {
+      await callback();
+    } catch (error) {
+      const message = error.message || "Something went wrong. Please retry.";
+      if ($("#action-dialog").open) {
+        let errorLine = $("#dialog-error");
+        if (!errorLine) {
+          errorLine = document.createElement("p");
+          errorLine.id = "dialog-error";
+          errorLine.setAttribute("role", "alert");
+          $("#dialog-body").append(errorLine);
+        }
+        errorLine.textContent = message;
+      } else notice(message);
+    } finally {
+      state.busy = false;
+      button.disabled = false;
+    }
+  }
+  function view(name) {
+    for (const page of ["timeline", "profile", "about"])
+      $(`#${page}-view`).hidden = page !== name;
+    $$("[data-nav]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.nav === name);
+      if (button.dataset.nav === name)
+        button.setAttribute("aria-current", "page");
+      else button.removeAttribute("aria-current");
+    });
+    $("#page-crumb").textContent = {
+      timeline: "Timeline",
+      profile: "Profile & settings",
+      about: "About XFlog",
+    }[name];
+    if (name === "profile") fillProfile();
+    $("#mobile-profile").textContent =
+      name === "profile" ? "Timeline" : "Profile";
+    history.replaceState(null, "", `#${name}`);
+    root.dataset.route = name;
+    $(".back-button").hidden = name === "timeline";
+    if ($("#explore-dialog").open) $("#explore-dialog").close();
+    if (document.activeElement !== document.body)
+      $("#main").focus({ preventScroll: true });
+  }
+  function renderStatus(status) {
+    const previous = state.status;
+    state.status = status;
+    state.csrf = status.csrf;
+    const active = ["tracking", "connecting", "reconnecting"].includes(
+      status.state,
+    );
+    $("#connection-label").textContent = state.demo
+      ? "Demo workspace"
+      : {
+          stopped: status.connected ? "Ready · paused" : "Setup missing",
+          tracking: "Tracking",
+          connecting: "Connecting…",
+          reconnecting: "Reconnecting…",
+          reconnect: "Credentials needed",
+          error: "Storage error",
+        }[status.state] || status.state;
+    $("#connection-label").classList.toggle(
+      "is-tracking",
+      !state.demo && status.state === "tracking",
+    );
+    $("#tracking-button").textContent = active
+      ? "Pause tracking"
+      : "Start tracking →";
+    $("#tracking-button").disabled = state.demo;
+    const account = status.account;
+    $("#scope-name").textContent = state.demo
+      ? "Mira Studio"
+      : account?.name || account?.username || (account?.id ? `Account ${account.id}` : "Your workspace");
+    $("#scope-handle").textContent = state.demo
+      ? "@mirastudio · demo"
+      : account?.username
+        ? `@${account.username}`
+        : "Private history";
+    $(".workspace-avatar").textContent = (
+      state.demo ? "M" : (account?.name || account?.username || "X")[0]
+    ).toUpperCase();
+    if (!state.demo) renderSummary(status.counts);
+    if ($("#notice").textContent === "Failed to fetch") notice("");
+    if (status.cleanup_warning) notice(status.cleanup_warning);
+    else if (["reconnecting", "reconnect", "error"].includes(status.state))
+      notice(status.message);
+    if (
+      previous &&
+      status.notification_sequence > previous.notification_sequence &&
+      status.selection.notifications &&
+      !state.demo
+    )
+      notice(
+        "New activity arrived. Refresh local history to see the latest events.",
+      );
+    if (
+      previous &&
+      !previous.connected &&
+      !status.connected &&
+      status.message !== previous.message
+    )
+      notice(status.message);
+  }
+  function renderSummary(counts) {
+    const subscription = state.subject === "subscriptions";
+    const plus =
+      counts?.[subscription ? "subscriptions.subscribe" : "follow.follow"] || 0;
+    const minus =
+      counts?.[
+        subscription ? "subscriptions.unsubscribe" : "follow.unfollow"
+      ] || 0;
+    const net = plus - minus;
+    $("#net-value").textContent = net > 0 ? `+${net}` : String(net);
+    $("#gained-value").textContent = plus.toLocaleString();
+    $("#lost-value").textContent = minus.toLocaleString();
+    $("#net-label").textContent = subscription
+      ? "Net subscriber events"
+      : "Net follower events";
+    $("#gained-label").textContent = subscription
+      ? "Subscriptions started"
+      : "Followers gained";
+    $("#lost-label").textContent = subscription
+      ? "Subscriptions expired"
+      : "Followers lost";
+  }
+  function renderEvents() {
+    const list = $("#history");
+    list.className = `history ${state.layout}`;
+    list.setAttribute(
+      "aria-label",
+      `${state.subject === "followers" ? "Follower" : "Paid subscription"} event timeline`,
+    );
+    if (!state.events.length) {
+      const isSubs = state.subject === "subscriptions";
+      let title = "Your next chapter starts here.";
+      let copy =
+        "Configure the instance, then start tracking to record follower changes.";
+      strand.clear();
+      if (state.filter !== "all") {
+        title = "No matching events yet.";
+        copy = "Try All events, or return after more activity is received.";
+      } else if (
+        isSubs &&
+        !state.status?.selection.subscriptions &&
+        !state.demo
+      ) {
+        title = "Subscriber history is optional.";
+        copy =
+          "Enable paid subscription events in Profile, then start tracking.";
+      } else if (state.status?.connected) {
+        title = "Ready when you are.";
+        copy =
+          "History begins when tracking starts. Activity before that is not reconstructed.";
+      }
+      list.innerHTML = `<div class="empty-state"><img src="/static/xf/mark.svg" width="48" height="48" alt=""><h2>${title}</h2><p>${copy}</p>${!state.demo ? '<button type="button" class="button" data-empty-demo>Explore the demo →</button>' : ""}</div>`;
+      list
+        .querySelector("[data-empty-demo]")
+        ?.addEventListener("click", () => setDemo(true));
+    } else if (state.layout === "horizontal") {
+      strand.render(state.events, state.selected);
+    } else {
+      strand.clear();
+      let prior = "";
+      list.innerHTML = state.events
+        .map((event) => {
+          const date = dateFormat.format(displayDate(event));
+          const heading =
+            date !== prior ? `<div class="date-group">${esc(date)}</div>` : "";
+          prior = date;
+          const lost = !gained(event);
+          return `${heading}<article class="event ${lost ? "lost" : "gain"}"><span class="event-dot" aria-hidden="true"></span><button type="button" class="event-button" data-event="${esc(event.event_id)}" aria-pressed="${state.selected === event.event_id}"><span class="avatar" aria-hidden="true">${esc(initials(event))}</span><span class="event-identity"><span class="event-name">${esc(event.name || event.handle || "X account")}</span><span class="event-handle">${esc(event.handle ? "@" + event.handle : "ID " + event.actor_id)}</span></span><span class="event-meta"><span class="event-kind"><span aria-hidden="true">${lost ? "↘" : "↗"}</span>${eventLabel(event)}</span><span class="event-time">${esc(timeFormat.format(displayDate(event)))}${event.provider_at ? "" : " · received"}</span></span></button></article>`;
+        })
+        .join("");
+      list
+        .querySelectorAll("[data-event]")
+        .forEach((button) =>
+          button.addEventListener("click", () =>
+            selectEvent(button.dataset.event, true),
+          ),
+        );
+    }
+    $("#history-count").textContent =
+      `${state.events.length} ${state.events.length === 1 ? "event" : "events"} loaded`;
+    $("#load-more").hidden = !state.next;
+    $("#memory-scrubber").max = Math.max(0, state.events.length - 1);
+    $("#memory-scrubber").disabled = !state.events.length;
+    $("#memory-previous").disabled = !state.events.length;
+    $("#memory-next").disabled = !state.events.length;
+    $("#view-memory").disabled = !state.events.length;
+    $("#jump-latest").disabled = !state.events.length;
+    if (!state.events.length) {
+      $("#journey-date").textContent = "Your story starts here";
+      $("#journey-position").textContent = "No memories in this view";
+      $("#memory-scrubber").value = 0;
+    }
+    $("#history-end").textContent = state.demo
+      ? "Synthetic examples · Stored separately from your history"
+      : state.subject === "subscriptions"
+        ? "Expired means access ended, not the date a subscriber canceled."
+        : "Only activity received while tracking appears here.";
+  }
+  function selectEvent(identity, openMobile = false) {
+    const event = state.events.find((event) => event.event_id === identity);
+    if (!event) return;
+    state.selected = identity;
+    $$("[data-event]").forEach((button) =>
+      button.setAttribute("aria-pressed", button.dataset.event === identity),
+    );
+    const safeLink =
+      typeof event.profile_url === "string" &&
+      /^https:\/\/x\.com\/[A-Za-z0-9_]{1,15}$/.test(event.profile_url);
+    const detail = `<h2>Event details</h2><div class="detail-person"><span class="avatar" aria-hidden="true">${esc(initials(event))}</span><h3>${esc(event.name || event.handle || "X account")}</h3><p>${esc(event.handle ? "@" + event.handle : "ID " + event.actor_id)}</p></div><div class="detail-kind ${gained(event) ? "" : "lost"}"><span aria-hidden="true">${gained(event) ? "↗" : "↘"}</span>${eventLabel(event)}</div><dl class="detail-data"><dt>Provider event time</dt><dd>${event.provider_at ? esc(fullFormat.format(new Date(event.provider_at))) : "Not supplied by X"}</dd><dt>Received on this device</dt><dd>${esc(fullFormat.format(new Date(event.received_at)))}</dd><dt>Account ID</dt><dd>${esc(event.actor_id)}</dd></dl>${safeLink ? `<a class="detail-profile" href="${esc(event.profile_url)}" target="_blank" rel="noopener noreferrer">View profile on X <span aria-hidden="true">↗</span></a>` : ""}<p class="detail-small">${event.kind === "subscriptions.unsubscribe" ? "This event records subscription expiry, not cancellation." : "Provider time is shown only when X supplies it. Received time is when XFlog captured the event."}${state.demo ? " Synthetic demo event." : ""}</p>`;
+    $("#detail-panel").innerHTML = detail;
+    $("#mobile-detail").innerHTML = detail;
+    strand.select(identity);
+    const index = state.events.findIndex((item) => item.event_id === identity);
+    $("#journey-date").textContent = dateFormat.format(displayDate(event));
+    $("#journey-position").textContent =
+      `Memory ${index + 1} of ${state.events.length} loaded`;
+    $("#memory-scrubber").value = index;
+    $("#memory-scrubber").setAttribute(
+      "aria-valuetext",
+      `${event.name || event.handle || "X account"}, ${eventLabel(event)}, ${dateFormat.format(displayDate(event))}`,
+    );
+    $("#memory-previous").disabled = index <= 0;
+    $("#memory-next").disabled = index >= state.events.length - 1;
+    $("#view-memory").disabled = false;
+    if (openMobile && !$("#detail-dialog").open)
+      $("#detail-dialog").showModal();
+  }
+  async function load(append = false) {
+    const generation = ++state.generation;
+    const params = new URLSearchParams({
+      kind: state.filter,
+      subject: state.subject,
+      before: String(append ? state.next || 0 : 0),
+    });
+    const demo = state.demo;
+    if (!append && !state.events.length)
+      $("#history").innerHTML =
+        '<div class="loading-state"><span class="loading-dot" aria-hidden="true"></span>Loading local history…</div>';
+    $("#history").setAttribute("aria-busy", "true");
+    try {
+      const result = await api(`/api/${demo ? "demo" : "events"}?${params}`);
+      if (generation !== state.generation) return;
+      state.events = append
+        ? [...state.events, ...result.events]
+        : result.events;
+      state.next = result.next;
+      if (!state.events.some((event) => event.event_id === state.selected))
+        state.selected =
+          state.events[Math.min(2, state.events.length - 1)]?.event_id || null;
+      renderEvents();
+      if (state.selected) selectEvent(state.selected);
+      else
+        $("#detail-panel").innerHTML =
+          '<div class="detail-placeholder"><h2>A closer look</h2><p>Select an event to see the account and its recorded timestamps.</p><div class="detail-illustration" aria-hidden="true"><span>↗</span><span class="path-dot"></span><span>↘</span></div></div>';
+      if (demo) renderSummary(result.counts);
+      announce(
+        `${result.events.length} ${state.subject} events ${append ? "added" : "loaded"}.`,
+      );
+    } catch (error) {
+      if (generation !== state.generation) return;
+      notice(error.message);
+      if (!state.events.length) {
+        $("#history").innerHTML =
+          '<div class="empty-state"><h2>History couldn’t be loaded.</h2><p>Check your local database and connection, then refresh to retry.</p><button class="button" type="button" data-retry>Retry</button></div>';
+        $("#history [data-retry]").addEventListener("click", () => load());
+      }
+    } finally {
+      if (generation === state.generation)
+        $("#history").setAttribute("aria-busy", "false");
+    }
+  }
+  async function setDemo(enabled) {
+    const address = new URL(location.href);
+    if (enabled) address.searchParams.set("demo", "1");
+    else address.searchParams.delete("demo");
+    history.replaceState(null, "", address);
+    state.demo = enabled;
+    state.events = [];
+    state.selected = null;
+    state.next = null;
+    $("#demo-toggle").textContent = enabled ? "Leave demo ↗" : "Explore demo ↗";
+    notice("");
+    if (state.status) renderStatus(state.status);
+    view("timeline");
+    await load();
+  }
+  function dialog(html) {
+    if ($("#explore-dialog").open) $("#explore-dialog").close();
+    $("#dialog-body").innerHTML = html;
+    $("#action-dialog").showModal();
+  }
+  function fillProfile() {
+    const status = state.status;
+    if (!status) return;
+    $("#profile-account").textContent = status.account
+      ? `${status.account.name || status.account.username || "X account"} · ${status.account.username ? "@" + status.account.username : status.account.id}`
+      : "No account configured.";
+    $("#profile-state").textContent = status.connected
+      ? "Configured"
+      : "Setup missing";
+    $("#profile-message").textContent = status.message;
+    for (const key of ["followers", "subscriptions", "notifications"])
+      $(`#preferences-form [name="${key}"]`).checked = Boolean(
+        status.selection[key],
+      );
+
+  }
+  function startDialog() {
+    if (state.demo) return;
+    if (
+      ["tracking", "connecting", "reconnecting"].includes(state.status?.state)
+    ) {
+      action($("#tracking-button"), async () => {
+        await api("/api/stop", {});
+        renderStatus(await api("/api/status"));
+        notice("Tracking paused. Local history is kept.");
+      });
+      return;
+    }
+    if (!state.status?.connected) {
+      notice("Instance setup is incomplete. Configure the environment and restart.");
+      return;
+    }
+    dialog(
+      '<h2 id="dialog-title">Start tracking</h2><p>X Activity can incur charges. The published follower event price is $0.01 per event; paid subscription events are listed as not billed. Verify stream pricing and your eligibility in the Developer Console.</p><p>Set a provider spending limit and review auto-recharge before continuing. A local count is not a billing cap.</p><p>Collection resumes after an app restart until you pause. Offline events may be missed.</p><label><input type="checkbox" id="accept-costs"><span>I reviewed X pricing and set my provider spending limit.</span></label><button type="button" class="button primary" id="confirm-start" disabled>Start tracking →</button>',
+    );
+    $("#accept-costs").addEventListener("change", () => {
+      $("#confirm-start").disabled = !$("#accept-costs").checked;
+    });
+    $("#confirm-start").addEventListener("click", (event) =>
+      action(event.currentTarget, async () => {
+        await api("/api/start", { accepted_costs: $("#accept-costs").checked });
+        $("#action-dialog").close();
+        renderStatus(await api("/api/status"));
+      }),
+    );
+  }
+  $$("[data-nav]").forEach((button) =>
+    button.addEventListener("click", () => view(button.dataset.nav)),
+  );
+  $("#mobile-profile").addEventListener("click", () => {
+    const profile = $("#profile-view").hidden;
+    view(profile ? "profile" : "timeline");
+    $("#mobile-profile").textContent = profile ? "Timeline" : "Profile";
+  });
+  $$("[data-filter]").forEach((button) =>
+    button.addEventListener("click", () => {
+      state.filter = button.dataset.filter;
+      $$("[data-filter]").forEach((item) =>
+        item.setAttribute("aria-pressed", item === button),
+      );
+      state.events = [];
+      state.selected = null;
+      load();
+    }),
+  );
+  $$("[data-subject]").forEach((button) =>
+    button.addEventListener("click", () => {
+      state.subject = button.dataset.subject;
+      $$("[data-subject]").forEach((item) =>
+        item.setAttribute("aria-pressed", item === button),
+      );
+      state.events = [];
+      state.selected = null;
+      if (!state.demo) renderSummary(state.status?.counts);
+      load();
+    }),
+  );
+  $$("[data-layout]").forEach((button) =>
+    button.addEventListener("click", () => {
+      state.layout = button.dataset.layout;
+      $$("[data-layout]").forEach((item) =>
+        item.setAttribute("aria-pressed", item === button),
+      );
+      renderEvents();
+      announce(`${state.layout} timeline selected.`);
+    }),
+  );
+  $("#demo-toggle").addEventListener("click", () => setDemo(!state.demo));
+  $("#exit-demo").addEventListener("click", () => setDemo(false));
+  $("#empty-demo").addEventListener("click", () => setDemo(true));
+  $("#refresh-button").addEventListener("click", (event) =>
+    action(event.currentTarget, async () => {
+      renderStatus(await api("/api/status"));
+      await load();
+    }),
+  );
+  $("#load-more").addEventListener("click", (event) =>
+    action(event.currentTarget, () => load(true)),
+  );
+  $("#tracking-button").addEventListener("click", startDialog);
+  $("#preferences-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    action($('#preferences-form button[type="submit"]'), async () => {
+      const form = event.currentTarget;
+      await api("/api/preferences", {
+        followers: form.elements.followers.checked,
+        subscriptions: form.elements.subscriptions.checked,
+        notifications: form.elements.notifications.checked,
+      });
+      renderStatus(await api("/api/status"));
+      fillProfile();
+      notice("Preferences saved. Tracking is paused until you start it.");
+    });
+  });
+  $("#view-gaps").addEventListener("click", () => {
+    const gaps = state.demo
+      ? [
+          {
+            started_at: "2026-10-24T14:10:00Z",
+            ended_at: "2026-10-24T14:24:00Z",
+            reason: "Synthetic offline example",
+          },
+        ]
+      : state.status?.gaps || [];
+    dialog(
+      `<h2 id="dialog-title">Connection history</h2><p>Events during a gap may be missing. XFlog does not promise replay or recovery.</p>${gaps.length ? gaps.map((gap) => `<div class="gap-row">${esc(fullFormat.format(new Date(gap.started_at)))}<span>To ${gap.ended_at ? esc(fullFormat.format(new Date(gap.ended_at))) : "now · gap still open"}</span><span>${esc(gap.reason)}</span></div>`).join("") : "<p>No connection gaps have been recorded.</p>"}`,
+    );
+  });
+  $("#explore-button").addEventListener("click", () => {
+    view("timeline");
+    $("#explore-dialog").showModal();
+    $("#explore-dialog .panel-body").scrollTop = 0;
+  });
+  $("#controls-toggle").addEventListener("click", (event) => {
+    const open = $(".strand-controls").classList.toggle("is-open");
+    event.currentTarget.setAttribute("aria-expanded", String(open));
+  });
+  $(".strand-controls").addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    $(".strand-controls").classList.remove("is-open");
+    $("#controls-toggle").setAttribute("aria-expanded", "false");
+    $("#history").focus({ preventScroll: true });
+  });
+  $("#view-memory").addEventListener("click", () => {
+    if (state.selected) selectEvent(state.selected, true);
+  });
+  $("#memory-previous").addEventListener("click", () => moveMemory(-1));
+  $("#memory-next").addEventListener("click", () => moveMemory(1));
+  $("#jump-latest").addEventListener("click", () =>
+    moveMemory(-state.events.length),
+  );
+  $("#memory-scrubber").addEventListener("input", (event) => {
+    const index = Number(event.target.value);
+    if (state.layout === "horizontal") strand.seek(index, "instant");
+    else if (state.events[index]) selectEvent(state.events[index].event_id);
+  });
+  function moveMemory(delta) {
+    if (state.layout === "horizontal") strand.move(delta);
+    else {
+      const index = Math.max(
+        0,
+        Math.min(
+          state.events.length - 1,
+          state.events.findIndex((event) => event.event_id === state.selected) +
+            delta,
+        ),
+      );
+      if (state.events[index]) {
+        selectEvent(state.events[index].event_id);
+        $("#history")
+          .querySelectorAll("[data-event]")
+          [index].scrollIntoView({ block: "nearest", behavior: "auto" });
+      }
+    }
+  }
+  $("#motion-toggle").addEventListener("click", (event) => {
+    const enabled = root.dataset.motion !== "on";
+    root.dataset.motion = enabled ? "on" : "off";
+    event.currentTarget.setAttribute("aria-pressed", enabled);
+    event.currentTarget.textContent = enabled
+      ? "Ambient motion on"
+      : "Ambient motion paused";
+  });
+  async function poll() {
+    if (!root.isConnected) {
+      strand.destroy();
+      return;
+    }
+    if (!document.hidden && !state.busy) {
+      try {
+        renderStatus(await api("/api/status"));
+      } catch (error) {
+        notice(error.message);
+      }
+    }
+    setTimeout(poll, 10000);
+  }
+  try {
+    renderStatus(await api("/api/status"));
+    if (new URLSearchParams(location.search).get("demo") === "1")
+      await setDemo(true);
+    else await load();
+    const hash = location.hash.slice(1);
+    if (["profile", "about"].includes(hash)) view(hash);
+    setTimeout(poll, 10000);
+  } catch (error) {
+    notice(error.message);
+  }
+})();
