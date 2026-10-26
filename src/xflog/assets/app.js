@@ -114,8 +114,6 @@
     escape: esc,
     label: eventLabel,
     initials,
-    date: dateFormat,
-    time: timeFormat,
     gained,
     onSelect: (identity) => selectEvent(identity),
     onOpen: (identity) => selectEvent(identity, true),

@@ -313,9 +313,7 @@
   display: block;
   overflow-wrap: anywhere;
 }
-.star-label .star-kind,
-.star-label time,
-.star-label .star-records {
+.star-label .star-kind {
   display: none;
 }
 .is-selected .star-label {
@@ -340,25 +338,8 @@
 .is-selected .star-label .star-kind.negative {
   color: var(--negative);
 }
-.is-selected .star-label time {
-  display: block;
-  font-size: 12px;
-  color: var(--muted);
-  margin-top: 8px;
-}
-.is-selected .star-label time span {
-  display: block;
-  margin-top: 2px;
-}
-.is-selected .star-label .star-records {
-  display: block;
-  font-size: 11px;
-  color: var(--faint);
-  margin-top: 8px;
-}
 .star-label strong,
-.star-label span,
-.star-label time {
+.star-label span {
   background: var(--ground);
   box-decoration-break: clone;
 }

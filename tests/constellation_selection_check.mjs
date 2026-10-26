@@ -158,8 +158,6 @@ const scene = createConstellation({
   escape: String,
   label: (e) => e.kind,
   initials: (e) => e.actor_id,
-  date: new Intl.DateTimeFormat("en"),
-  time: new Intl.DateTimeFormat("en"),
   gained: (e) => e.kind === "follow.follow",
   onSelect: (id) => selectedSteps.push(id),
   onOpen: (id) => opened.push(id),
@@ -182,7 +180,8 @@ assert.equal(controls.get("#zoom-value").textContent, "120%");
 scene.setZoom(0.8);
 const label = labels.find((n) => n.dataset.label === "A");
 assert.ok(label.innerHTML.includes("follow.unfollow"));
-assert.ok(label.innerHTML.includes("2 recorded events"));
+assert.ok(!label.innerHTML.includes("recorded events"));
+assert.ok(!label.innerHTML.includes("<time>"));
 label.handlers.click();
 nodes.find((n) => n.dataset.actor === "A").handlers.click();
 assert.deepEqual(opened, ["old-A", "old-A"]);

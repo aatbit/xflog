@@ -15,8 +15,6 @@ export function createConstellation({
   escape: esc,
   label,
   initials,
-  date,
-  time,
   gained,
   onSelect,
   onOpen,
@@ -55,10 +53,8 @@ export function createConstellation({
   const selectedProfileIndex = () =>
     geometry?.people.findIndex((person) => person.id === current()?.actor_id) ??
     -1;
-  const eventDate = (event) => new Date(event.provider_at || event.received_at);
-
   function personLabel(person, event = person.event) {
-    return `<strong>${esc(event.name || event.handle || "X account")}</strong><span class="star-handle">${esc(event.handle ? "@" + event.handle : "ID " + person.id)}</span><span class="star-kind ${gained(event) ? "positive" : "negative"}">${esc(label(event))}</span><time>${esc(date.format(eventDate(event)))}<span>${esc(time.format(eventDate(event)))}${event.provider_at ? "" : " · received"}</span></time><span class="star-records">${person.events.length} recorded ${person.events.length === 1 ? "event" : "events"}</span>`;
+    return `<strong>${esc(event.name || event.handle || "X account")}</strong><span class="star-handle">${esc(event.handle ? "@" + event.handle : "ID " + person.id)}</span><span class="star-kind ${gained(event) ? "positive" : "negative"}">${esc(label(event))}</span>`;
   }
 
   function stop() {
