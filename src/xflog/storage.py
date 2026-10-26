@@ -43,6 +43,12 @@ class Store:
         self.db = await aiosqlite.connect(self.path)
         self.db.row_factory = aiosqlite.Row
         await self.db.executescript(SCHEMA)
+        async with self.db.execute("PRAGMA table_info(events)") as cursor:
+            columns = {row["name"] for row in await cursor.fetchall()}
+        if "group_data" not in columns:
+            await self.db.execute(
+                "ALTER TABLE events ADD COLUMN group_data TEXT NOT NULL DEFAULT '{}'"
+            )
         await self.db.execute("PRAGMA journal_mode=WAL")
         await self.db.execute("PRAGMA busy_timeout=5000")
         await self.db.commit()
@@ -84,9 +90,9 @@ class Store:
         async with self.lock:
             cursor = await self.db.execute(
                 """INSERT OR IGNORE INTO events
-                (event_id,kind,account_id,actor_id,handle,name,provider_at,received_at)
-                VALUES (?,?,?,?,?,?,?,?)""",
-                tuple(vars(event).values()),
+                (event_id,kind,account_id,actor_id,handle,name,provider_at,received_at,group_data)
+                VALUES (:event_id,:kind,:account_id,:actor_id,:handle,:name,:provider_at,:received_at,:group_data)""",
+                {**vars(event), "group_data": json.dumps(event.group_data)},
             )
             await self.db.commit()
             return cursor.rowcount == 1
@@ -115,6 +121,7 @@ class Store:
         events = []
         for row in rows[:limit]:
             values = dict(row)
+            values["group_data"] = json.loads(values["group_data"])
             sequence = values.pop("sequence")
             events.append({**Event(**values).public(), "sequence": sequence})
         return {

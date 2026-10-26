@@ -1,19 +1,19 @@
 :root {
-  --ground: #0d0f12;
-  --surface: #15181d;
-  --raised: #1c2026;
-  --active: #252b32;
-  --border: #303740;
-  --rule: #252b32;
-  --control: #4d5965;
-  --text: #edf0f2;
-  --muted: #afb7c0;
-  --faint: #a0aab5;
-  --accent: #a8d5f3;
-  --positive: #a8d5f3;
-  --negative: #efa99a;
-  --gain-bg: #23313a;
-  --loss-bg: #3b2b29;
+  --ground: #0c1012;
+  --surface: #141a1d;
+  --raised: #1b2226;
+  --active: #263137;
+  --border: #313d43;
+  --rule: #263137;
+  --control: #52636a;
+  --text: #eef1ed;
+  --muted: #acb9bd;
+  --faint: #9aa9ae;
+  --accent: #e5c58f;
+  --positive: #9ccfcd;
+  --negative: #e2aca0;
+  --gain-bg: #233333;
+  --loss-bg: #392c2a;
   --radius-control: 4px;
   --quick: 140ms;
   --standard: 360ms;
@@ -43,6 +43,7 @@ body {
   padding: 0;
 }
 #xf {
+  color-scheme: dark;
   --font: "IBM Plex Sans", sans-serif;
   font-family: var(--font);
   color: var(--text);
@@ -272,7 +273,7 @@ body {
   display: flex;
   flex-direction: column;
   height: calc(100dvh - 96px);
-  min-height: 660px;
+  min-height: 560px;
 }
 .connection {
   display: flex;
@@ -364,13 +365,13 @@ body {
   line-height: 1.7;
   margin: 16px 0;
 }
-#xf dialog label {
+#xf #action-dialog label {
   display: flex;
   gap: 12px;
   align-items: flex-start;
   margin: 20px 0;
 }
-#xf dialog input[type="checkbox"] {
+#xf #action-dialog input[type="checkbox"] {
   accent-color: var(--accent);
   width: 20px;
   height: 20px;
@@ -401,7 +402,7 @@ body {
 #xf #profile-view {
   border: 1px solid #ffffff18;
   border-radius: 20px;
-  background: #191f26;
+  background: var(--surface);
 }
 /* The user requested glass for this floating settings surface. */
 #xf .explore-drawer {
@@ -418,10 +419,13 @@ body {
   display: flex;
   flex-direction: column;
 }
-@supports ((backdrop-filter: blur(24px)) or (-webkit-backdrop-filter: blur(24px))) { /* taste-skill-ignore: user requested glass settings */
+@supports (
+  (backdrop-filter: blur(24px)) or (-webkit-backdrop-filter: blur(24px))
+) {
+  /* taste-skill-ignore: user requested glass settings */
   #xf .explore-drawer,
   #xf #profile-view {
-    background: #191f26e8;
+    background: rgb(20 26 29 / 94%);
     -webkit-backdrop-filter: blur(24px) saturate(120%); /* taste-skill-ignore: WebKit glass surface */
     backdrop-filter: blur(24px) saturate(120%); /* taste-skill-ignore: user requested glass settings */
   }
@@ -487,7 +491,7 @@ body {
   padding: 4px;
   gap: 4px;
   border-radius: 12px;
-  background: #080c1266;
+  background: var(--ground);
 }
 .segmented button {
   flex: 1;
@@ -514,7 +518,7 @@ body {
 }
 .segmented button[aria-pressed="true"] {
   color: var(--text);
-  background: #36424f;
+  background: var(--active);
 }
 .segmented button:active {
   transform: scale(0.97);
@@ -543,7 +547,7 @@ body {
   width: 36px;
   height: 22px;
   border-radius: 20px;
-  background: #4d5965;
+  background: var(--control);
   transition: background var(--quick);
 }
 .motion-switch:after {
@@ -564,7 +568,7 @@ body {
 }
 .motion-switch[aria-pressed="true"]:after {
   transform: translateX(14px);
-  background: #15212c;
+  background: var(--ground);
 }
 #xf .explore-drawer .setting-description {
   font-size: 12px;
@@ -673,7 +677,7 @@ body {
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   #xf .explore-drawer,
   #xf #profile-view {
-    background: #191f26;
+    background: var(--surface);
     -webkit-backdrop-filter: none; /* taste-skill-ignore: respect reduced transparency */
     backdrop-filter: none; /* taste-skill-ignore: respect reduced transparency */
   }

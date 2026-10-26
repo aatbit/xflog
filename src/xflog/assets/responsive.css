@@ -5,7 +5,7 @@
   }
   #timeline-view {
     height: calc(100dvh - 80px);
-    min-height: 650px;
+    min-height: 560px;
   }
   .journey-bar {
     padding: 0 28px 12px;
@@ -74,31 +74,11 @@
   }
   #timeline-view {
     height: calc(100dvh - 72px);
-    min-height: 630px;
+    min-height: 560px;
   }
   .history,
-  .strand-canvas {
+  .constellation-canvas {
     min-height: 400px;
-  }
-  .memory {
-    width: 192px;
-  }
-  .memory-name {
-    font-size: 17px;
-  }
-  .memory-handle {
-    font-size: 13px;
-  }
-  .memory-kind {
-    font-size: 13px;
-  }
-  .memory-time {
-    font-size: 13px;
-  }
-  .memory-avatar {
-    width: 38px;
-    height: 38px;
-    margin-bottom: 10px;
   }
   .journey-bar {
     padding: 0 20px 8px;
@@ -253,10 +233,10 @@
 }
 @media (max-height: 650px) and (min-width: 681px) {
   #timeline-view {
-    min-height: 650px;
+    min-height: 560px;
   }
   .history,
-  .strand-canvas {
+  .constellation-canvas {
     min-height: 400px;
   }
 }
@@ -267,10 +247,6 @@
     animation: none !important;
     transition: none !important;
     scroll-behavior: auto !important;
-  }
-  .memory {
-    opacity: 1;
-    transform: translateX(-50%);
   }
   .history {
     scroll-behavior: auto;

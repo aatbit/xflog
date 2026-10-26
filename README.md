@@ -249,6 +249,29 @@ Enable **Activity notifications** for in-app notices and browser alerts while th
 
 </details>
 
+## Exploring your audience
+
+The constellation shows one star per person in the history you have loaded. Select a star to see an event, or use **Journal** in timeline settings to browse every recorded event. Scroll up or left for older encounters, down or right for newer ones. Light trails travel from older to newer encounters. Dragging, scrolling and the manual scrubber ease through the scene; reduced motion keeps movement immediate. The side arrows stay visible while there is room to travel; zoom out to **Fit** to see the whole loaded audience.
+
+**Activity** is the default lens. Zooming out gathers people by their latest recorded activity, such as followed or unfollowed. It uses events XFlog already records and adds no X API requests or charges.
+
+In timeline settings, open **Audience Groups** to turn optional groups on or off. **Account size** starts off. When enabled, it saves follower counts only when X includes them with a new event; it never looks up profiles. An older event or a missing count appears as **Unknown**. Enable it to reveal the spyglass button, which opens choices for Activity, Account size and Ungrouped.
+
+These groups describe the loaded history, not a complete or current follower list. Loading older events can add people or fill out a group. Turning a group off stops its metadata capture and removes its lens; your recorded history stays saved. Group changes save automatically and keep the listener running.
+
+<details>
+<summary>Adding an Audience Group as a developer</summary>
+
+Each built-in group is a small, trusted Python module in `src/xflog/audience_groups/`. Register an `AudienceGroup` with a unique key, label, description, bucket definitions and an `assign(event)` function. Include an `unknown` bucket. An optional `capture(source)` function can return the small metadata snapshot to keep from an incoming event. Set `default_enabled=False` for optional features.
+
+Import the module explicitly in the package’s `__init__.py`. The API catalog supplies its settings switch, lens option and overview buckets automatically; no feature-specific frontend code is needed. Follow the existing Account size module and its tests. Capture runs only while that group is enabled, and missing data must remain unknown.
+
+This is a registration mechanism for code shipped with XFlog, not an installer for third-party plugins. Modules receive event data, not the X client or credentials. Keep them event-only: adding network lookups would need a separate design with explicit permission and cost handling.
+
+This version adds a metadata column to the history database. Back up history before upgrading. If you later return to an older XFlog version, you may also need to restore its matching database backup.
+
+</details>
+
 <details>
 <summary>Privacy and upgrading from older versions</summary>
 

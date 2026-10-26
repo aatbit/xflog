@@ -1,6 +1,8 @@
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+
+from . import audience_groups
 
 FOLLOW_TYPES = ("follow.follow", "follow.unfollow")
 SUBSCRIPTION_TYPES = ("subscriptions.subscribe", "subscriptions.unsubscribe")
@@ -33,6 +35,7 @@ class Event:
     name: str | None
     provider_at: str | None
     received_at: str
+    group_data: dict = field(default_factory=dict)
 
     def public(self) -> dict:
         result = asdict(self)
@@ -44,7 +47,7 @@ class Event:
         return result
 
 
-def parse_event(envelope: dict, account_id: str) -> Event | None:
+def parse_event(envelope: dict, account_id: str, groups=None) -> Event | None:
     """Only incoming activity for this authenticated account crosses the storage boundary."""
     if isinstance(envelope, dict):
         envelope = envelope.get("data", envelope)
@@ -84,4 +87,5 @@ def parse_event(envelope: dict, account_id: str) -> Event | None:
         name=name[:200] if isinstance(name, str) else None,
         provider_at=timestamp(envelope.get("created_at")),
         received_at=utc_now(),
+        group_data=audience_groups.capture(source, groups),
     )

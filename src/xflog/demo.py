@@ -43,6 +43,11 @@ def demo_history(query: dict) -> dict:
             provider.isoformat() if index % 9 else None,
             (provider + timedelta(seconds=4)).isoformat(),
         ).public()
+        count = (0, 43, 189, 650, 1200, 5900, 15000, 42000, None, 88, 300, 11000)[
+            index % len(PEOPLE)
+        ]
+        if count is not None:
+            event["group_data"] = {"account-size": {"followers_count": count}}
         event["sequence"] = 76 - index
         events.append(event)
     prefix = "subscriptions." if query.get("subject") == "subscriptions" else "follow."

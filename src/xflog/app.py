@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, StrictBool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from . import audience_groups
 from .collector import DEFAULT_SELECTION, Collector
 from .config import ASSETS, Config
 from .demo import demo_history
@@ -31,6 +32,11 @@ class Selection(BaseModel):
 
 class StartRequest(BaseModel):
     accepted_costs: StrictBool
+
+
+class AudiencePreferences(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: dict[str, StrictBool]
 
 
 def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
@@ -181,6 +187,7 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
             "cleanup_warning": await store.setting("cleanup_warning", ""),
             "csrf": sessions[request.state.session]["csrf"],
             "notification_sequence": collector.notifications,
+            "audience_groups": audience_groups.catalog(await store.setting("audience_groups", {})),
         }
 
     @app.get("/api/events")
@@ -194,9 +201,12 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
         account = await store.setting("account")
         if not account:
             return {"events": [], "next": None}
-        return await store.history(
+        result = await store.history(
             account["id"], {"kind": kind, "subject": subject, "before": before}
         )
+        groups = await store.setting("audience_groups", {})
+        result["events"] = [audience_groups.decorate(event, groups) for event in result["events"]]
+        return result
 
     @app.get("/api/demo")
     async def demo(kind: str = "all", subject: str = "followers", before: int = 0):
@@ -206,7 +216,20 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
             or before < 0
         ):
             raise HTTPException(422, "Invalid demo filter.")
-        return demo_history({"kind": kind, "subject": subject, "before": before})
+        result = demo_history({"kind": kind, "subject": subject, "before": before})
+        groups = await store.setting("audience_groups", {})
+        result["events"] = [audience_groups.decorate(event, groups) for event in result["events"]]
+        return result
+
+    @app.post("/api/audience-groups")
+    async def save_audience_groups(settings: AudiencePreferences):
+        if settings.enabled.keys() - audience_groups.MODULES.keys():
+            raise HTTPException(422, "Unknown audience group.")
+        async with controls:
+            previous = audience_groups.preferences(await store.setting("audience_groups", {}))
+            enabled = {**previous, **settings.enabled}
+            await store.save_setting("audience_groups", enabled)
+        return {"audience_groups": audience_groups.catalog(enabled)}
 
     @app.post("/api/preferences")
     async def preferences(selection: Selection):
@@ -248,7 +271,13 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
             footer_links=[],
             css_paths=[
                 ASSETS / name
-                for name in ("app.css", "timeline.css", "settings.css", "responsive.css")
+                for name in (
+                    "app.css",
+                    "timeline.css",
+                    "constellation.css",
+                    "settings.css",
+                    "responsive.css",
+                )
             ],
             favicon_path=str(ASSETS / "mark.svg"),
             head='<link rel="stylesheet" href="/static/xf/fonts.css">',

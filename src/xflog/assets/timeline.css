@@ -16,213 +16,6 @@
   touch-action: pan-x pan-y pinch-zoom;
   cursor: grab;
 }
-.strand-canvas {
-  position: relative;
-  height: 100%;
-  min-height: 420px;
-  isolation: isolate;
-}
-.strand-art {
-  position: absolute;
-  z-index: 0;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  pointer-events: none;
-  color: var(--accent);
-}
-.strand-art {
-  --strand-cool: hsl(195 100% 64%);
-  --strand-warm: hsl(15 100% 64%);
-  --strand-cool-shade: hsl(195 85% 27%);
-  --strand-warm-shade: hsl(15 80% 28%);
-  --pair-green: hsl(135 100% 67%);
-  --pair-pink: hsl(315 100% 70%);
-}
-.strand-art .strand-cool.thread-body {
-  stroke: var(--strand-cool-shade);
-}
-.strand-art .strand-cool.thread-light {
-  stroke: var(--strand-cool);
-}
-.strand-art .strand-warm.thread-body {
-  stroke: var(--strand-warm-shade);
-}
-.strand-art .strand-warm.thread-light {
-  stroke: var(--strand-warm);
-}
-.strand-art .thread-near.thread-body {
-  stroke-width: 12;
-}
-.strand-art .thread-near.thread-light {
-  stroke-width: 6;
-}
-.strand-art .thread-far.thread-body {
-  stroke-width: 8;
-  opacity: 0.7;
-}
-.strand-art .thread-far.thread-light {
-  stroke-width: 3;
-  opacity: 0.6;
-}
-.strand-art .rungs {
-  stroke: #789bb5;
-  stroke-width: 3.5;
-  opacity: 0.65;
-}
-.strand-art .rungs[data-pair="0"][data-side="0"] {
-  stroke: var(--strand-cool);
-}
-.strand-art .rungs[data-pair="0"][data-side="1"] {
-  stroke: var(--strand-warm);
-}
-.strand-art .rungs[data-pair="1"][data-side="0"] {
-  stroke: var(--pair-green);
-}
-.strand-art .rungs[data-pair="1"][data-side="1"] {
-  stroke: var(--pair-pink);
-}
-.is-overview .strand-art .thread-body {
-  stroke-width: 4;
-}
-.is-overview .strand-art .thread-light {
-  stroke-width: 1.5;
-}
-.is-overview .strand-art .rungs {
-  stroke-width: 0.8;
-  opacity: 0.25;
-}
-.strand-art .node {
-  fill: var(--ground);
-  stroke: var(--ground);
-  stroke-width: 4;
-  transition:
-    transform var(--standard) var(--ease),
-    fill var(--standard);
-  transform-box: fill-box;
-  transform-origin: center;
-}
-.strand-art .node.gain {
-  fill: var(--accent);
-}
-.strand-art .node.lost {
-  stroke: var(--negative);
-  stroke-width: 2.5;
-}
-.strand-art .node.is-selected {
-  transform: scale(1.5);
-}
-.memory {
-  position: absolute;
-  z-index: 1;
-  visibility: hidden;
-  width: 216px;
-  text-align: center;
-  transform: translateX(-50%) translateX(var(--orbit-x, 0px))
-    translateY(var(--orbit-y, 0px))
-    scale(calc((0.88 + var(--focus, 1) * 0.12) * var(--depth-scale, 1)));
-  opacity: calc((0.76 + var(--focus, 1) * 0.24) * var(--edge-opacity, 0));
-  transform-origin: center;
-  transition: opacity var(--quick) var(--ease);
-  scroll-snap-align: center;
-}
-.memory.is-selected {
-  z-index: 2;
-}
-.memory[data-label-visible="false"] {
-  pointer-events: none;
-}
-.memory.is-above {
-  transform-origin: bottom center;
-}
-.memory.is-below {
-  transform-origin: top center;
-}
-.memory-button {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 100%;
-  gap: 0;
-  padding: 8px;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-}
-.memory-avatar {
-  width: 42px;
-  height: 42px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--control);
-  border-radius: 50%;
-  font-size: 13px;
-  margin-bottom: 12px;
-  background: var(--surface);
-  color: var(--muted);
-  transition:
-    transform var(--standard) var(--ease),
-    background var(--standard),
-    color var(--standard);
-}
-.memory.is-selected .memory-avatar {
-  transform: scale(1.3);
-  background: var(--accent);
-  color: var(--ground);
-  border-color: var(--accent);
-}
-.memory.lost.is-selected .memory-avatar {
-  background: var(--negative);
-  border-color: var(--negative);
-}
-.memory-name {
-  font-size: 18px;
-  font-weight: 400;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
-  max-width: 100%;
-}
-.memory-handle {
-  font-size: 13px;
-  color: var(--muted);
-  margin-top: 3px;
-}
-.memory-kind {
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--positive);
-  margin-top: 10px;
-}
-.memory.lost .memory-kind {
-  color: var(--negative);
-}
-.memory-time {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: calc(100% + 8px);
-  width: max-content;
-  max-width: 100%;
-  margin-inline: auto;
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.memory-time span {
-  display: block;
-  font-size: 11px;
-  margin-top: 2px;
-}
-.memory-button:hover .memory-name {
-  color: var(--accent);
-}
-.memory.lost .memory-button:hover .memory-name {
-  color: var(--negative);
-}
 .journey-bar {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -240,15 +33,6 @@
   font-size: 13px;
   color: var(--muted);
   margin-top: 4px;
-}
-.journey-actions {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-}
-.journey-actions .subtle {
-  border: 0;
-  color: var(--muted);
 }
 .journey-help {
   text-align: right;
@@ -493,10 +277,6 @@
 .event-time {
   color: var(--muted);
 }
-#xf[data-motion="off"] .memory,
-#xf[data-motion="off"] .memory-avatar {
-  transition: none;
-}
 @keyframes loading-breath {
   from {
     opacity: 0.45;
@@ -507,25 +287,6 @@
     transform: scale(1);
   }
 }
-@media (prefers-reduced-motion: no-preference) {
-  .is-arriving .memory.is-selected .memory-button {
-    animation: memory-resolve var(--slow) var(--ease) both;
-  }
-}
-@keyframes memory-resolve {
-  from {
-    opacity: 0;
-    transform: translateY(16px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-#xf[data-motion="off"] .thread,
-#xf[data-motion="off"] .memory-button {
-  animation: none;
-}
 .history.horizontal[data-panning="true"] {
   cursor: grabbing;
   user-select: none;
@@ -534,37 +295,9 @@
   cursor: default;
   overflow-x: hidden;
 }
-.history.vertical ~ .strand-controls .zoom-strip,
-.history.vertical ~ .strand-controls .navigator-track {
+.history.vertical ~ .scene-controls .zoom-strip,
+.history.vertical ~ .scene-controls .navigator-track {
   display: none;
-}
-.is-overview .memory:not(.is-selected) {
-  width: 128px;
-}
-.is-overview .memory:not(.is-selected) .memory-button {
-  padding: 6px;
-}
-.is-overview .memory:not(.is-selected) .memory-avatar {
-  width: 28px;
-  height: 28px;
-  margin-bottom: 6px;
-  font-size: 11px;
-}
-.is-overview .memory:not(.is-selected) .memory-name {
-  font-size: 14px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.is-overview .memory:not(.is-selected) .memory-handle,
-.is-overview .memory:not(.is-selected) .memory-kind,
-.is-overview .memory:not(.is-selected) .memory-time {
-  display: none;
-}
-.is-overview .memory.is-selected {
-  opacity: 1;
-  transform: translateX(-50%) translateX(var(--orbit-x, 0px))
-    translateY(var(--orbit-y, 0px)) scale(var(--depth-scale, 1));
 }
 .zoom-strip {
   display: flex;
@@ -676,7 +409,7 @@
   top: 13px;
   border-left: 1px solid var(--accent);
   border-right: 1px solid var(--accent);
-  background: #a8d5f30a;
+  background: rgb(231 202 145 / 4%);
   pointer-events: none;
 }
 #navigator-cursor {
@@ -723,7 +456,7 @@
 #timeline-view {
   position: relative;
 }
-.strand-controls {
+.scene-controls {
   position: absolute;
   bottom: 0;
   left: 0;
@@ -734,7 +467,7 @@
 }
 .controls-content {
   padding-top: 16px;
-  background: #0d0f12f5;
+  background: var(--ground);
   opacity: 0;
   transform: translateY(12px);
   pointer-events: none;
@@ -742,7 +475,7 @@
     opacity var(--standard) var(--ease),
     transform var(--standard) var(--ease);
 }
-.strand-controls.is-open .controls-content,
+.scene-controls.is-open .controls-content,
 .controls-content:focus-within {
   opacity: 1;
   transform: none;
@@ -787,10 +520,10 @@
   order: 1;
 }
 @media (hover: hover) and (pointer: fine) {
-  .strand-controls {
+  .scene-controls {
     pointer-events: auto;
   }
-  .strand-controls:hover .controls-content {
+  .scene-controls:hover .controls-content {
     opacity: 1;
     transform: none;
     pointer-events: auto;
@@ -803,12 +536,4 @@
   .controls-toggle {
     display: grid;
   }
-}
-
-.memory-name,
-.memory-handle,
-.memory-kind,
-.memory-time {
-  background: rgba(13, 15, 18, 0.9);
-  text-shadow: 1px 0 1px #000, -1px 0 1px #000, 0 1px 1px #000, 0 -1px 1px #000, 0 0 5px #000e; /* taste-skill-ignore: requested dark letter halo preserves the continuous strand. */
 }

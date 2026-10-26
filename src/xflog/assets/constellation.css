@@ -1,0 +1,471 @@
+.scene-context {
+  position: absolute;
+  left: 48px;
+  right: 48px;
+  top: 14px;
+  z-index: 5;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  pointer-events: none;
+}
+.scene-context strong {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text);
+  display: block;
+}
+.scene-context #scene-people-count {
+  font-size: 12px;
+  color: var(--faint);
+  display: block;
+  margin-top: 3px;
+}
+#lens-control {
+  pointer-events: auto;
+}
+#lens-trigger {
+  width: 56px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: transparent;
+  color: var(--muted);
+  transition:
+    background var(--quick),
+    border-color var(--quick),
+    color var(--quick);
+}
+#lens-trigger:hover,
+#lens-trigger[aria-expanded="true"] {
+  color: var(--accent);
+  border-color: var(--control);
+  background: var(--surface);
+}
+#lens-trigger svg {
+  width: 20px;
+  height: 20px;
+}
+#lens-trigger .lens-chevron {
+  width: 10px;
+  height: 10px;
+  transition: transform var(--quick) var(--ease);
+}
+#lens-trigger[aria-expanded="true"] .lens-chevron {
+  transform: rotate(180deg);
+}
+#audience-lens {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  width: 200px;
+  max-width: calc(100vw - 32px);
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 12px 40px #0005; /* taste-skill-ignore: floating native popover */
+  animation: lens-arrive var(--quick) var(--ease);
+}
+#audience-lens button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  border-radius: 7px;
+  padding: 10px 12px;
+  text-align: left;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+}
+#audience-lens button:hover,
+#audience-lens button:focus-visible {
+  background: var(--active);
+  color: var(--text);
+}
+#audience-lens button[aria-checked="true"] {
+  color: var(--accent);
+}
+#audience-lens button[aria-checked="true"]::after {
+  content: "✓";
+}
+@keyframes lens-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.constellation-canvas {
+  position: relative;
+  height: 100%;
+  min-height: 400px;
+  isolation: isolate;
+}
+.constellation-sky {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+}
+.constellation-links {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+.sky-star {
+  fill: var(--text);
+  stroke: none;
+  opacity: 0.4;
+}
+.constellation-links path {
+  stroke: var(--muted);
+  stroke-width: 1;
+  opacity: 0.22;
+  fill: none;
+}
+.sequence-spark {
+  fill: var(--accent);
+  stroke: none;
+  opacity: 0.65;
+}
+.sequence-trail {
+  stroke: var(--accent);
+  stroke-width: 2.2;
+  opacity: 0.35;
+}
+.constellation-person {
+  position: static;
+}
+.scene-travel {
+  position: absolute;
+  top: 62%;
+  left: 32px;
+  right: 32px;
+  z-index: 8;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.scene-travel button {
+  min-width: 88px;
+  min-height: 44px;
+  padding: 10px 15px;
+  border: 1px solid var(--control);
+  border-radius: 24px;
+  background: var(--ground);
+  color: var(--text);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity var(--quick),
+    transform var(--standard) var(--ease),
+    visibility 0s;
+}
+.scene-travel button:hover {
+  border-color: var(--accent);
+}
+.scene-travel button.is-unavailable {
+  opacity: 0 !important;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(-10px);
+  transition:
+    opacity var(--quick),
+    transform var(--standard) var(--ease),
+    visibility 0s var(--quick);
+}
+.scene-travel button:last-child.is-unavailable {
+  transform: translateX(10px);
+}
+.constellation-star {
+  position: absolute;
+  width: 48px;
+  height: 48px;
+  transform: translate(-50%, -50%);
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  z-index: 2;
+}
+.constellation-star.positive {
+  color: var(--positive);
+}
+.constellation-star.negative {
+  color: var(--negative);
+}
+.star-core {
+  width: 11px;
+  height: 11px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  background: var(--ground);
+  transition:
+    transform var(--standard) var(--ease),
+    background var(--quick);
+}
+.constellation-star:hover .star-core {
+  transform: scale(1.4);
+  background: currentColor;
+}
+.star-initials {
+  display: none;
+}
+.is-selected .constellation-star {
+  width: 58px;
+  height: 58px;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  background: var(--surface);
+}
+.is-selected .star-core {
+  position: absolute;
+  inset: -10px;
+  width: auto;
+  height: auto;
+  border: 1px solid var(--accent);
+  opacity: 0.3;
+}
+.is-selected .star-initials {
+  display: block;
+  font-size: 15px;
+  color: var(--text);
+}
+.star-label {
+  visibility: hidden;
+  position: absolute;
+  transform: translateX(-50%);
+  z-index: 4;
+  width: 126px;
+  padding: 0 4px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: center;
+  line-height: 1.4;
+}
+.star-label strong {
+  font-size: 14px;
+  font-weight: 400;
+  display: block;
+  overflow-wrap: anywhere;
+  text-shadow: 0 1px 4px #000;
+}
+.star-label .star-handle {
+  font-size: 11px;
+  color: var(--muted);
+  display: block;
+  overflow-wrap: anywhere;
+}
+.star-label .star-kind,
+.star-label time,
+.star-label .star-records {
+  display: none;
+}
+.is-selected .star-label {
+  width: 190px;
+  z-index: 6;
+}
+.is-selected .star-label strong {
+  font-size: 20px;
+}
+.is-selected .star-label .star-handle {
+  font-size: 12px;
+  margin-top: 4px;
+}
+.is-selected .star-label .star-kind {
+  display: block;
+  font-size: 12px;
+  margin-top: 10px;
+}
+.is-selected .star-label .star-kind.positive {
+  color: var(--positive);
+}
+.is-selected .star-label .star-kind.negative {
+  color: var(--negative);
+}
+.is-selected .star-label time {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 8px;
+}
+.is-selected .star-label time span {
+  display: block;
+  margin-top: 2px;
+}
+.is-selected .star-label .star-records {
+  display: block;
+  font-size: 11px;
+  color: var(--faint);
+  margin-top: 8px;
+}
+.star-label strong,
+.star-label span,
+.star-label time {
+  background: var(--ground);
+  box-decoration-break: clone;
+}
+.constellation-group {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  width: 150px;
+  min-height: 136px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  padding: 12px;
+  z-index: 5;
+  transition: transform var(--quick) var(--ease);
+}
+.constellation-group:hover {
+  transform: translate(-50%, -50%) scale(1.04);
+}
+.cluster-count {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 27px;
+  color: var(--accent);
+  margin-bottom: 14px;
+  background: var(--surface);
+}
+.constellation-group.positive .cluster-count {
+  color: var(--positive);
+}
+.constellation-group.negative .cluster-count {
+  color: var(--negative);
+}
+.constellation-group strong {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text);
+  max-width: 140px;
+  overflow-wrap: anywhere;
+}
+.constellation-group > span:last-child {
+  font-size: 11px;
+  margin-top: 3px;
+}
+.is-group-overview .constellation-star {
+  pointer-events: none;
+  opacity: 0.35;
+  width: 48px;
+  height: 48px;
+  border: 0;
+  background: transparent;
+}
+.is-group-overview .star-initials {
+  display: none;
+}
+.is-group-overview .star-core {
+  position: static;
+  width: 6px;
+  height: 6px;
+  border: 0;
+  background: currentColor;
+  opacity: 0.6;
+}
+#xf[data-motion="off"] .star-core {
+  transition: none;
+}
+#audience-group-options {
+  margin-top: 12px;
+}
+#audience-group-options .switch-row {
+  gap: 20px;
+  padding: 13px 0;
+}
+#audience-group-options .switch-row strong {
+  font-weight: 400;
+}
+#audience-group-options .switch-row small {
+  max-width: 290px;
+  line-height: 1.6;
+  font-size: 12px;
+  color: var(--faint);
+}
+@media (max-width: 1000px) {
+  .scene-context {
+    left: 28px;
+    right: 28px;
+  }
+}
+@media (max-width: 680px) {
+  .scene-travel {
+    left: 20px;
+    right: 20px;
+    top: 66%;
+  }
+  .scene-context {
+    left: 20px;
+    right: 20px;
+    top: 12px;
+    gap: 10px;
+  }
+  .scene-context #scene-people-count {
+    max-width: 150px;
+    font-size: 11px;
+  }
+  .constellation-group {
+    width: 142px;
+    min-height: 110px;
+    padding: 6px;
+  }
+  .cluster-count {
+    width: 48px;
+    height: 48px;
+    font-size: 23px;
+    margin-bottom: 10px;
+  }
+  .is-selected .star-label strong {
+    font-size: 18px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .constellation-star,
+  .star-core,
+  .constellation-group {
+    transition: none;
+  }
+}

@@ -13,6 +13,9 @@
     status: null,
     csrf: "",
     generation: 0,
+    groups: [],
+    lens: "activity",
+    groupSignature: "",
   };
   const pendingActions = new WeakSet();
   const esc = (value) =>
@@ -64,36 +67,46 @@
       .map((word) => word[0])
       .join("")
       .toUpperCase();
-  const { createStrand } = await import("/static/xf/strand.js");
-  const { normalizeTwistSpeed } = await import("/static/xf/strand-life.js");
-  const { requestBrowserNotifications, notifyActivity, clearActivityNotification, activityDelta } =
-    await import("/static/xf/notifications.js");
+  const { createConstellation } = await import("/static/xf/constellation.js");
+  const { normalizeMotionSpeed } =
+    await import("/static/xf/constellation-layout.js");
+  const {
+    requestBrowserNotifications,
+    notifyActivity,
+    clearActivityNotification,
+    activityDelta,
+  } = await import("/static/xf/notifications.js");
   window.addEventListener("pagehide", clearActivityNotification);
-  function setTwistSpeed(value) {
-    const speed = normalizeTwistSpeed(value);
-    root.dataset.twistSpeed = String(speed);
-    $("#twist-speed").value = speed;
-    const duration = Number((12 / speed).toFixed(1));
-    $("#twist-speed-value").textContent = `${speed}× · ${duration}s per turn`;
-    $("#twist-speed").setAttribute(
+  function setMotionSpeed(value) {
+    const speed = normalizeMotionSpeed(value);
+    root.dataset.motionSpeed = String(speed);
+    $("#motion-speed").value = speed;
+    $("#motion-speed-value").textContent = `${speed}×`;
+    $("#motion-speed").setAttribute(
       "aria-valuetext",
-      `${speed} times, ${duration} seconds per turn`,
+      `${speed} times ambient motion speed`,
     );
   }
   try {
-    setTwistSpeed(localStorage.getItem("xflog.twist-speed") ?? 1);
+    setMotionSpeed(
+      localStorage.getItem("xflog.motion-speed") ??
+        localStorage.getItem("xflog.twist-speed") ??
+        1,
+    );
   } catch {
-    setTwistSpeed(1);
+    setMotionSpeed(1);
   }
-  $("#twist-speed").addEventListener("input", (event) => {
-    setTwistSpeed(event.currentTarget.value);
+  $("#motion-speed").addEventListener("input", (event) => {
+    setMotionSpeed(event.currentTarget.value);
     try {
-      localStorage.setItem("xflog.twist-speed", root.dataset.twistSpeed);
+      localStorage.setItem("xflog.motion-speed", root.dataset.motionSpeed);
     } catch {
       // Restricted browser storage must not prevent changing the current speed.
     }
   });
-  const strand = createStrand({
+  const { createAudienceControls, resolveLens } =
+    await import("/static/xf/audience-ui.js");
+  const scene = createConstellation({
     element: $("#history"),
     root,
     escape: esc,
@@ -208,11 +221,14 @@
     $("#tracking-button").textContent = active
       ? "Pause tracking"
       : "Start tracking →";
-    $("#tracking-button").disabled = state.demo || pendingActions.has($("#tracking-button"));
+    $("#tracking-button").disabled =
+      state.demo || pendingActions.has($("#tracking-button"));
     const account = status.account;
     $("#scope-name").textContent = state.demo
       ? "Mira Studio"
-      : account?.name || account?.username || (account?.id ? `Account ${account.id}` : "Your workspace");
+      : account?.name ||
+        account?.username ||
+        (account?.id ? `Account ${account.id}` : "Your workspace");
     $("#scope-handle").textContent = state.demo
       ? "@mirastudio · demo"
       : account?.username
@@ -227,7 +243,10 @@
     else if (["reconnecting", "reconnect", "error"].includes(status.state))
       notice(status.message);
     else if (status.preference_warning) notice(status.preference_warning);
-    else if (previous?.preference_warning && $("#notice").textContent === previous.preference_warning)
+    else if (
+      previous?.preference_warning &&
+      $("#notice").textContent === previous.preference_warning
+    )
       notice("");
     const newActivity = state.demo ? 0 : activityDelta(previous, status);
     if (newActivity) {
@@ -236,7 +255,8 @@
       );
       notifyActivity(newActivity);
     }
-    if (state.demo || !status.selection.notifications) clearActivityNotification();
+    if (state.demo || !status.selection.notifications)
+      clearActivityNotification();
     if (
       previous &&
       !previous.connected &&
@@ -245,6 +265,38 @@
     )
       notice(status.message);
     if (!$("#profile-view").hidden) fillProfileStatus(status);
+    renderAudienceGroups(status.audience_groups || []);
+  }
+  const groupControls = createAudienceControls({
+    root,
+    onToggle: (group, toggle) =>
+      action(toggle, async () => {
+        try {
+          const result = await api("/api/audience-groups", {
+            enabled: { [group.key]: toggle.checked },
+          });
+          renderAudienceGroups(result.audience_groups);
+          await load();
+          announce("Audience groups saved. No extra X requests are made.");
+        } catch (error) {
+          toggle.checked = group.enabled;
+          throw error;
+        }
+      }),
+    onLens: (lens) => {
+      state.lens = lens;
+      groupControls.render(state.groups, lens);
+      scene.configure(state.groups, lens);
+    },
+  });
+  function renderAudienceGroups(groups) {
+    const signature = JSON.stringify(groups);
+    if (signature === state.groupSignature) return;
+    state.groupSignature = signature;
+    state.lens = resolveLens(groups, state.lens, state.groups);
+    state.groups = groups;
+    groupControls.render(groups, state.lens);
+    scene.configure(groups, state.lens);
   }
   function renderSummary(counts) {
     const subscription = state.subject === "subscriptions";
@@ -270,6 +322,8 @@
   }
   function renderEvents() {
     const list = $("#history");
+    $(".scene-context").hidden =
+      state.layout !== "horizontal" || !state.events.length;
     list.className = `history ${state.layout}`;
     list.setAttribute(
       "aria-label",
@@ -280,7 +334,8 @@
       let title = "Your next chapter starts here.";
       let copy =
         "Configure the instance, then start tracking to record follower changes.";
-      strand.clear();
+      scene.clear();
+      $("#scene-people-count").textContent = "";
       if (state.filter !== "all") {
         title = "No matching events yet.";
         copy = "Try All events, or return after more activity is received.";
@@ -302,9 +357,9 @@
         .querySelector("[data-empty-demo]")
         ?.addEventListener("click", () => setDemo(true));
     } else if (state.layout === "horizontal") {
-      strand.render(state.events, state.selected);
+      scene.render(state.events, state.selected);
     } else {
-      strand.clear();
+      scene.clear();
       let prior = "";
       list.innerHTML = state.events
         .map((event) => {
@@ -329,8 +384,6 @@
     $("#load-more").hidden = !state.next;
     $("#memory-scrubber").max = Math.max(0, state.events.length - 1);
     $("#memory-scrubber").disabled = !state.events.length;
-    $("#memory-previous").disabled = !state.events.length;
-    $("#memory-next").disabled = !state.events.length;
     $("#view-memory").disabled = !state.events.length;
     $("#jump-latest").disabled = !state.events.length;
     if (!state.events.length) {
@@ -357,7 +410,7 @@
     const detail = `<h2>Event details</h2><div class="detail-person"><span class="avatar" aria-hidden="true">${esc(initials(event))}</span><h3>${esc(event.name || event.handle || "X account")}</h3><p>${esc(event.handle ? "@" + event.handle : "ID " + event.actor_id)}</p></div><div class="detail-kind ${gained(event) ? "" : "lost"}"><span aria-hidden="true">${gained(event) ? "↗" : "↘"}</span>${eventLabel(event)}</div><dl class="detail-data"><dt>Provider event time</dt><dd>${event.provider_at ? esc(fullFormat.format(new Date(event.provider_at))) : "Not supplied by X"}</dd><dt>Received on this device</dt><dd>${esc(fullFormat.format(new Date(event.received_at)))}</dd><dt>Account ID</dt><dd>${esc(event.actor_id)}</dd></dl>${safeLink ? `<a class="detail-profile" href="${esc(event.profile_url)}" target="_blank" rel="noopener noreferrer">View profile on X <span aria-hidden="true">↗</span></a>` : ""}<p class="detail-small">${event.kind === "subscriptions.unsubscribe" ? "This event records subscription expiry, not cancellation." : "Provider time is shown only when X supplies it. Received time is when XFlog captured the event."}${state.demo ? " Synthetic demo event." : ""}</p>`;
     $("#detail-panel").innerHTML = detail;
     $("#mobile-detail").innerHTML = detail;
-    strand.select(identity);
+    scene.select(identity);
     const index = state.events.findIndex((item) => item.event_id === identity);
     $("#journey-date").textContent = dateFormat.format(displayDate(event));
     $("#journey-position").textContent =
@@ -367,8 +420,6 @@
       "aria-valuetext",
       `${event.name || event.handle || "X account"}, ${eventLabel(event)}, ${dateFormat.format(displayDate(event))}`,
     );
-    $("#memory-previous").disabled = index <= 0;
-    $("#memory-next").disabled = index >= state.events.length - 1;
     $("#view-memory").disabled = false;
     if (openMobile && !$("#detail-dialog").open)
       $("#detail-dialog").showModal();
@@ -442,9 +493,8 @@
       ? `${status.account.name || status.account.username || "X account"} · ${status.account.username ? "@" + status.account.username : status.account.id}`
       : "No account configured.";
     const missing = status.missing_settings || [];
-    $("#profile-state").textContent = !missing.length && status.connected
-      ? "Configured"
-      : "Setup missing";
+    $("#profile-state").textContent =
+      !missing.length && status.connected ? "Configured" : "Setup missing";
     $("#profile-message").textContent = missing.length
       ? "Add the missing settings to your server configuration, then restart XFlog."
       : status.preference_warning || status.message;
@@ -466,7 +516,8 @@
       path.textContent = status.environment_file;
       environment.append(document.createTextNode("Configuration file: "), path);
     } else {
-      environment.textContent = "Configuration source: server environment (.env path not provided).";
+      environment.textContent =
+        "Configuration source: server environment (.env path not provided).";
     }
   }
   function fillProfile() {
@@ -477,7 +528,6 @@
       $(`#preferences-form [name="${key}"]`).checked = Boolean(
         status.selection[key],
       );
-
   }
   function startDialog() {
     if (state.demo) return;
@@ -492,7 +542,11 @@
       return;
     }
     if (!state.status?.connected || state.status?.missing_settings?.length) {
-      notice(state.status?.setup_message || state.status?.message || "Configure all required X credentials and restart.");
+      notice(
+        state.status?.setup_message ||
+          state.status?.message ||
+          "Configure all required X credentials and restart.",
+      );
       return;
     }
     dialog(
@@ -580,8 +634,16 @@
       if (!result.saved) fillProfile();
       notice(result.message);
       permission.then((value) => {
-        if (result.saved && value && value !== "granted" && state.status?.selection.notifications)
-          notice(result.message + " Browser alerts are blocked or unavailable; in-app notifications still work.");
+        if (
+          result.saved &&
+          value &&
+          value !== "granted" &&
+          state.status?.selection.notifications
+        )
+          notice(
+            result.message +
+              " Browser alerts are blocked or unavailable; in-app notifications still work.",
+          );
       });
     });
   });
@@ -605,47 +667,35 @@
     $("#explore-dialog .panel-body").scrollTop = 0;
   });
   $("#controls-toggle").addEventListener("click", (event) => {
-    const open = $(".strand-controls").classList.toggle("is-open");
+    const open = $(".scene-controls").classList.toggle("is-open");
     event.currentTarget.setAttribute("aria-expanded", String(open));
   });
-  $(".strand-controls").addEventListener("keydown", (event) => {
+  $(".scene-controls").addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
-    $(".strand-controls").classList.remove("is-open");
+    $(".scene-controls").classList.remove("is-open");
     $("#controls-toggle").setAttribute("aria-expanded", "false");
     $("#history").focus({ preventScroll: true });
   });
   $("#view-memory").addEventListener("click", () => {
     if (state.selected) selectEvent(state.selected, true);
   });
-  $("#memory-previous").addEventListener("click", () => moveMemory(-1));
-  $("#memory-next").addEventListener("click", () => moveMemory(1));
-  $("#jump-latest").addEventListener("click", () =>
-    moveMemory(-state.events.length),
-  );
+  $("#memory-previous").addEventListener("click", () => scene.travel(-1));
+  $("#memory-next").addEventListener("click", () => scene.travel(1));
+  $("#jump-latest").addEventListener("click", () => {
+    if (state.layout === "horizontal") scene.seek(0);
+    else if (state.events[0]) {
+      selectEvent(state.events[0].event_id);
+      $("#history")
+        .querySelector("[data-event]")
+        .scrollIntoView({ block: "nearest" });
+    }
+  });
   $("#memory-scrubber").addEventListener("input", (event) => {
     const index = Number(event.target.value);
-    if (state.layout === "horizontal") strand.seek(index, "instant");
+    if (state.layout === "horizontal") scene.seek(index);
     else if (state.events[index]) selectEvent(state.events[index].event_id);
   });
-  function moveMemory(delta) {
-    if (state.layout === "horizontal") strand.move(delta);
-    else {
-      const index = Math.max(
-        0,
-        Math.min(
-          state.events.length - 1,
-          state.events.findIndex((event) => event.event_id === state.selected) +
-            delta,
-        ),
-      );
-      if (state.events[index]) {
-        selectEvent(state.events[index].event_id);
-        $("#history")
-          .querySelectorAll("[data-event]")
-          [index].scrollIntoView({ block: "nearest", behavior: "auto" });
-      }
-    }
-  }
+
   $("#motion-toggle").addEventListener("click", (event) => {
     const enabled = root.dataset.motion !== "on";
     root.dataset.motion = enabled ? "on" : "off";
@@ -656,7 +706,8 @@
   });
   async function poll() {
     if (!root.isConnected) {
-      strand.destroy();
+      scene.destroy();
+      groupControls.destroy();
       return;
     }
     if (!document.hidden || state.status?.selection.notifications) {

@@ -370,7 +370,8 @@ class Collector:
                             self.message = "Listening for incoming activity."
                             await self.store.end_gap(account["id"])
                             continue
-                        event = parse_event(raw, account["id"])
+                        groups = await self.store.setting("audience_groups", {})
+                        event = parse_event(raw, account["id"], groups)
                         selection = await self.store.setting("selection", DEFAULT_SELECTION)
                         if (
                             event
