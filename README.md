@@ -9,6 +9,10 @@ The current X UI shows unfollow metrics but does not have a direct way to view u
 > [!NOTE]
 > It doesn’t reconstruct past activity. Live tracking requires X API credits.
 
+![XFlog’s constellation timeline with demo profiles, selected-person details and activity statistics](assets/readme/constellation.jpg)
+
+*Screenshots use offline demo data. No real X account is connected.*
+
 ## X prerequisites
 
 **You can try the demo without an X developer account, tokens or API charges.** To track a real account, you’ll need an X developer app and the following settings:
@@ -247,6 +251,10 @@ Open **Profile** using the person icon near the top right. Choose what you want 
 | **Activity notifications** | Off | Shows a notice when new events arrive. Can also show a browser alert while XFlog is open. |
 | **Allow Follow/Unfollow** | Off | Adds a Follow/Unfollow button to a person’s details and, when there is room, their readout below the stars. Needs a user access token with permission to follow accounts. Unfollow asks you to confirm. |
 
+![Profile settings showing follower tracking, paid subscriptions, notifications and optional Follow/Unfollow](assets/readme/profile-preferences.jpg)
+
+*Profile shown without X credentials; Follow/Unfollow stays unavailable.*
+
 **Saving does not pause tracking.** If XFlog is already recording, it keeps recording with your new choices. If you paused it earlier, saving does not start it again. To stop recording everything, choose **Pause tracking** in timeline settings under **Workspace** before turning both tracking options off.
 
 To record again, enable at least one tracking option, save, then choose **Start tracking** under **Workspace**.
@@ -276,6 +284,8 @@ The **sliders icon** near the top right opens timeline settings. The viewing opt
 | **Layout** | Choose **Constellation** for one star per person, or **Journal** to read each recorded event in a list. |
 | **Ambient motion** | Turn the moving light trails and occasional shooting stars on or off. Your device’s reduced-motion setting is respected. |
 | **Motion speed** | Slow down or speed up the animation, from **0.25× to 2×**. This does not change how quickly XFlog receives events. |
+
+![Timeline settings with audience and event filters, layout choices and ambient motion controls](assets/readme/timeline-settings.jpg)
 
 In the constellation, select a star to choose a person, then select their name or the readout below to open the event details. The side arrows move one person older or newer. Scroll up for older history and down for newer history, or use the long slider at the bottom. The smaller slider controls zoom and starts at **80%**. Journal uses normal up-and-down scrolling and hides these sliders.
 
@@ -308,6 +318,10 @@ Groups help you explore patterns without paying for more profile lookups. Open *
 | **Profile location** | Off | Similar profile location labels together, with simple variations such as **NYC → New York City** and **Bangalore → Bengaluru** cleaned up. |
 
 Zoom out in Constellation to see groups of stars. In Journal, the same choice gives you sections you can open or collapse. When there is room, enabled Verification, Account size and Account age also add facts to the selected person’s readout. With Verification enabled, known verified accounts get a checkmark beside their name in the constellation and readout.
+
+![Journal grouped by Activity, with Followed you collapsed and Unfollowed events open](assets/readme/journal-groups.jpg)
+
+*Collapse a section to focus on another type of activity.*
 
 **Missing details appear as Unknown.** Account size, age, verification and location use only details included with new events while that group is enabled. Turning a group on does not look up profiles or fill in missing details in old records. Turning it off keeps your saved history.
 
