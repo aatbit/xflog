@@ -24,7 +24,7 @@ export function createConstellation({
   let events = [],
     selected = null,
     modules = [],
-    lens = "activity",
+    lens = "none",
     geometry = null;
   let zoom = 0.55,
     frame = 0,

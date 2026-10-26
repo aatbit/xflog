@@ -15,16 +15,21 @@ const { resolveLens } = await import(new URL("audience-ui.js", base));
 const modules = JSON.parse(process.argv[3]);
 const inactive = modules.map((module) => ({ ...module, enabled: false }));
 assert.equal(
-  resolveLens(modules, "none", inactive),
-  "activity",
-  "Re-enabling groups restores Activity when no explicit ungrouped choice was available.",
+  resolveLens(modules, "none"),
+  "none",
+  "The grouping picker starts ungrouped even when Activity is available.",
 );
 assert.equal(
-  resolveLens(modules, "none", modules),
+  resolveLens(modules, "none"),
   "none",
   "An explicit Ungrouped lens survives optional-group changes.",
 );
-assert.equal(resolveLens(inactive, "activity", modules), "none");
+assert.equal(resolveLens(inactive, "activity"), "none");
+assert.equal(
+  resolveLens(modules, "activity"),
+  "activity",
+  "An explicit grouping choice stays selected while enabled.",
+);
 const events = Array.from({ length: 50 }, (_, index) => ({
   actor_id: String(index % 19),
   event_id: String(index),

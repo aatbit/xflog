@@ -1,13 +1,7 @@
-export function resolveLens(groups, current, previous) {
-  const enabled = groups.filter((group) => group.enabled);
-  if (current === "none" && previous.some((group) => group.enabled))
-    return "none";
-  if (enabled.some((group) => group.key === current)) return current;
-  return (
-    enabled.find((group) => group.key === "activity")?.key ||
-    enabled[0]?.key ||
-    "none"
-  );
+export function resolveLens(groups, current) {
+  return groups.some((group) => group.enabled && group.key === current)
+    ? current
+    : "none";
 }
 
 export function createAudienceControls({ root, onToggle, onLens }) {
@@ -62,12 +56,9 @@ export function createAudienceControls({ root, onToggle, onLens }) {
   return {
     render(groups, lens) {
       const enabled = groups.filter((group) => group.enabled);
-      $("#lens-control").hidden = !enabled.some(
-        (group) => group.key !== "activity",
-      );
+      $("#lens-control").hidden = !enabled.length;
       $("#scene-lens-label").textContent =
-        enabled.find((group) => group.key === lens)?.label ||
-        "Recorded audience";
+        enabled.find((group) => group.key === lens)?.label || "Ungrouped";
       trigger.setAttribute(
         "aria-label",
         `Choose audience lens, current: ${enabled.find((group) => group.key === lens)?.label || "Ungrouped"}`,

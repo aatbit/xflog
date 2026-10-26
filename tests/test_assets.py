@@ -69,6 +69,24 @@ def test_selected_constellation_record_is_the_one_opened():
     assert result.returncode == 0, result.stderr
 
 
+def test_journal_groups_keep_records_order_and_collapsed_selection():
+    import json
+
+    from xflog import audience_groups
+
+    result = subprocess.run(
+        [
+            "node",
+            str(Path(__file__).with_name("journal_check.mjs")),
+            str(ASSETS),
+            json.dumps(audience_groups.catalog({"account-size": True})),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_browser_notification_permission_and_fallbacks():
     result = subprocess.run(
         [

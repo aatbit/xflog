@@ -253,9 +253,11 @@ Enable **Activity notifications** for in-app notices and browser alerts while th
 
 The constellation shows one star per person in the history you have loaded. Select a star to see an event, or use **Journal** in timeline settings to browse every recorded event. Scroll up or left for older encounters, down or right for newer ones. Light trails travel from older to newer encounters. Dragging, scrolling and the manual scrubber ease through the scene; reduced motion keeps movement immediate. The side arrows stay visible while there is room to travel; zoom out to **Fit** to see the whole loaded audience.
 
-**Activity** is the default lens. Zooming out gathers people by their latest recorded activity, such as followed or unfollowed. It uses events XFlog already records and adds no X API requests or charges.
+**Ungrouped** is selected when you open XFlog. Use the spyglass button to choose a grouping in either view. **Activity** is enabled by default and uses events XFlog already records, with no additional X API requests or charges.
 
-In timeline settings, open **Audience Groups** to turn optional groups on or off. **Account size** starts off. When enabled, it saves follower counts only when X includes them with a new event; it never looks up profiles. An older event or a missing count appears as **Unknown**. Enable it to reveal the spyglass button, which opens choices for Activity, Account size and Ungrouped.
+In the constellation, zooming out gathers people by their latest recorded activity. In **Journal**, the same lens creates collapsible sections with event counts; events keep their existing order inside each section. A person’s follow and unfollow records can appear in different sections.
+
+In timeline settings, open **Audience Groups** to turn optional groups on or off. **Account size** starts off. When enabled, it saves follower counts only when X includes them with a new event; it never looks up profiles. An older event or a missing count appears as **Unknown**. Enable it to add Account size to the spyglass picker alongside Activity and Ungrouped.
 
 These groups describe the loaded history, not a complete or current follower list. Loading older events can add people or fill out a group. Turning a group off stops its metadata capture and removes its lens; your recorded history stays saved. Group changes save automatically and keep the listener running.
 

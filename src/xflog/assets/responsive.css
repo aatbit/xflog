@@ -216,7 +216,10 @@
     font-size: 12px;
   }
   .history.vertical {
-    padding: 12px 20px 24px;
+    padding: 4px 20px 190px;
+  }
+  #timeline-view[data-layout="vertical"] .scene-context {
+    width: calc(100% - 40px);
   }
   .date-group {
     padding-left: 24px;

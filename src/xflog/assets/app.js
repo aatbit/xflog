@@ -14,7 +14,7 @@
     csrf: "",
     generation: 0,
     groups: [],
-    lens: "activity",
+    lens: "none",
     groupSignature: "",
   };
   const pendingActions = new WeakSet();
@@ -116,6 +116,18 @@
     time: timeFormat,
     gained,
     onSelect: (identity) => selectEvent(identity),
+    onOpen: (identity) => selectEvent(identity, true),
+  });
+  const { createJournal } = await import("/static/xf/journal.js");
+  const journal = createJournal({
+    element: $("#history"),
+    escape: esc,
+    date: dateFormat,
+    time: timeFormat,
+    displayDate,
+    gained,
+    label: eventLabel,
+    initials,
     onOpen: (identity) => selectEvent(identity, true),
   });
   const announce = (text) => {
@@ -287,16 +299,18 @@
       state.lens = lens;
       groupControls.render(state.groups, lens);
       scene.configure(state.groups, lens);
+      if (state.layout === "vertical") renderEvents();
     },
   });
   function renderAudienceGroups(groups) {
     const signature = JSON.stringify(groups);
     if (signature === state.groupSignature) return;
     state.groupSignature = signature;
-    state.lens = resolveLens(groups, state.lens, state.groups);
+    state.lens = resolveLens(groups, state.lens);
     state.groups = groups;
     groupControls.render(groups, state.lens);
     scene.configure(groups, state.lens);
+    if (state.layout === "vertical") renderEvents();
   }
   function renderSummary(counts) {
     const subscription = state.subject === "subscriptions";
@@ -322,8 +336,8 @@
   }
   function renderEvents() {
     const list = $("#history");
-    $(".scene-context").hidden =
-      state.layout !== "horizontal" || !state.events.length;
+    $(".scene-context").hidden = !state.events.length;
+    $("#timeline-view").dataset.layout = state.layout;
     list.className = `history ${state.layout}`;
     list.setAttribute(
       "aria-label",
@@ -360,24 +374,13 @@
       scene.render(state.events, state.selected);
     } else {
       scene.clear();
-      let prior = "";
-      list.innerHTML = state.events
-        .map((event) => {
-          const date = dateFormat.format(displayDate(event));
-          const heading =
-            date !== prior ? `<div class="date-group">${esc(date)}</div>` : "";
-          prior = date;
-          const lost = !gained(event);
-          return `${heading}<article class="event ${lost ? "lost" : "gain"}"><span class="event-dot" aria-hidden="true"></span><button type="button" class="event-button" data-event="${esc(event.event_id)}" aria-pressed="${state.selected === event.event_id}"><span class="avatar" aria-hidden="true">${esc(initials(event))}</span><span class="event-identity"><span class="event-name">${esc(event.name || event.handle || "X account")}</span><span class="event-handle">${esc(event.handle ? "@" + event.handle : "ID " + event.actor_id)}</span></span><span class="event-meta"><span class="event-kind"><span aria-hidden="true">${lost ? "↘" : "↗"}</span>${eventLabel(event)}</span><span class="event-time">${esc(timeFormat.format(displayDate(event)))}${event.provider_at ? "" : " · received"}</span></span></button></article>`;
-        })
-        .join("");
-      list
-        .querySelectorAll("[data-event]")
-        .forEach((button) =>
-          button.addEventListener("click", () =>
-            selectEvent(button.dataset.event, true),
-          ),
-        );
+      journal.render(state.events, {
+        selected: state.selected,
+        modules: state.groups,
+        lens: state.lens,
+      });
+      $("#scene-people-count").textContent =
+        `${state.events.length} ${state.events.length === 1 ? "event" : "events"} in loaded history`;
     }
     $("#history-count").textContent =
       `${state.events.length} ${state.events.length === 1 ? "event" : "events"} loaded`;
@@ -410,7 +413,7 @@
     const detail = `<h2>Event details</h2><div class="detail-person"><span class="avatar" aria-hidden="true">${esc(initials(event))}</span><h3>${esc(event.name || event.handle || "X account")}</h3><p>${esc(event.handle ? "@" + event.handle : "ID " + event.actor_id)}</p></div><div class="detail-kind ${gained(event) ? "" : "lost"}"><span aria-hidden="true">${gained(event) ? "↗" : "↘"}</span>${eventLabel(event)}</div><dl class="detail-data"><dt>Provider event time</dt><dd>${event.provider_at ? esc(fullFormat.format(new Date(event.provider_at))) : "Not supplied by X"}</dd><dt>Received on this device</dt><dd>${esc(fullFormat.format(new Date(event.received_at)))}</dd><dt>Account ID</dt><dd>${esc(event.actor_id)}</dd></dl>${safeLink ? `<a class="detail-profile" href="${esc(event.profile_url)}" target="_blank" rel="noopener noreferrer">View profile on X <span aria-hidden="true">↗</span></a>` : ""}<p class="detail-small">${event.kind === "subscriptions.unsubscribe" ? "This event records subscription expiry, not cancellation." : "Provider time is shown only when X supplies it. Received time is when XFlog captured the event."}${state.demo ? " Synthetic demo event." : ""}</p>`;
     $("#detail-panel").innerHTML = detail;
     $("#mobile-detail").innerHTML = detail;
-    scene.select(identity);
+    if (state.layout === "horizontal") scene.select(identity);
     const index = state.events.findIndex((item) => item.event_id === identity);
     $("#journey-date").textContent = dateFormat.format(displayDate(event));
     $("#journey-position").textContent =
@@ -685,15 +688,16 @@
     if (state.layout === "horizontal") scene.seek(0);
     else if (state.events[0]) {
       selectEvent(state.events[0].event_id);
-      $("#history")
-        .querySelector("[data-event]")
-        .scrollIntoView({ block: "nearest" });
+      journal.reveal(state.events[0].event_id);
     }
   });
   $("#memory-scrubber").addEventListener("input", (event) => {
     const index = Number(event.target.value);
     if (state.layout === "horizontal") scene.seek(index);
-    else if (state.events[index]) selectEvent(state.events[index].event_id);
+    else if (state.events[index]) {
+      selectEvent(state.events[index].event_id);
+      journal.reveal(state.events[index].event_id);
+    }
   });
 
   $("#motion-toggle").addEventListener("click", (event) => {

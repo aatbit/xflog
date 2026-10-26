@@ -180,7 +180,73 @@
 .history.vertical {
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 24px max(24px, calc((100% - 780px) / 2)) 32px;
+  padding: 8px max(24px, calc((100% - 780px) / 2)) 190px;
+}
+#timeline-view[data-layout="vertical"] .scene-context {
+  position: relative;
+  inset: auto;
+  width: min(780px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 16px 0 12px;
+  flex-shrink: 0;
+}
+.journal-group {
+  border-top: 1px solid var(--border);
+  margin-bottom: 20px;
+}
+.journal-group summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 56px;
+  padding: 12px 0;
+  list-style: none;
+  cursor: pointer;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--ground);
+}
+.journal-group summary::-webkit-details-marker {
+  display: none;
+}
+.journal-group-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+.journal-group.positive .journal-group-name {
+  color: var(--positive);
+}
+.journal-group.negative .journal-group-name {
+  color: var(--negative);
+}
+.journal-group-count {
+  color: var(--faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.journal-group summary svg {
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+  transition: transform var(--quick) var(--ease);
+  flex-shrink: 0;
+}
+.journal-group[open] > summary svg {
+  transform: rotate(90deg);
+}
+#xf .journal-group summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+.journal-group .date-group:first-child {
+  padding-top: 8px;
+}
+.journal-group .event:last-child:before {
+  bottom: 20px;
 }
 .date-group {
   font-size: 13px;

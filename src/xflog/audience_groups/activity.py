@@ -9,7 +9,7 @@ register(
     AudienceGroup(
         key="activity",
         label="Activity",
-        description="Arrange people by their latest event in the loaded history.",
+        description="Group by follows, unfollows and subscription changes.",
         default_enabled=True,
         buckets=(
             Bucket("follow.follow", "Followed you", "positive"),

@@ -1,3 +1,5 @@
+import { groupEvents } from "./audience-groups.js";
+
 export const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 
 export function flowStep(current, target, elapsed) {
@@ -80,21 +82,18 @@ export function constellationLayout({
   lens,
 }) {
   const people = peopleFromEvents(events);
-  const module = modules.find((item) => item.key === lens && item.enabled);
-  const definitions = module?.buckets || [
-    { key: "all", label: "Loaded audience", tone: "neutral" },
-  ];
-  const groups = definitions.map((bucket) => ({ ...bucket, people: [] }));
-  for (const person of people) {
-    const key = module
-      ? person.event.audience_groups?.[module.key] || "unknown"
-      : "all";
-    const group =
-      groups.find((item) => item.key === key) ||
-      groups.find((item) => item.key === "unknown") ||
-      groups[0];
-    group.people.push(person);
-  }
+  const buckets = groupEvents(
+    people.map((person) => person.event),
+    modules,
+    lens,
+  );
+  const byActor = new Map(people.map((person) => [person.id, person]));
+  const groups = buckets
+    ? buckets.map(({ events, ...bucket }) => ({
+        ...bucket,
+        people: events.map((event) => byActor.get(event.actor_id)),
+      }))
+    : [{ key: "all", label: "Loaded audience", tone: "neutral", people }];
   const occupied = groups.filter((group) => group.people.length);
   const columns = Math.min(occupied.length, width < 700 ? 2 : 3);
   const rows = Math.ceil(occupied.length / Math.max(1, columns));
@@ -140,7 +139,7 @@ export function constellationLayout({
     width: worldWidth,
     upper,
     lower,
-    overview: Boolean(module) && zoom <= 0.25,
+    overview: buckets !== null && zoom <= 0.25,
     canPan: worldWidth > width + 0.5,
     center: (upper + lower) / 2,
   };
