@@ -70,6 +70,14 @@ class XClient:
             raise SetupError(
                 "Set X_USER_ACCESS_TOKEN for paid events, or X_APP_BEARER_TOKEN for follower events."
             )
+        return await self.authorized_request(method, path, token, **kwargs)
+
+    async def user_request(self, method: str, path: str, **kwargs):
+        if not self.config.user_token:
+            raise SetupError("Set X_USER_ACCESS_TOKEN to use Follow/Unfollow.")
+        return await self.authorized_request(method, path, self.config.user_token, **kwargs)
+
+    async def authorized_request(self, method: str, path: str, token: str, **kwargs):
         response = await self.http.request(
             method, f"{API_ROOT}{path}", headers={"Authorization": f"Bearer {token}"}, **kwargs
         )

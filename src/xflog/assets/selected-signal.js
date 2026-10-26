@@ -11,6 +11,7 @@ export function createSelectedSignal({
   time,
   fullDate,
   onOpen,
+  onFit = () => {},
 }) {
   const $ = (selector) => root.querySelector(selector);
   const button = $("#selected-signal");
@@ -37,6 +38,7 @@ export function createSelectedSignal({
       }
     }
     profile.hidden = visible === 0;
+    onFit();
   }
   // Gradio strips container queries; measure this column without changing its CSS pipeline.
   const resize = new ResizeObserver(fitProfile);
@@ -51,7 +53,10 @@ export function createSelectedSignal({
       button.hidden = !event;
       profile.replaceChildren();
       profile.hidden = true;
-      if (!event) return;
+      if (!event) {
+        onFit();
+        return;
+      }
       for (const key of profileSignals) {
         const module = modules.find((item) => item.key === key && item.enabled);
         if (!module) continue;

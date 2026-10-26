@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBasic
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import audience_groups
@@ -21,6 +21,7 @@ from .config import ASSETS, Config
 from .demo import demo_activity, demo_history
 from .demo import encounter_context as demo_encounter_context
 from .errors import SetupError
+from .follow_actions import FollowActions
 from .storage import Store
 from .transport import ProviderError, XClient
 
@@ -30,6 +31,7 @@ class Selection(BaseModel):
     followers: StrictBool = True
     subscriptions: StrictBool = False
     notifications: StrictBool = False
+    follow_actions: StrictBool = False
 
 
 class StartRequest(BaseModel):
@@ -41,6 +43,16 @@ class AudiencePreferences(BaseModel):
     enabled: dict[str, StrictBool]
 
 
+class FollowTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    event_id: StrictStr = Field(min_length=1, max_length=200)
+    demo: StrictBool = False
+
+
+class FollowChange(FollowTarget):
+    following: StrictBool
+
+
 def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
     config = config or Config.from_env()
     store = Store(config.database)
@@ -49,6 +61,7 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
     )
     client = XClient(config, http)
     collector = Collector(store, client)
+    follow_actions = FollowActions(store, client)
     sessions = {}
     controls = asyncio.Lock()
 
@@ -66,6 +79,7 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.store, app.state.collector = store, collector
     app.state.client, app.state.sessions = client, sessions
+    app.state.follow_actions = follow_actions
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=[urlsplit(config.origin).hostname])
     basic_auth = HTTPBasic(auto_error=False)
 
@@ -190,6 +204,7 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
             "csrf": sessions[request.state.session]["csrf"],
             "notification_sequence": collector.notifications,
             "audience_groups": audience_groups.catalog(await store.setting("audience_groups", {})),
+            "follow_actions": await follow_actions.status(),
         }
 
     @app.get("/api/activity-summary")
@@ -250,7 +265,27 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
 
     @app.post("/api/preferences")
     async def preferences(selection: Selection):
-        return await collector.save_preferences(selection.model_dump())
+        follow_setting = (
+            selection.follow_actions if "follow_actions" in selection.model_fields_set else None
+        )
+        if follow_setting is not None:
+            follow_actions.validate_setting(follow_setting)
+        result = await collector.save_preferences(selection.model_dump(exclude={"follow_actions"}))
+        if result["saved"] and follow_setting is not None:
+            await follow_actions.configure(follow_setting)
+        return result
+
+    @app.post("/api/follow-actions/relationship")
+    async def follow_relationship(target: FollowTarget):
+        if target.demo:
+            raise SetupError("Follow actions are unavailable in the offline demo.")
+        return await follow_actions.relationship(target.event_id)
+
+    @app.post("/api/follow-actions")
+    async def change_follow(target: FollowChange):
+        if target.demo:
+            raise SetupError("Follow actions are unavailable in the offline demo.")
+        return await follow_actions.change(target.event_id, target.following)
 
     @app.post("/api/start")
     async def start(body: StartRequest):
@@ -295,6 +330,7 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
                     "settings.css",
                     "responsive.css",
                     "activity-hud.css",
+                    "follow-actions.css",
                 )
             ],
             favicon_path=str(ASSETS / "mark.svg"),

@@ -134,3 +134,12 @@ def test_selected_signal_readout_uses_current_event_and_receipt_time():
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_follow_controls_share_state_and_guard_async_actions():
+    result = subprocess.run(
+        ["node", str(Path(__file__).with_name("follow_actions_check.mjs")), str(ASSETS)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr

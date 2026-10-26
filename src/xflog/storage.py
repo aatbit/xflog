@@ -89,6 +89,14 @@ class Store:
             )
             await self.db.commit()
 
+    async def event_actor(self, account_id: str, event_id: str) -> str | None:
+        async with self.db.execute(
+            "SELECT actor_id FROM events WHERE account_id=? AND event_id=?",
+            (account_id, event_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return row[0] if row else None
+
     async def insert(self, event: Event) -> bool:
         async with self.lock:
             cursor = await self.db.execute(

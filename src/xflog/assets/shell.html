@@ -155,6 +155,16 @@
             <path d="m9 5 7 7-7 7" />
           </svg>
         </button>
+        <button
+          id="signal-follow"
+          type="button"
+          class="follow-button follow-hud"
+          data-follow-button
+          hidden
+          disabled
+        >
+          Follow
+        </button>
       </div>
       <div class="scene-controls">
         <div id="scene-control-content" class="controls-content">
@@ -315,6 +325,19 @@
             ><label class="switch-row"
               ><span><strong>Activity notifications</strong></span
               ><input type="checkbox" role="switch" name="notifications"
+            /></label>
+            <label class="switch-row"
+              ><span
+                ><strong>Allow Follow/Unfollow</strong
+                ><small id="follow-actions-help"
+                  >Extra X requests apply. Requires X_USER_ACCESS_TOKEN with
+                  follows.read and follows.write.</small
+                ></span
+              ><input
+                type="checkbox"
+                role="switch"
+                name="follow_actions"
+                aria-describedby="follow-actions-help"
             /></label>
             <div class="preference-actions">
               <button type="submit" class="button primary">

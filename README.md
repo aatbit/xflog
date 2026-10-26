@@ -31,7 +31,7 @@ Followers are on by default. Paid-subscription tracking stays off until you enab
 <details>
 <summary>Getting a user access token for paid subscriptions</summary>
 
-Use an external [OAuth 2.0 sign-in flow](https://docs.x.com/fundamentals/authentication/oauth-2-0/authorization-code) to let the account approve your app. Request the `follows.read` permission and save the returned access token as `X_USER_ACCESS_TOKEN`.
+Use an external [OAuth 2.0 sign-in flow](https://docs.x.com/fundamentals/authentication/oauth-2-0/authorization-code) to let the account approve your app. Request the `follows.read` permission and save the returned access token as `X_USER_ACCESS_TOKEN`. For optional Follow/Unfollow actions, also request `tweet.read`, `users.read` and `follows.write`. A previously issued read-only token needs authorization again with these permissions.
 
 Both tokens must belong to the same developer app, and the user token must belong to the account in `X_USER_ID`. XFlog does not provide this sign-in flow or refresh tokens for you. You can skip this token for followers only, but XFlog will not start or resume paid-subscription tracking without it.
 
@@ -213,7 +213,7 @@ These are the settings most people need:
 | --- | --- |
 | `X_APP_BEARER_TOKEN` | Your app’s X token. Required for live tracking. |
 | `X_USER_ID` | The numeric ID of the X account to track. |
-| `X_USER_ACCESS_TOKEN` | Required for paid subscriptions; optional for followers only. Get and refresh it outside XFlog. |
+| `X_USER_ACCESS_TOKEN` | Required for paid subscriptions and optional Follow/Unfollow actions. Follower tracking alone does not need it. Get and refresh it outside XFlog. |
 | `XFLOG_ADMIN_PASSWORD` | Leave blank for local access without a password. Required for remote access; browser username is `xflog`. |
 | `XFLOG_ORIGIN` | The address you open in your browser. Defaults to `http://127.0.0.1:7860`; use your HTTPS address for remote access. |
 
@@ -256,6 +256,17 @@ The constellation shows one star per person in the history you have loaded. Sele
 **Ungrouped** is selected when you open XFlog. Use the spyglass button to choose a grouping in either view. **Activity** is enabled by default and uses events XFlog already records, with no additional X API requests or charges.
 
 The readings above the sliders show follows, unfollows, their hourly rates and **Growth ratio** (follows divided by unfollows). Use the **clock** to choose a period from **1 hour to 90 days**. Arrows compare it with the previous equal period: green means more follows or fewer unfollows; red means the reverse. **New** means the previous count was zero; **—** means there is no ratio to calculate. Hover or focus a reading’s label for a short explanation. Readings use the full local log and the time events reached XFlog, independent of zoom or grouping. Gaps in tracking can leave events missing; these are recorded changes, not your current audience size. No extra X requests are made.
+
+**Allow Follow/Unfollow** in Profile is optional and starts **off**. Enable it and save preferences to use the button in a person's event details, or in their selected-person readout when there is room. A user access token with the permissions described above is required. **This feature makes extra X API requests**, including relationship checks; X's usage charges and limits apply. Following someone does not add an incoming follower event to your log. Unfollow asks for confirmation. The offline demo cannot perform these actions.
+
+<details>
+<summary>How follow actions check account relationships</summary>
+
+XFlog first verifies that the user token belongs to `X_USER_ID`. It requests `connection_status` only for the selected recorded person, after you stop changing selection briefly, and checks it again before an action. It does not download your following list or poll X for relationship updates. The two buttons share the same result; selecting the person again after 30 seconds refreshes it. Ordinary status polling makes no X requests for this feature.
+
+Missing, unknown or unavailable relationship data leaves the action disabled or offers a relationship-check retry. Pending follow requests and blocked accounts must be managed on X. A failed or timed-out write is never automatically repeated: use **Retry** to check the actual relationship first. Turning the feature off prevents further actions after the save completes; an action already sent to X may have completed. It does not change follower tracking or your recorded history.
+
+</details>
 
 In the constellation, zooming out gathers people by their latest recorded activity. In **Journal**, the same lens creates collapsible sections with event counts; events keep their existing order inside each section. A person’s follow and unfollow records can appear in different sections.
 

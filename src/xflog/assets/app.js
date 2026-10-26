@@ -68,9 +68,8 @@
       .join("")
       .toUpperCase();
   const { createConstellation } = await import("/static/xf/constellation.js");
-  const { normalizeMotionSpeed } = await import(
-    "/static/xf/constellation-layout.js"
-  );
+  const { normalizeMotionSpeed } =
+    await import("/static/xf/constellation-layout.js");
   const {
     requestBrowserNotifications,
     notifyActivity,
@@ -105,9 +104,8 @@
       // Restricted browser storage must not prevent changing the current speed.
     }
   });
-  const { createAudienceControls, resolveLens } = await import(
-    "/static/xf/audience-ui.js"
-  );
+  const { createAudienceControls, resolveLens } =
+    await import("/static/xf/audience-ui.js");
   const scene = createConstellation({
     element: $("#history"),
     root,
@@ -138,9 +136,15 @@
     api,
     context: () => ({ demo: state.demo, subject: state.subject }),
   });
-  const { createSelectedSignal } = await import(
-    "/static/xf/selected-signal.js"
-  );
+  const { createSelectedSignal } =
+    await import("/static/xf/selected-signal.js");
+  const { createFollowControls, followButtonMarkup } =
+    await import("/static/xf/follow-actions.js");
+  const followControls = createFollowControls({
+    root,
+    api,
+    announce: (message) => announce(message),
+  });
   const selectedSignal = createSelectedSignal({
     root,
     label: eventLabel,
@@ -149,6 +153,7 @@
     time: timeFormat,
     fullDate: fullFormat,
     onOpen: (identity) => selectEvent(identity, true),
+    onFit: () => followControls.fitHud(),
   });
   const announce = (text) => {
     $("#announcer").textContent = text;
@@ -224,6 +229,11 @@
       name === "profile" ? "Timeline" : "Profile";
     history.replaceState(null, "", `#${name}`);
     root.dataset.route = name;
+    followControls.select(
+      name === "timeline"
+        ? state.events.find((event) => event.event_id === state.selected)
+        : null,
+    );
     if (name === "timeline") activityHud.refresh();
     $(".back-button").hidden = name === "timeline";
     if ($("#explore-dialog").open) $("#explore-dialog").close();
@@ -234,6 +244,7 @@
     const previous = state.status;
     state.status = status;
     state.csrf = status.csrf;
+    followControls.configure(status, state.demo);
     const active = ["tracking", "connecting", "reconnecting"].includes(
       status.state,
     );
@@ -347,6 +358,7 @@
     );
     if (!state.events.length) {
       selectedSignal.render(null);
+      followControls.select(null);
       const isSubs = state.subject === "subscriptions";
       let title = "Your next chapter starts here.";
       let copy =
@@ -417,6 +429,10 @@
     const detail = `<h2>Event details</h2><div class="detail-person"><span class="avatar" aria-hidden="true">${esc(initials(event))}</span><h3>${esc(event.name || event.handle || "X account")}</h3><p>${esc(event.handle ? "@" + event.handle : "ID " + event.actor_id)}</p></div><div class="detail-kind ${gained(event) ? "" : "lost"}"><span aria-hidden="true">${gained(event) ? "↗" : "↘"}</span>${eventLabel(event)}</div><dl class="detail-data"><dt>Provider event time</dt><dd>${event.provider_at ? esc(fullFormat.format(new Date(event.provider_at))) : "Not supplied by X"}</dd><dt>Received on this device</dt><dd>${esc(fullFormat.format(new Date(event.received_at)))}</dd><dt>Account ID</dt><dd>${esc(event.actor_id)}</dd></dl>${safeLink ? `<a class="detail-profile" href="${esc(event.profile_url)}" target="_blank" rel="noopener noreferrer">View profile on X <span aria-hidden="true">↗</span></a>` : ""}<p class="detail-small">${event.kind === "subscriptions.unsubscribe" ? "This event records subscription expiry, not cancellation." : "Provider time is shown only when X supplies it. Received time is when XFlog captured the event."}${state.demo ? " Synthetic demo event." : ""}</p>`;
     $("#detail-panel").innerHTML = detail;
     $("#mobile-detail").innerHTML = detail;
+    for (const panel of [$("#detail-panel"), $("#mobile-detail")])
+      panel
+        .querySelector(".detail-person")
+        .insertAdjacentHTML("afterend", followButtonMarkup);
     if (state.layout === "horizontal") scene.select(identity);
     const index = state.events.findIndex((item) => item.event_id === identity);
     $("#journey-position").textContent =
@@ -428,6 +444,7 @@
     );
     if (openMobile && !$("#detail-dialog").open)
       $("#detail-dialog").showModal();
+    followControls.select(event);
   }
   function requestOlder() {
     if (
@@ -448,6 +465,7 @@
     const demo = state.demo;
     if (!append && !state.events.length) {
       selectedSignal.render(null);
+      followControls.select(null);
       $("#history").innerHTML =
         '<div class="loading-state"><span class="loading-dot" aria-hidden="true"></span>Loading local history…</div>';
     }
@@ -492,9 +510,7 @@
     state.events = [];
     state.selected = null;
     state.next = null;
-    $("#demo-toggle").textContent = enabled
-      ? "Leave demo ↗"
-      : "Explore demo ↗";
+    $("#demo-toggle").textContent = enabled ? "Leave demo ↗" : "Explore demo ↗";
     notice("");
     if (state.status) renderStatus(state.status);
     view("timeline");
@@ -545,6 +561,9 @@
       $(`#preferences-form [name="${key}"]`).checked = Boolean(
         status.selection[key],
       );
+    const follow = $('#preferences-form [name="follow_actions"]');
+    follow.checked = Boolean(status.follow_actions?.enabled);
+    follow.disabled = !status.follow_actions?.available && !follow.checked;
   }
   function startDialog() {
     if (state.demo) return;
@@ -639,6 +658,7 @@
         followers: form.elements.followers.checked,
         subscriptions: form.elements.subscriptions.checked,
         notifications: form.elements.notifications.checked,
+        follow_actions: form.elements.follow_actions.checked,
       };
       const permission = selection.notifications
         ? requestBrowserNotifications()
@@ -717,6 +737,7 @@
       groupControls.destroy();
       activityHud.destroy();
       selectedSignal.destroy();
+      followControls.destroy();
       return;
     }
     if (!document.hidden || state.status?.selection.notifications) {
