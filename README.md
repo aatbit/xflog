@@ -17,23 +17,25 @@ The current X UI shows unfollow metrics but does not have a direct way to view u
 | --- | --- |
 | `X_APP_BEARER_TOKEN` | Your developer app’s bearer token. Required for live tracking. |
 | `X_USER_ID` | The account’s numeric ID, not its `@handle`. Required for live tracking. |
-| `X_USER_ACCESS_TOKEN` | The account’s permission to use your app. **Required for paid subscriptions; optional for followers only.** |
+| `X_USER_ACCESS_TOKEN` | The account’s permission to use your app. **Required for paid subscriptions or Follow/Unfollow; optional for follower tracking alone.** |
 
 1. **Create a developer app** in the [X Developer Console](https://console.x.com). Check that it can use [X Activity](https://docs.x.com/x-api/activity/quickstart).
 2. **Get your app’s bearer token and the account’s numeric ID.** X’s quickstart explains how to look up the ID.
 3. **Add API credits and check your spending limit.** Also check whether automatic credit top-ups are enabled.
-4. **Enter the settings in the installer or `.env`.** For paid-subscription tracking, get a user access token too; the details are below.
+4. **Enter the settings in the installer or `.env`.** For paid-subscription tracking or Follow/Unfollow, get a user access token too; the details are below.
 
 **X charges for live API usage, even when XFlog runs on your own computer.** Check [Activity prices](https://docs.x.com/x-api/activity/event-pricing) and [X’s spending rules](https://docs.x.com/x-api/getting-started/pricing) before starting. XFlog’s event count does not cap your X bill.
 
 Followers are on by default. Paid-subscription tracking stays off until you enable it in Profile. Choose **Start tracking** when you’re ready. To use the demo instead, leave the X settings blank.
 
 <details>
-<summary>Getting a user access token for paid subscriptions</summary>
+<summary>Getting a user access token</summary>
 
-Use an external [OAuth 2.0 sign-in flow](https://docs.x.com/fundamentals/authentication/oauth-2-0/authorization-code) to let the account approve your app. Request the `follows.read` permission and save the returned access token as `X_USER_ACCESS_TOKEN`. For optional Follow/Unfollow actions, also request `tweet.read`, `users.read` and `follows.write`. A previously issued read-only token needs authorization again with these permissions.
+Use a separate [OAuth 2.0 sign-in flow](https://docs.x.com/fundamentals/authentication/oauth-2-0/authorization-code) to give your app permission to access the account. Save the access token it returns as `X_USER_ACCESS_TOKEN`.
 
-Both tokens must belong to the same developer app, and the user token must belong to the account in `X_USER_ID`. XFlog does not provide this sign-in flow or refresh tokens for you. You can skip this token for followers only, but XFlog will not start or resume paid-subscription tracking without it.
+For paid-subscription tracking, request `follows.read`. To use Follow/Unfollow too, also request `tweet.read`, `users.read` and `follows.write`. If you already have a read-only token, approve the app again with these added permissions.
+
+Both tokens must belong to the same developer app, and the user token must belong to the account in `X_USER_ID`. XFlog does not include this sign-in step or renew tokens for you. You can leave the user token blank for follower tracking alone. Paid-subscription tracking and Follow/Unfollow need it.
 
 </details>
 
@@ -52,11 +54,11 @@ Run the installer in a terminal as your regular user, **without `sudo`**:
 curl -fsSL https://raw.githubusercontent.com/aatbit/xflog/main/install.sh | bash
 ```
 
-Choose **install**, then follow the prompts for your install method, a new installation folder, port, X settings and optional browser password. Review the choices before confirming. The installer won’t overwrite an existing installation.
+Choose **install**, then follow the prompts for Docker or native Linux, a new installation folder, port, X settings and an optional browser password. The port is the number at the end of your local XFlog address; press Enter to use `7860`. Review the choices before confirming. The installer won’t overwrite an existing installation.
 
 **For local use, press Enter at the password prompt to leave protection off.** If you set a password, use at least 16 ASCII characters; the browser username is `xflog`. This password protects XFlog and is separate from your X account.
 
-Open `http://127.0.0.1:7860` when installation finishes, or use the port you chose. Tokens and passwords are hidden while you type and saved in `.env`; keep that file private.
+Open `http://127.0.0.1:7860` when installation finishes, or replace `7860` with the port you chose. Tokens and passwords are hidden while you type and saved in `.env`; keep that file private.
 
 <details>
 <summary>Read the installer before running it</summary>
@@ -87,9 +89,9 @@ Leave the X credentials blank to try the demo without X API calls or charges. A 
 
 **Checking for updates**
 
-Run the installer, choose **check for updates** (type `check`), and enter your existing installation folder. It reports **XFlog app** and **Installer** updates separately. Checking does not change your app, settings or history, and Docker does not need to be running.
+Run the installer, choose **check for updates** (type `check`), and enter your XFlog installation folder. You’ll see separately whether the **XFlog app** or the **Installer** has changed. Checking does not change your app, settings or history, and Docker does not need to be running.
 
-If the installer has changed, you can let it run the new copy and reopen the menu first. This uses a temporary copy; it does not overwrite a script you saved elsewhere. If an app update is available, it also prints the command to run—then choose **update**. App updates still need your confirmation.
+If the installer has changed, it offers to open the updated installer first. A script you saved elsewhere stays untouched. If an app update is available, it shows the command to run; choose **update** from the menu. Nothing is updated without your confirmation.
 
 **Updating**
 
@@ -97,7 +99,7 @@ Run the installer again, choose **update**, then select your install type and ex
 
 - Back up your history first.
 - Your history, `.env` settings and custom Docker network settings are kept. New settings get their default values; existing values, including blanks, stay unchanged.
-- The installer asks before restarting XFlog. It stops if you have edited the app’s tracked files.
+- The installer asks before restarting XFlog. If you have changed the app’s source files, it stops so your edits aren’t overwritten.
 
 **Uninstalling**
 
@@ -121,7 +123,7 @@ XFlog stops running, but your files, settings and history are kept by default. D
 
 Want to open XFlog from another device or run it on a VPS? Give it an address such as `https://xf.example.com`. HTTPS encrypts the connection, including your browser password.
 
-The example below uses **Caddy installed directly on the same server as XFlog**. Caddy handles HTTPS and passes requests to XFlog, which stays on its private local port. If you already use another HTTPS proxy, you can keep using it.
+The example below uses **Caddy installed directly on the same server as XFlog**. Caddy provides the secure public address and forwards visitors to XFlog, which stays on a private local address. If you already use another HTTPS proxy, you can keep using it.
 
 **1. Point a domain at your server**
 
@@ -178,7 +180,7 @@ sudo systemctl enable --now caddy
 sudo systemctl reload caddy
 ```
 
-These commands assume Caddy’s standard Linux service is installed. See [Caddy’s service guide](https://caddyserver.com/docs/running) if your installation uses a different setup.
+These commands are for Caddy’s standard Linux installation. See [Caddy’s service guide](https://caddyserver.com/docs/running) if your installation uses a different setup.
 
 **5. Open XFlog**
 
@@ -205,7 +207,7 @@ Inside a proxy container, `127.0.0.1` means that container itself, so use `xflog
 
 ## Environment configuration
 
-The installer saves settings in `.env` inside your installation folder. For a manual setup, supply them through your launcher or environment. After changing these settings, [recreate the Docker container or restart the native app](#hosting-remotely-and-using-https).
+The installer saves settings in `.env` inside your installation folder. If you run Python manually, set the environment variables before starting XFlog. After changing these settings, [apply them by restarting XFlog as shown in the hosting guide](#hosting-remotely-and-using-https).
 
 These are the settings most people need:
 
@@ -230,92 +232,116 @@ These are the settings most people need:
 | `XFLOG_ENV_FILE` | Tell Profile which configuration-file path to show. The installer fills this in. For Docker, use the host path. This setting only displays the path; it does not load the file. |
 | `XFLOG_LOOPBACK_PUBLISHED` | The supplied Compose file sets this to `1` because its port is published only on `127.0.0.1`. Other container setups may set it only when they also restrict access to localhost. Native localhost runs do not need it. |
 
-If `XFLOG_ENV_FILE` is not supplied, Profile says that no file path was provided. It asks for `X_USER_ACCESS_TOKEN` only when paid-subscription tracking is selected.
+If `XFLOG_ENV_FILE` is not set, Profile says that no file path was provided. Its missing-settings list asks for `X_USER_ACCESS_TOKEN` when paid-subscription tracking is selected. Follow/Unfollow also needs this token; its switch stays unavailable until the account ID and user token are set.
 
 </details>
 
 ## Preferences and notifications
 
-Change what you track in **Profile**, then choose **Save preferences**. Saving keeps a running listener on and a paused listener off. To turn off every event category, pause tracking first.
+Open **Profile** using the person icon near the top right. Choose what you want XFlog to do, then select **Save preferences**.
 
-Enable **Activity notifications** for in-app notices and browser alerts while the page is open. Your browser may ask for permission when you save. If alerts are blocked or unsupported, in-app notices still work.
+| Setting | Starts | What it does |
+| --- | --- | --- |
+| **Follower events** | On | Records when someone follows or unfollows you. |
+| **Paid subscription events** | Off | Records new paid subscribers and expired subscriptions. Needs a user access token. |
+| **Activity notifications** | Off | Shows a notice when new events arrive. Can also show a browser alert while XFlog is open. |
+| **Allow Follow/Unfollow** | Off | Adds a Follow/Unfollow button to a person’s details and, when there is room, their readout below the stars. Needs a user access token with permission to follow accounts. Unfollow asks you to confirm. |
+
+**Saving does not pause tracking.** If XFlog is already recording, it keeps recording with your new choices. If you paused it earlier, saving does not start it again. To stop recording everything, choose **Pause tracking** in timeline settings under **Workspace** before turning both tracking options off.
+
+To record again, enable at least one tracking option, save, then choose **Start tracking** under **Workspace**.
+
+When you enable **Activity notifications** and save, your browser may ask whether to allow alerts. If you decline, or your browser cannot show them, notices inside XFlog still work. Keep the page open to receive either type of notice.
+
+Follow/Unfollow makes extra X requests and can add charges, including when it checks whether you already follow someone. Leave it off if you only want to record your audience’s activity. See [which features use X credits](#which-features-use-x-credits) below.
 
 <details>
-<summary>How preference changes and browser alerts work</summary>
+<summary>If a change or notification doesn’t work</summary>
 
-- Saving only notification settings does not change your X subscriptions.
-- If X cannot apply an event change, XFlog keeps your saved choices and shows a warning. Fix the X access or server storage problem, then save again to retry.
-- Browser alerts need HTTPS or localhost, and each browser has its own permission setting. Alerts require an open page; XFlog does not send push notifications after it is closed.
+- **A warning after saving:** read the message before assuming the change is active. If XFlog saved your choices but could not apply them on X, fix the access or disk problem shown, then save again. If it says the choices could not be saved, make your choices again after fixing the problem.
+- **No browser alerts:** allow notifications in your browser’s settings for the XFlog address. Browser alerts work on localhost or an HTTPS address. Each browser and device needs its own permission.
+- **Alerts stop after closing XFlog:** that is expected. XFlog does not send alerts to a closed page.
+- **Only changing notifications:** this does not change which events XFlog asks X to send.
 
 </details>
 
-## Exploring your audience
+## Exploring your history
 
-The constellation shows one star per person in the history you have loaded. Select a star to see an event, or use **Journal** in timeline settings to browse every recorded event. Scroll up or left for older encounters, down or right for newer ones. Light trails travel from older to newer encounters. Dragging and scrolling ease through the scene; reduced motion keeps movement immediate. The side arrows move the selected profile one place older or newer with each click. Zoom starts at **80%**; use the compact zoom control in the bottom controls to change it. Both sliders stay visible in the constellation; Journal uses normal vertical scrolling. The history thumb tracks the visible viewport directly without changing zoom; older records load when you reach the older end. At full overview, panning is disabled. Select a star or name to open its event. Occasional meteors vary their direction, timing and lifetime from one to the next: some burn out quickly, others cross the screen. They follow the Ambient motion and reduced-motion settings.
+The **sliders icon** near the top right opens timeline settings. The viewing options below change how you explore your saved history without changing what you record.
 
-**Ungrouped** is selected when you open XFlog. Use the spyglass button to choose a grouping in either view. **Activity** is enabled by default and uses events XFlog already records, with no additional X API requests or charges.
+| Control | How to use it |
+| --- | --- |
+| **Audience** | Switch between **Followers** and **Paid subscribers**. Choosing a view does not start recording that activity; use Profile for that. |
+| **Events** | Choose **All events**, **Gained** or **Lost** to narrow the view. Your other records stay saved. |
+| **Layout** | Choose **Constellation** for one star per person, or **Journal** to read each recorded event in a list. |
+| **Ambient motion** | Turn the moving light trails and occasional shooting stars on or off. Your device’s reduced-motion setting is respected. |
+| **Motion speed** | Slow down or speed up the animation, from **0.25× to 2×**. This does not change how quickly XFlog receives events. |
 
-The readings above the sliders show follows, unfollows, their hourly rates and **Growth ratio** (follows divided by unfollows). Use the **clock** to choose a period from **1 hour to 90 days**. Arrows compare it with the previous equal period: green means more follows or fewer unfollows; red means the reverse. **New** means the previous count was zero; **—** means there is no ratio to calculate. Hover or focus a reading’s label for a short explanation. Readings use the full local log and the time events reached XFlog, independent of zoom or grouping. Gaps in tracking can leave events missing; these are recorded changes, not your current audience size. No extra X requests are made.
+In the constellation, select a star to choose a person, then select their name or the readout below to open the event details. The side arrows move one person older or newer. Scroll up for older history and down for newer history, or use the long slider at the bottom. The smaller slider controls zoom and starts at **80%**. Journal uses normal up-and-down scrolling and hides these sliders.
 
-**Allow Follow/Unfollow** in Profile is optional and starts **off**. Enable it and save preferences to use the button in a person's event details, or in their selected-person readout when there is room. A user access token with the permissions described above is required. **This feature makes extra X API requests**, including relationship checks; X's usage charges and limits apply. Following someone does not add an incoming follower event to your log. Unfollow asks for confirmation. The offline demo cannot perform these actions.
+The readings at the bottom show follows, unfollows, hourly rates and **Growth ratio**. Use the **clock button** to choose **1h, 6h, 12h, 24h, 3d, 7d, 30d or 90d**. Hover over a reading’s label, or focus it with the keyboard, for a short explanation. In the Paid subscribers view, the readings show subscribers and expirations instead.
 
 <details>
-<summary>How follow actions check account relationships</summary>
+<summary>Understanding the numbers and connection history</summary>
 
-XFlog first verifies that the user token belongs to `X_USER_ID`. It requests `connection_status` only for the selected recorded person, after you stop changing selection briefly, and checks it again before an action. It does not download your following list or poll X for relationship updates. The two buttons share the same result; selecting the person again after 30 seconds refreshes it. Ordinary status polling makes no X requests for this feature.
-
-Missing, unknown or unavailable relationship data leaves the action disabled or offers a relationship-check retry. Pending follow requests and blocked accounts must be managed on X. A failed or timed-out write is never automatically repeated: use **Retry** to check the actual relationship first. Turning the feature off prevents further actions after the save completes; an action already sent to X may have completed. It does not change follower tracking or your recorded history.
+- **Growth ratio** is gains divided by losses. For example, 7 follows and 2 unfollows gives **3.5**. A dash means there is no ratio to calculate, such as when there were no losses.
+- **Percentage changes** compare the chosen period with the previous period of the same length. Green means more gains or fewer losses; red means the reverse. **New** means there was activity now but none in the previous period.
+- **These are recorded changes, not your current follower total.** The readings use your full saved log and the time XFlog received each event, regardless of zoom, filters or grouping.
+- **Workspace → Connection history** shows recorded interruptions. Events that happened before tracking began, or during a gap, may be missing; XFlog cannot reconstruct them.
+- **Workspace → Refresh local history** reloads what XFlog has already saved. It does not fetch an old follower list from X. **Explore demo** lets you try the interface with sample data.
 
 </details>
 
-In the constellation, zooming out gathers people by their latest recorded activity. In **Journal**, the same lens creates collapsible sections with event counts; events keep their existing order inside each section. A person’s follow and unfollow records can appear in different sections.
+## Audience groups
 
-In timeline settings, open **Audience Groups** to turn optional groups on or off. **Account size** starts off. When enabled, it saves follower counts only when X includes them with a new event; it never looks up profiles. An older event or a missing count appears as **Unknown**. Enable it to add Account size to the spyglass picker alongside Activity and Ungrouped.
+Groups help you explore patterns without paying for more profile lookups. Open **timeline settings → Audience Groups** and turn on the ones you want. These switches **save automatically** and do not pause tracking. Then use the **spyglass button** on the timeline to choose a grouping.
 
-**Previous encounters** also starts off. Enable it to group events as **First appearance**, **Seen before**, or **Followed again**. It uses this account’s full saved log, including records outside the page or filter you are viewing. Followed again requires a recorded unfollow followed by a follow; subscription changes alone do not count as a return. First appearance means first in this log, not their first-ever interaction on X. Tracking gaps and activity before recording began are not reconstructed. This group makes no X requests and can use history saved before you enabled it.
+**Ungrouped** is selected when you open XFlog. **Activity** is already available in the picker; the other groups start off. **None of these groups makes extra X requests or adds X API charges.**
 
-**Account age** and **Verification** start off too. Enable either to save the relevant fields when X includes them with a new event. They work in both the constellation and Journal, without extra profile requests.
+| Group | Starts | What you’ll see |
+| --- | --- | --- |
+| **Activity** | On | People grouped by follows, unfollows, new subscriptions or expirations. Uses events already in your log. |
+| **Previous encounters** | Off | **First appearance**, **Seen before** or **Followed again**, based on your saved history. |
+| **Account size** | Off | **Under 100**, **100–999**, **1K–9,999** or **10K+** followers, when X includes the count. |
+| **Account age** | Off | **Under 1 year**, **1–3 years** or **3+ years** old when the event was recorded. |
+| **Verification** | Off | Verified and unverified accounts, with blue, business or government badge types when supplied. |
+| **Profile location** | Off | Similar profile location labels together, with simple variations such as **NYC → New York City** and **Bangalore → Bengaluru** cleaned up. |
 
-- **Account age:** Under 1 year, 1–3 years, or 3+ years, measured when XFlog received the event. Old events keep their original age group.
-- **Verification:** Blue, business or government badges when supplied, otherwise Verified with type unknown, Unverified, or Unknown. This records the badge status delivered with the event, not a live check of the profile.
+Zoom out in Constellation to see groups of stars. In Journal, the same choice gives you sections you can open or collapse. When there is room, enabled Verification, Account size and Account age also add facts to the selected person’s readout. With Verification enabled, known verified accounts get a checkmark beside their name in the constellation and readout.
 
-Missing or invalid fields, and older events saved without them, appear as **Unknown**. XFlog does not fetch missing details. These fields are documented in [X’s user data dictionary](https://docs.x.com/x-api/fundamentals/data-dictionary) and [Activity event examples](https://docs.x.com/x-api/activity/event-payloads).
-
-**Profile location** is optional and starts off. It groups the location text delivered with new events, cleaning up spacing, capitalization differences, separators and a small set of clear aliases such as **NYC → New York City** and **Bangalore → Bengaluru**. Missing or unusable labels stay **Unknown**. It makes no extra X requests and does not look up or guess where someone lives. In the constellation, large lists show the largest groups plus **More groups**; Journal keeps every named group.
+**Missing details appear as Unknown.** Account size, age, verification and location use only details included with new events while that group is enabled. Turning a group on does not look up profiles or fill in missing details in old records. Turning it off keeps your saved history.
 
 <details>
-<summary>How location labels are cleaned up</summary>
+<summary>A few limits worth knowing</summary>
 
-Matching ignores capitalization and differences in spaces, commas and periods. Unicode variants such as full-width letters are normalized. Common US/USA and UK spellings are merged. Otherwise, labels keep their wording and accents. Ambiguous labels remain separate: **New York** does not automatically mean **New York City**, and **London, UK** stays separate from **London, Ontario**. Multiple locations and labels such as **Remote** are kept as written, with separators tidied up.
-
-Blank values, placeholders such as `N/A`, invalid text and labels longer than 160 characters become Unknown. There is no fuzzy matching, geocoding or backfill. Only events received while the module is enabled capture location text; previously saved snapshots remain available if you turn it off and on again.
+- **Previous encounters** can use history saved before you enabled it. **First appearance** means first in your XFlog log, not first on X. **Followed again** requires an unfollow followed by a follow in that log; a tracking gap may hide part of the story.
+- **Profile facts describe the recorded event.** Someone’s follower count, account age or badge may have changed since then. XFlog does not keep checking their profile.
+- **Location is profile text, not a verified address.** XFlog tidies spacing and capitalization and merges a few clear aliases. It does not guess where someone lives: **London, UK** and **London, Ontario** stay separate. Missing or unusable labels become Unknown.
+- **The constellation shows people from the history you have loaded.** Loading older records can add people or change the groups you see. Journal lists the events themselves, so one person can appear in more than one section.
 
 </details>
 
-These groups describe the loaded history, not a complete or current follower list. Loading older events can add people or fill out a group. Turning a group off stops its extra processing and removes its lens; your recorded history stays saved. Group changes save automatically and keep the listener running.
+## Which features use X credits?
+
+**Browsing saved history and changing the view do not add X API charges. Collecting live follower events and using Follow/Unfollow can cost money.** Running XFlog on your own computer does not remove X’s API fees.
+
+| Feature | X API cost |
+| --- | --- |
+| **Offline demo** | None. No X requests. |
+| **Groups, filters, layouts, zoom, statistics and notifications** | No extra X requests or charges for these tools. Any live events you record still follow X’s event pricing. |
+| **Live follower tracking** | X bills each delivered follow or unfollow event on its pay-per-use plan. |
+| **Paid-subscription tracking** | X currently lists new-subscription and subscription-expiry events as **not billed**. You still need a configured developer app, access to X Activity and a user access token. |
+| **Allow Follow/Unfollow** | Makes additional X API requests. Checking whether you already follow someone can be billed, even if you never press Follow. Following or unfollowing also uses X’s action pricing. |
+
+Pricing checked **26 October 2026**. See [X’s Activity event prices](https://docs.x.com/x-api/activity/event-pricing) and [API pricing](https://docs.x.com/x-api/getting-started/pricing) for current terms. Check your usage and set a spending limit in the [X Developer Console](https://console.x.com). The numbers shown inside XFlog are activity counts, not a bill or spending limit. VPS or other hosting costs are separate.
 
 <details>
-<summary>Adding an Audience Group as a developer</summary>
+<summary>How to keep Follow/Unfollow requests under control</summary>
 
-Each built-in group is a small, trusted Python module in `src/xflog/audience_groups/`. Register an `AudienceGroup` with a unique key, label, description, bucket definitions and an `assign(event)` function. Include an `unknown` bucket. An optional `capture(source)` function can return the small metadata snapshot to keep from an incoming event. Set `default_enabled=False` for optional features.
+The feature starts off. When you enable it, XFlog first checks that the user token belongs to your configured account. It checks the selected person’s relationship only when an action button can be shown, and again before a follow or unfollow. It does not download your whole following list or keep checking X in the background. Selecting the same person again after 30 seconds can refresh the check.
 
-History-derived modules can supply an async `prepare(events, lookup)` hook. The callback returns local context for the page’s event sequences: whether the actor appeared earlier and the last earlier follower-event kind. Previous encounters demonstrates this path. Lookups cover the full account log and run only while the module is enabled; prepared metadata is returned to the UI without rewriting saved events. The demo supplies its own in-memory history context.
+If a check fails, **Retry** checks the relationship again; it does not repeat a follow or unfollow. Pending requests and blocked accounts must be managed on X. The demo cannot make these actions.
 
-Import the module explicitly in the package’s `__init__.py`. The API catalog supplies its settings switch, lens option and overview buckets automatically; no feature-specific frontend code is needed. Follow the existing Account size module and its tests. Capture runs only while that group is enabled, and missing data must remain unknown.
-
-For categories derived from event labels, set `dynamic_buckets=True` and return a `Bucket` from `assign(event)`, as Profile location does. The registry includes its descriptor with the event; the shared frontend grouping helper supplies the same labels to both views. Keep an Unknown bucket and validate received text before saving it.
-
-This is a registration mechanism for code shipped with XFlog, not an installer for third-party plugins. Modules receive event data, not the X client or credentials. Keep them event-only: adding network lookups would need a separate design with explicit permission and cost handling.
-
-This version adds a metadata column to the history database. Back up history before upgrading. If you later return to an older XFlog version, you may also need to restore its matching database backup.
-
-</details>
-
-<details>
-<summary>Privacy and upgrading from older versions</summary>
-
-X tokens stay in the server’s environment, outside Profile and the history database. Host and Docker administrators can inspect them, so protect your server and `.env` backups. The history database is not encrypted.
-
-Older versions used Client IDs, secrets, callbacks and desktop keyring storage. Those settings and the built-in X sign-in flow have been removed. Existing history is kept, but XFlog does not delete old keyring credentials or revoke old X permissions. Remove those separately if needed.
+To stop further checks and actions, turn **Allow Follow/Unfollow** off in Profile and save. An action already sent to X may still complete. Following someone from XFlog does not create an incoming follower event in your log.
 
 </details>
