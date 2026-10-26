@@ -126,16 +126,22 @@
           id="selected-signal"
           class="selected-signal"
           aria-label="Open selected signal details"
-          aria-describedby="signal-handle signal-activity signal-received"
+          aria-describedby="signal-verification signal-handle signal-profile signal-activity signal-received"
           hidden
         >
           <svg class="signal-target" viewBox="0 0 24 24" aria-hidden="true">
             <circle cx="12" cy="12" r="6" />
             <path d="M12 2v4m0 12v4M2 12h4m12 0h4" />
           </svg>
-          <span class="signal-person">
-            <strong id="signal-name"></strong>
-            <span id="signal-handle"></span>
+          <span id="signal-identity" class="signal-identity">
+            <span class="signal-person">
+              <span class="signal-name">
+                <strong id="signal-name"></strong>
+                <span id="signal-verification"></span>
+              </span>
+              <span id="signal-handle"></span>
+            </span>
+            <span id="signal-profile" class="signal-profile" hidden></span>
           </span>
           <span class="signal-activity">
             <small>Activity</small>

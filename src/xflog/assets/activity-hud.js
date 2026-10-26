@@ -1,13 +1,19 @@
 import { bindPopover } from "./popover.js";
 
 const labels = {
-  followers: ["Follows", "Unfollows", "Follows / h", "Unfollows / h", "F / U"],
+  followers: [
+    "Follows",
+    "Unfollows",
+    "Follows / h",
+    "Unfollows / h",
+    "Growth ratio",
+  ],
   subscriptions: [
     "Subscribers",
     "Expired",
     "New / h",
     "Expired / h",
-    "New / expired",
+    "Growth ratio",
   ],
 };
 const keys = ["gained", "lost", "gain_rate", "loss_rate", "ratio"];
@@ -17,7 +23,7 @@ const counts = new Intl.NumberFormat(undefined, {
   maximumFractionDigits: 1,
 });
 
-export function formatReading(key, value) {
+export function formatReading(value) {
   if (value === null || value === undefined) return "—";
   const text =
     value >= 10000
@@ -25,7 +31,6 @@ export function formatReading(key, value) {
       : value > 0 && value < 0.01
         ? "<0.01"
         : decimal.format(value);
-  if (key === "ratio") return `${text}:1`;
   return text;
 }
 
@@ -154,7 +159,7 @@ export function createActivityHud({ root, api, context }) {
       cells.forEach((cell, index) => {
         const key = keys[index],
           metric = result.metrics[key];
-        cell.value.textContent = formatReading(key, metric.value);
+        cell.value.textContent = formatReading(metric.value);
         const change = formatChange(key, metric);
         cell.change.textContent = change.text;
         cell.change.dataset.tone = change.tone;

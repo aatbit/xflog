@@ -119,8 +119,17 @@ def test_activity_readings_and_period_request_order():
 
 
 def test_selected_signal_readout_uses_current_event_and_receipt_time():
+    import json
+
+    from xflog import audience_groups
+
     result = subprocess.run(
-        ["node", str(Path(__file__).with_name("selected_signal_check.mjs")), str(ASSETS)],
+        [
+            "node",
+            str(Path(__file__).with_name("selected_signal_check.mjs")),
+            str(ASSETS),
+            json.dumps(audience_groups.catalog(dict.fromkeys(audience_groups.MODULES, True))),
+        ],
         capture_output=True,
         text=True,
     )

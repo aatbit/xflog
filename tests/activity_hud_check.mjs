@@ -4,13 +4,12 @@ const { createActivityHud, formatReading, formatChange } = await import(
   new URL("activity-hud.js", pathToFileURL(process.argv[2] + "/"))
 );
 
-assert.equal(formatReading("ratio", null), "—");
-assert.equal(formatReading("ratio", 2.5), "2.5:1");
-assert.equal(formatReading("gain_rate", 0.001), "<0.01");
-assert.equal(formatReading("gained", 9999), "9,999");
-assert.equal(formatReading("gained", 12000), "12K");
-assert.equal(formatReading("gain_rate", 12000), "12K");
-assert.equal(formatReading("ratio", 1200000), "1.2M:1");
+assert.equal(formatReading(null), "—");
+assert.equal(formatReading(2.5), "2.5");
+assert.equal(formatReading(0.001), "<0.01");
+assert.equal(formatReading(9999), "9,999");
+assert.equal(formatReading(12000), "12K");
+assert.equal(formatReading(1200000), "1.2M");
 for (const [key, percent, tone] of [
   ["gained", 20, "good"],
   ["gained", -20, "bad"],

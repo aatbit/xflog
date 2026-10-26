@@ -330,6 +330,10 @@
     state.groups = groups;
     groupControls.render(groups, state.lens);
     scene.configure(groups, state.lens);
+    selectedSignal.render(
+      state.events.find((event) => event.event_id === state.selected),
+      groups,
+    );
     if (state.layout === "vertical") renderEvents();
   }
   function renderEvents() {
@@ -403,7 +407,7 @@
     const event = state.events.find((event) => event.event_id === identity);
     if (!event) return;
     state.selected = identity;
-    selectedSignal.render(event);
+    selectedSignal.render(event, state.groups);
     $$("[data-event]").forEach((button) =>
       button.setAttribute("aria-pressed", button.dataset.event === identity),
     );
@@ -712,6 +716,7 @@
       scene.destroy();
       groupControls.destroy();
       activityHud.destroy();
+      selectedSignal.destroy();
       return;
     }
     if (!document.hidden || state.status?.selection.notifications) {

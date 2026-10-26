@@ -37,8 +37,49 @@
   height: 14px;
   color: var(--faint);
 }
-.signal-person {
+.signal-identity {
+  display: flex;
+  align-items: center;
+  gap: 20px;
   min-width: 0;
+}
+.signal-person {
+  flex: 1;
+  min-width: 0;
+}
+.signal-profile {
+  display: flex;
+  flex-shrink: 0;
+  gap: 16px;
+}
+.signal-fact {
+  display: block;
+  width: max-content;
+  flex-shrink: 0;
+}
+.signal-fact > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+.signal-person .signal-name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.signal-name strong {
+  min-width: 0;
+}
+#signal-verification {
+  display: flex;
+  flex-shrink: 0;
+}
+.selected-signal svg.verified-badge {
+  width: 14px;
+  height: 14px;
 }
 .signal-person strong,
 .signal-person > span {
@@ -56,6 +97,7 @@
   font-size: 12px;
   color: var(--muted);
 }
+.signal-fact small,
 .signal-activity small,
 .signal-time small {
   display: block;
@@ -81,7 +123,7 @@
     right: 80px;
   }
   .signal-target,
-  .signal-person,
+  .signal-identity,
   .signal-open {
     grid-row: 1;
   }

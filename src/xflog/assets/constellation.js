@@ -8,6 +8,7 @@ import {
   seed,
 } from "./constellation-layout.js";
 import { createShootingStar } from "./shooting-star.js";
+import { verificationBadge } from "./verification-badge.js";
 
 export function createConstellation({
   element,
@@ -54,7 +55,7 @@ export function createConstellation({
     geometry?.people.findIndex((person) => person.id === current()?.actor_id) ??
     -1;
   function personLabel(person, event = person.event) {
-    return `<strong>${esc(event.name || event.handle || "X account")}</strong><span class="star-handle">${esc(event.handle ? "@" + event.handle : "ID " + person.id)}</span><span class="star-kind ${gained(event) ? "positive" : "negative"}">${esc(label(event))}</span>`;
+    return `<strong>${esc(event.name || event.handle || "X account")}${verificationBadge(event, modules)}</strong><span class="star-handle">${esc(event.handle ? "@" + event.handle : "ID " + person.id)}</span><span class="star-kind ${gained(event) ? "positive" : "negative"}">${esc(label(event))}</span>`;
   }
 
   function stop() {
