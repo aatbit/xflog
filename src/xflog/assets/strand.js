@@ -31,7 +31,8 @@ export function strandGeometry(count, viewport, height, zoom = 1) {
   const padding = zoom === 0 && count > 1 ? inset : viewport / 2;
   const width =
     zoom === 0 ? viewport : viewport + Math.max(0, count - 1) * spacing;
-  const center = height / 2;
+  // Leave room for orbiting names and dates above the bottom control tray.
+  const center = height * 0.32;
   const amplitude = Math.min(112, height * 0.17) * (zoom === 0 ? 0.82 : 1);
   const wave = (x) =>
     spacing ? amplitude * Math.cos(((x - padding) / spacing) * Math.PI) : 0;

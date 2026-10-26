@@ -51,13 +51,14 @@ def test_memory_strand_geometry_matches_native_scroll_and_alternates():
     for (const viewport of [375, 768, 1440]) {{
       for (const count of [0, 1, 2, 25, 50]) {{
         const geometry = strandGeometry(count, viewport, 480);
+        assert.ok(geometry.center < 480 / 2);
         assert.equal(geometry.points.length, count);
         assert.ok(Math.abs(geometry.width - viewport - Math.max(0,count-1)*geometry.spacing) < 0.001);
         geometry.points.forEach((point,index) => {{
           assert.equal(point.x, viewport/2 + (count-1-index)*geometry.spacing);
           assert.equal(point.above, (count-1-index)%2===0);
           assert.ok(point.y > 0 && point.y < 480);
-          assert.equal((point.y<240), point.above);
+          assert.equal((point.y<geometry.center), point.above);
         }});
         assert.ok(!geometry.front.includes('NaN'));
         assert.ok(!geometry.back.includes('NaN'));
