@@ -39,6 +39,7 @@ elif [[ $1 == -C && $3 == checkout ]]; then cp -R "$FIXTURE_SOURCE/." "$2/"; fi
         """printf 'docker %s\\n' "$*" >> "$CALL_LOG"
 if [[ $1 == network && $2 == ls ]]; then printf 'bridge\\nproxy\\n'; fi
 if [[ $1 == network && $2 == inspect ]]; then [[ $3 == proxy ]]; fi
+if [[ $1 == ps ]]; then printf '%s' "${EXISTING_PROJECT_CONTAINER:-}"; fi
 """,
     )
     for name in ("systemctl", "systemd-analyze", "loginctl", "sleep"):
@@ -168,6 +169,26 @@ def test_existing_install_is_not_overwritten(installer_environment, tmp_path):
     assert marker.read_text() == "original"
 
 
+def test_existing_compose_project_is_not_activated(installer_environment, tmp_path):
+    environment = {**installer_environment, "EXISTING_PROJECT_CONTAINER": "existing-container"}
+    destination = tmp_path / "fresh"
+    code, transcript = interactive_run(environment, docker_answers(destination))
+    assert code != 0
+    assert "already has containers" in transcript
+    assert not destination.exists()
+
+
+def test_token_whitespace_is_rejected_without_writing_secrets(installer_environment, tmp_path):
+    destination = tmp_path / "fresh"
+    answers = docker_answers(destination)
+    answers[6] = ("X app bearer token", "invalid token")
+    code, transcript = interactive_run(installer_environment, answers)
+    assert code != 0
+    assert "Tokens must contain" in transcript
+    assert "invalid token" not in transcript
+    assert not destination.exists()
+
+
 @pytest.mark.skipif(not shutil.which("docker"), reason="Optional Docker Compose parser integration")
 def test_compose_env_round_trips_shell_special_characters(tmp_path):
     value = "fake-1234567890$()${UNSET}`echo bad`\"\\' # literal"
@@ -270,6 +291,23 @@ def test_native_setup_generates_user_service_and_boot_start(installer_environmen
     assert "enable-linger" in calls
     assert "systemctl --user enable --now xflog.service" in calls
     assert not Path(Path(environment["BOOTSTRAP_PATH"]).read_text().strip()).exists()
+
+
+def test_native_dependency_failure_cannot_enable_service(installer_environment, tmp_path):
+    failing_python = tmp_path / "fail-python"
+    executable(failing_python, "exit 9\n")
+    result = subprocess.run(
+        ["bash", "-c", 'source "$1"; install_native', "--", str(INSTALLER)],
+        env={
+            **installer_environment,
+            "python": str(failing_python),
+            "TMPDIR": str(tmp_path),
+        },
+        capture_output=True,
+    )
+    assert result.returncode == 9
+    assert not Path(installer_environment["CALL_LOG"]).exists()
+    assert not list(tmp_path.glob("xflog-bootstrap.*"))
 
 
 @pytest.mark.parametrize(
