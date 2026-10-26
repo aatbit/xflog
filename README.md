@@ -31,7 +31,7 @@ To get ready:
 
 **X charges for API usage.** Check the current [Activity prices](https://docs.x.com/x-api/activity/event-pricing) and [credit/spending-limit rules](https://docs.x.com/x-api/getting-started/pricing) before turning tracking on. Running XFlog on your own machine or in Docker does not remove those charges. XFlog's event count does not limit your X bill.
 
-Put the required values in `.env` or enter them in the installer. Tracking starts when you confirm **Start tracking** in the app. Followers are enabled by default; paid subscription tracking stays off until you enable it in Profile. Without the user access token, XFlog will refuse to start or resume paid-subscription tracking when paid-subscription tracking is enabled. 
+Put the required values in `.env` or enter them in the installer. Tracking starts when you confirm **Start tracking** in the app. Followers are enabled by default; paid subscription tracking stays off until you enable it in Profile. Without the user access token, XFlog will refuse to start or resume paid-subscription tracking when paid-subscription tracking is enabled.
 To try the offline demo instead, leave all X settings blank—no X API calls are made.
 
 ### Installation
