@@ -268,6 +268,17 @@ In timeline settings, open **Audience Groups** to turn optional groups on or off
 
 Missing or invalid fields, and older events saved without them, appear as **Unknown**. XFlog does not fetch missing details. These fields are documented in [X’s user data dictionary](https://docs.x.com/x-api/fundamentals/data-dictionary) and [Activity event examples](https://docs.x.com/x-api/activity/event-payloads).
 
+**Profile location** is optional and starts off. It groups the location text delivered with new events, cleaning up spacing, capitalization differences, separators and a small set of clear aliases such as **NYC → New York City** and **Bangalore → Bengaluru**. Missing or unusable labels stay **Unknown**. It makes no extra X requests and does not look up or guess where someone lives. In the constellation, large lists show the largest groups plus **More groups**; Journal keeps every named group.
+
+<details>
+<summary>How location labels are cleaned up</summary>
+
+Matching ignores capitalization and differences in spaces, commas and periods. Unicode variants such as full-width letters are normalized. Common US/USA and UK spellings are merged. Otherwise, labels keep their wording and accents. Ambiguous labels remain separate: **New York** does not automatically mean **New York City**, and **London, UK** stays separate from **London, Ontario**. Multiple locations and labels such as **Remote** are kept as written, with separators tidied up.
+
+Blank values, placeholders such as `N/A`, invalid text and labels longer than 160 characters become Unknown. There is no fuzzy matching, geocoding or backfill. Only events received while the module is enabled capture location text; previously saved snapshots remain available if you turn it off and on again.
+
+</details>
+
 These groups describe the loaded history, not a complete or current follower list. Loading older events can add people or fill out a group. Turning a group off stops its extra processing and removes its lens; your recorded history stays saved. Group changes save automatically and keep the listener running.
 
 <details>
@@ -278,6 +289,8 @@ Each built-in group is a small, trusted Python module in `src/xflog/audience_gro
 History-derived modules can supply an async `prepare(events, lookup)` hook. The callback returns local context for the page’s event sequences: whether the actor appeared earlier and the last earlier follower-event kind. Previous encounters demonstrates this path. Lookups cover the full account log and run only while the module is enabled; prepared metadata is returned to the UI without rewriting saved events. The demo supplies its own in-memory history context.
 
 Import the module explicitly in the package’s `__init__.py`. The API catalog supplies its settings switch, lens option and overview buckets automatically; no feature-specific frontend code is needed. Follow the existing Account size module and its tests. Capture runs only while that group is enabled, and missing data must remain unknown.
+
+For categories derived from event labels, set `dynamic_buckets=True` and return a `Bucket` from `assign(event)`, as Profile location does. The registry includes its descriptor with the event; the shared frontend grouping helper supplies the same labels to both views. Keep an Unknown bucket and validate received text before saving it.
 
 This is a registration mechanism for code shipped with XFlog, not an installer for third-party plugins. Modules receive event data, not the X client or credentials. Keep them event-only: adding network lookups would need a separate design with explicit permission and cost handling.
 

@@ -20,6 +20,7 @@ def test_defaults_and_explicit_module_registration(monkeypatch):
         "account-size": False,
         "activity": True,
         "previous-encounters": False,
+        "profile-location": False,
         "verification": False,
     }
     assert groups.preferences({"account-size": "true", "activity": False}) == {
@@ -27,6 +28,7 @@ def test_defaults_and_explicit_module_registration(monkeypatch):
         "account-size": False,
         "activity": False,
         "previous-encounters": False,
+        "profile-location": False,
         "verification": False,
     }
     module = groups.AudienceGroup(
@@ -153,7 +155,12 @@ async def test_group_settings_are_protected_and_do_not_restart_or_call_x(tmp_pat
                 browser.post("/api/audience-groups", json={"enabled": enabled}, headers=headers)
                 for enabled in (
                     {"activity": False},
-                    {"account-size": True, "account-age": True, "verification": True},
+                    {
+                        "account-size": True,
+                        "account-age": True,
+                        "verification": True,
+                        "profile-location": True,
+                    },
                 )
             )
         )
@@ -163,12 +170,13 @@ async def test_group_settings_are_protected_and_do_not_restart_or_call_x(tmp_pat
             "account-age": True,
             "account-size": True,
             "previous-encounters": False,
+            "profile-location": True,
             "verification": True,
         }
         raw = envelope(identity="captured")
         raw["data"]["payload"]["source"]["data"]["public_metrics"] = {"followers_count": 0}
         raw["data"]["payload"]["source"]["data"].update(
-            created_at="2020-01-01T00:00:00Z", verified=True, verified_type="blue"
+            created_at="2020-01-01T00:00:00Z", verified=True, verified_type="blue", location="NYC"
         )
         await provider.body.queue.put(json.dumps(raw).encode() + b"\n")
         await asyncio.wait_for(provider.body.queue.join(), timeout=2)
@@ -177,11 +185,13 @@ async def test_group_settings_are_protected_and_do_not_restart_or_call_x(tmp_pat
             "account-size": "under-100",
             "account-age": "3-plus-years",
             "verification": "blue",
+            "profile-location": history[0]["audience_group_buckets"]["profile-location"]["key"],
         }
         snapshot = {
             "account-size": {"followers_count": 0},
             "account-age": {"created_at": "2020-01-01T00:00:00+00:00"},
             "verification": {"verified": True, "verified_type": "blue"},
+            "profile-location": {"location": "New York City"},
         }
         assert history[0]["group_data"] == snapshot
         await browser.post(

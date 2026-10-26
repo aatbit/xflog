@@ -73,6 +73,28 @@ export function visibleLabels(candidates, selected) {
   return new Set(visible.map((item) => item.id));
 }
 
+function compactGroups(groups, limit) {
+  if (!groups || groups.length <= limit) return groups;
+  const unknown = groups.filter((group) => group.key === "unknown");
+  const known = groups
+    .filter((group) => group.key !== "unknown")
+    .sort(
+      (a, b) =>
+        b.events.length - a.events.length || a.label.localeCompare(b.label),
+    );
+  const kept = known.slice(0, limit - 1 - unknown.length);
+  return [
+    ...kept,
+    {
+      key: "overview-more",
+      label: "More groups",
+      tone: "neutral",
+      events: known.slice(kept.length).flatMap((group) => group.events),
+    },
+    ...unknown,
+  ];
+}
+
 export function constellationLayout({
   events,
   width,
@@ -82,10 +104,21 @@ export function constellationLayout({
   lens,
 }) {
   const people = peopleFromEvents(events);
-  const buckets = groupEvents(
-    people.map((person) => person.event),
-    modules,
-    lens,
+  const upper = Math.min(90, height * 0.14);
+  const rowHeight = width < 680 ? 124 : 156;
+  const availableColumns = width < 700 ? 2 : 3;
+  const availableRows = Math.max(
+    1,
+    Math.floor((height - upper - 80) / rowHeight),
+  );
+  const groupLimit = Math.max(2, Math.min(6, availableColumns * availableRows));
+  const buckets = compactGroups(
+    groupEvents(
+      people.map((person) => person.event),
+      modules,
+      lens,
+    ),
+    groupLimit,
   );
   const byActor = new Map(people.map((person) => [person.id, person]));
   const groups = buckets
@@ -97,9 +130,8 @@ export function constellationLayout({
   const occupied = groups.filter((group) => group.people.length);
   const columns = Math.min(occupied.length, width < 700 ? 2 : 3);
   const rows = Math.ceil(occupied.length / Math.max(1, columns));
-  const upper = Math.min(90, height * 0.14);
   const lower = Math.max(
-    upper + rows * (width < 680 ? 124 : 156),
+    upper + rows * rowHeight,
     height - Math.min(255, height * 0.36),
   );
   const areaHeight = lower - upper;

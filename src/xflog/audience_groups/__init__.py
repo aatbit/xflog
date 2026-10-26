@@ -21,10 +21,11 @@ class AudienceGroup:
     label: str
     description: str
     buckets: tuple[Bucket, ...]
-    assign: Callable[[dict], str]
+    assign: Callable[[dict], str | Bucket]
     capture: Callable[[dict], dict] | None = None
     default_enabled: bool = False
     prepare: HistoryPreparation | None = None
+    dynamic_buckets: bool = False
 
 
 MODULES: dict[str, AudienceGroup] = {}
@@ -57,6 +58,7 @@ def catalog(saved=None) -> list[dict]:
             "label": module.label,
             "description": module.description,
             "enabled": enabled[key],
+            "dynamic_buckets": module.dynamic_buckets,
             "data_policy": "recorded_history" if module.prepare else "received_events_only",
             "buckets": [asdict(bucket) for bucket in module.buckets],
         }
@@ -77,12 +79,18 @@ def capture(source: dict, saved=None) -> dict:
 
 def decorate(event: dict, saved=None) -> dict:
     enabled = preferences(saved)
-    groups = {}
+    groups, descriptors = {}, {}
     for key, module in MODULES.items():
         if enabled[key]:
             bucket = module.assign(event)
-            groups[key] = bucket if bucket in {item.key for item in module.buckets} else "unknown"
-    return {**event, "audience_groups": groups}
+            if module.dynamic_buckets and isinstance(bucket, Bucket):
+                groups[key] = bucket.key
+                descriptors[key] = asdict(bucket)
+            else:
+                groups[key] = (
+                    bucket if bucket in {item.key for item in module.buckets} else "unknown"
+                )
+    return {**event, "audience_groups": groups, "audience_group_buckets": descriptors}
 
 
 async def decorate_history(events: list[dict], saved, lookup: HistoryLookup) -> list[dict]:
@@ -96,4 +104,11 @@ async def decorate_history(events: list[dict], saved, lookup: HistoryLookup) -> 
 
 
 # Explicit imports are the allowlist; registering a module never installs third-party code.
-from . import account_age, account_size, activity, previous_encounters, verification  # noqa: E402, F401
+from . import (  # noqa: E402, F401
+    account_age,
+    account_size,
+    activity,
+    previous_encounters,
+    profile_location,
+    verification,
+)

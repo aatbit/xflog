@@ -182,6 +182,86 @@ for (const module of modules.filter((module) => module.enabled)) {
     `${module.label} renders all registered buckets and keeps every record.`,
   );
 }
+const locations = modules.find((module) => module.key === "profile-location");
+assert.equal(locations.dynamic_buckets, true);
+const locationRecord = (index, label) => ({
+  ...events[0],
+  event_id: `location-${index}`,
+  sequence: index,
+  audience_groups: { "profile-location": `location-${index}` },
+  audience_group_buckets: {
+    "profile-location": { key: `location-${index}`, label, tone: "neutral" },
+  },
+});
+const locationRows = [
+  locationRecord(1, "London"),
+  locationRecord(2, "New York City"),
+  {
+    ...locationRecord(3, "London"),
+    audience_groups: { "profile-location": "location-1" },
+  },
+  { ...events[0], event_id: "unknown-location" },
+];
+locationRows[2].audience_group_buckets["profile-location"].key = "location-1";
+const namedGroups = groupEvents(locationRows, modules, locations.key);
+assert.deepEqual(
+  namedGroups.map((group) => [group.label, group.events.length]),
+  [
+    ["London", 2],
+    ["New York City", 1],
+    ["Unknown", 1],
+  ],
+);
+journal.render(locationRows, { ...options, lens: locations.key });
+assert.equal(element.groups.length, 3);
+element.groups[0].open = false;
+element.groups[0].handlers.toggle();
+journal.reveal("location-3");
+assert.equal(element.groups[0].open, true);
+assert.equal(scrolled, "location-3");
+const manyLocations = Array.from({ length: 30 }, (_, index) =>
+  locationRecord(index, `City ${index}`),
+);
+journal.render(manyLocations, { ...options, lens: locations.key });
+assert.equal(
+  element.groups.length,
+  30,
+  "Journal retains every named location.",
+);
+assert.equal(element.buttons.length, 30);
+for (const descriptor of [
+  null,
+  {},
+  { key: "wrong", label: "London" },
+  { key: "location-1", label: {} },
+  { key: "location-1", label: "a".repeat(161) },
+]) {
+  const row = locationRecord(1, "London");
+  row.audience_group_buckets[locations.key] = descriptor;
+  assert.equal(groupEvents([row], modules, locations.key)[0].key, "unknown");
+}
+assert.equal(
+  groupEvents(
+    [locationRecord(1, "London")],
+    [{ ...locations, dynamic_buckets: false }],
+    locations.key,
+  )[0].key,
+  "unknown",
+);
+assert.equal(
+  groupEvents(
+    [locationRecord(1, "🏔️".repeat(60) + "London")],
+    modules,
+    locations.key,
+  )[0].key,
+  "location-1",
+);
+journal.render([locationRecord(1, '<img src=x onerror="bad()">')], {
+  ...options,
+  lens: locations.key,
+});
+assert.ok(element.html.includes("&lt;img"));
+assert.ok(!element.html.includes("<img"));
 journal.render([{ ...events[0], name: '<img src=x onerror="bad()">' }], {
   ...options,
   modules: [extension],

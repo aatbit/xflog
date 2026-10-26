@@ -13,6 +13,45 @@ const {
 const { createConstellation } = await import(new URL("constellation.js", base));
 const { resolveLens } = await import(new URL("audience-ui.js", base));
 const modules = JSON.parse(process.argv[3]);
+const locations = modules.find((module) => module.key === "profile-location");
+const cityEvents = Array.from({ length: 40 }, (_, index) => ({
+  actor_id: String(index),
+  event_id: String(index),
+  sequence: index,
+  audience_groups: {
+    "profile-location": index ? `location-${index}` : "unknown",
+  },
+  audience_group_buckets: {
+    "profile-location": {
+      key: index ? `location-${index}` : "unknown",
+      label: index ? `City ${index}` : "Unknown",
+      tone: "neutral",
+    },
+  },
+}));
+for (const width of [320, 390, 798, 1440])
+  for (const height of [420, 560, 772])
+    for (const zoom of [0, 0.3, 1, 2]) {
+      const layout = constellationLayout({
+        events: cityEvents,
+        width,
+        height,
+        zoom,
+        modules,
+        lens: locations.key,
+      });
+      assert.ok(layout.groups.length <= 6);
+      assert.ok(layout.groups.some((group) => group.key === "overview-more"));
+      assert.ok(layout.groups.some((group) => group.key === "unknown"));
+      assert.equal(
+        layout.groups.reduce((total, group) => total + group.people.length, 0),
+        40,
+      );
+      assert.ok(
+        layout.people.every((point) => point.y > 0 && point.y < height),
+      );
+      assert.ok(layout.center < height / 2);
+    }
 const inactive = modules.map((module) => ({ ...module, enabled: false }));
 assert.equal(
   resolveLens(modules, "none"),

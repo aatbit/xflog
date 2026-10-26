@@ -35,7 +35,26 @@ def profile_metadata(index: int) -> dict:
         {"verified": False},
         {},
     )[person % 6]
-    return {"public_metrics": {"followers_count": count}, "created_at": created, **verification}
+    location = (
+        "NYC",
+        "New York City",
+        "London",
+        " london ",
+        "Bangalore, India",
+        "Bengaluru, India",
+        "U.S.A.",
+        "United States",
+        "Remote",
+        None,
+        "",
+        "Unknown",
+    )[person]
+    return {
+        "public_metrics": {"followers_count": count},
+        "created_at": created,
+        "location": location,
+        **verification,
+    }
 
 
 def demo_events() -> list[dict]:
