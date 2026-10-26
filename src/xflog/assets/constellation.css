@@ -126,6 +126,11 @@
   pointer-events: none;
   z-index: 0;
 }
+.shooting-star {
+  color: var(--text);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
 .constellation-links {
   position: absolute;
   inset: 0;

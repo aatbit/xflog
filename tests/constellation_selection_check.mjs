@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+const controlIds = new Set(
+  [
+    ...readFileSync(join(process.argv[2], "shell.html"), "utf8").matchAll(
+      /\bid="([^"]+)"/g,
+    ),
+  ].map((match) => match[1]),
+);
 const { createConstellation } = await import(
   new URL("constellation.js", pathToFileURL(process.argv[2] + "/"))
 );
@@ -35,6 +44,8 @@ globalThis.ResizeObserver = class {
 };
 const controls = new Map(),
   opened = [];
+let olderLoads = 0;
+const selectedSteps = [];
 function button(dataset) {
   return {
     dataset,
@@ -61,12 +72,16 @@ function button(dataset) {
 const root = {
   dataset: { route: "timeline", motion: "on" },
   querySelector(key) {
+    if (key.startsWith("#") && !controlIds.has(key.slice(1))) return null;
     if (!controls.has(key))
       controls.set(key, {
+        handlers: {},
         style: { setProperty() {} },
         classList: { toggle() {} },
         setAttribute() {},
-        addEventListener() {},
+        addEventListener(type, handler) {
+          this.handlers[type] = handler;
+        },
         removeEventListener() {},
       });
     return controls.get(key);
@@ -98,7 +113,7 @@ const element = {
   },
   releasePointerCapture() {},
   querySelector() {
-    return { style: {} };
+    return { style: {}, dataset: {}, setAttribute() {} };
   },
   querySelectorAll(key) {
     return key === "[data-actor]"
@@ -146,10 +161,25 @@ const scene = createConstellation({
   date: new Intl.DateTimeFormat("en"),
   time: new Intl.DateTimeFormat("en"),
   gained: (e) => e.kind === "follow.follow",
-  onSelect() {},
+  onSelect: (id) => selectedSteps.push(id),
   onOpen: (id) => opened.push(id),
+  hasOlder: () => true,
+  onOlder: () => olderLoads++,
 });
 scene.render(events, "old-A");
+assert.equal(
+  Number(controls.get("#scene-zoom").value),
+  0.8,
+  "First render starts at 80% zoom.",
+);
+assert.equal(controls.get("#zoom-value").textContent, "80%");
+controls.get("#zoom-in").handlers.click();
+assert.equal(Number(controls.get("#scene-zoom").value), 1.05);
+controls.get("#zoom-out").handlers.click();
+assert.equal(Number(controls.get("#scene-zoom").value), 0.8);
+controls.get("#scene-zoom").handlers.input({ target: { value: "1.2" } });
+assert.equal(controls.get("#zoom-value").textContent, "120%");
+scene.setZoom(0.8);
 const label = labels.find((n) => n.dataset.label === "A");
 assert.ok(label.innerHTML.includes("follow.unfollow"));
 assert.ok(label.innerHTML.includes("2 recorded events"));
@@ -193,10 +223,29 @@ assert.ok(
   "Release preserves the remaining smooth travel.",
 );
 scene.setZoom(0);
+assert.equal(
+  controls.get("#memory-scrubber").disabled,
+  true,
+  "Overview disables panning instead of moving a meaningless thumb.",
+);
 assert.ok(
   controls.get("#memory-next").disabled &&
     controls.get("#memory-previous").disabled,
-  "Fit hides and disables both side controls.",
+  "Full overview hides and disables both side controls.",
+);
+scene.setZoom(0.8);
+element.scrollLeft = 0;
+handlers.wheel({ deltaY: -100, deltaX: 0, deltaMode: 0, preventDefault() {} });
+assert.equal(
+  olderLoads,
+  1,
+  "Wheel at the oldest edge can request the next history page.",
+);
+scene.travel(1);
+assert.equal(
+  olderLoads,
+  2,
+  "The Older side control can request the next page at the edge.",
 );
 handlers.keydown({
   key: "Home",
@@ -207,6 +256,42 @@ assert.equal(
   nodes.find((node) => node.dataset.actor === "B").attributes["aria-pressed"],
   "true",
   "Home selects the oldest displayed person, not a later repeated actor.",
+);
+scene.render([...events, event("old-C", "C", 0, "follow.follow")], "new-A");
+selectedSteps.length = 0;
+scene.travel(1);
+scene.travel(1);
+scene.travel(-1);
+scene.travel(-1);
+assert.deepEqual(
+  selectedSteps,
+  ["other-B", "old-C", "other-B", "new-A"],
+  "Rapid Older/Newer clicks step exactly one selected profile before any animation frame.",
+);
+scene.seek(0);
+for (const progress of [1, 0, 0.72, 0.13, 1, 0.5]) {
+  scene.scrub(progress);
+  assert.ok(Math.abs(element.scrollLeft - (1 - progress) * 500) < 0.001);
+  assert.equal(
+    Number(controls.get("#memory-scrubber").value),
+    Math.round(progress * 1000),
+  );
+  assert.equal(
+    Number(controls.get("#scene-zoom").value),
+    0.8,
+    "Scrubbing never changes zoom.",
+  );
+}
+frame(1048);
+assert.equal(
+  element.scrollLeft,
+  250,
+  "A pending eased seek cannot resume after scrubbing reverses direction.",
+);
+assert.equal(
+  Number(controls.get("#memory-scrubber").value),
+  500,
+  "The thumb stays aligned with the actual viewport, not a repeated actor's event index.",
 );
 scene.destroy();
 console.log(

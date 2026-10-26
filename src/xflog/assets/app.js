@@ -117,6 +117,8 @@
     gained,
     onSelect: (identity) => selectEvent(identity),
     onOpen: (identity) => selectEvent(identity, true),
+    hasOlder: () => Boolean(state.next),
+    onOlder: () => requestOlder(),
   });
   const { createJournal } = await import("/static/xf/journal.js");
   const journal = createJournal({
@@ -382,15 +384,15 @@
       $("#scene-people-count").textContent =
         `${state.events.length} ${state.events.length === 1 ? "event" : "events"} in loaded history`;
     }
-    $("#history-count").textContent =
-      `${state.events.length} ${state.events.length === 1 ? "event" : "events"} loaded`;
-    $("#load-more").hidden = !state.next;
-    $("#memory-scrubber").max = Math.max(0, state.events.length - 1);
-    $("#memory-scrubber").disabled = !state.events.length;
-    $("#view-memory").disabled = !state.events.length;
-    $("#jump-latest").disabled = !state.events.length;
+    if (state.layout === "vertical") {
+      $("#memory-scrubber").max = Math.max(0, state.events.length - 1);
+      $("#memory-scrubber").disabled = !state.events.length;
+      $("#memory-scrubber").value = Math.max(
+        0,
+        state.events.findIndex((event) => event.event_id === state.selected),
+      );
+    }
     if (!state.events.length) {
-      $("#journey-date").textContent = "Your story starts here";
       $("#journey-position").textContent = "No memories in this view";
       $("#memory-scrubber").value = 0;
     }
@@ -415,17 +417,24 @@
     $("#mobile-detail").innerHTML = detail;
     if (state.layout === "horizontal") scene.select(identity);
     const index = state.events.findIndex((item) => item.event_id === identity);
-    $("#journey-date").textContent = dateFormat.format(displayDate(event));
     $("#journey-position").textContent =
       `Memory ${index + 1} of ${state.events.length} loaded`;
-    $("#memory-scrubber").value = index;
+    if (state.layout === "vertical") $("#memory-scrubber").value = index;
     $("#memory-scrubber").setAttribute(
       "aria-valuetext",
       `${event.name || event.handle || "X account"}, ${eventLabel(event)}, ${dateFormat.format(displayDate(event))}`,
     );
-    $("#view-memory").disabled = false;
     if (openMobile && !$("#detail-dialog").open)
       $("#detail-dialog").showModal();
+  }
+  function requestOlder() {
+    if (
+      !state.next ||
+      root.dataset.route !== "timeline" ||
+      $("#history").getAttribute("aria-busy") === "true"
+    )
+      return;
+    load(true);
   }
   async function load(append = false) {
     const generation = ++state.generation;
@@ -616,9 +625,6 @@
       await load();
     }),
   );
-  $("#load-more").addEventListener("click", (event) =>
-    action(event.currentTarget, () => load(true)),
-  );
   $("#tracking-button").addEventListener("click", startDialog);
   $("#preferences-form").addEventListener("submit", (event) => {
     event.preventDefault();
@@ -669,35 +675,27 @@
     $("#explore-dialog").showModal();
     $("#explore-dialog .panel-body").scrollTop = 0;
   });
-  $("#controls-toggle").addEventListener("click", (event) => {
-    const open = $(".scene-controls").classList.toggle("is-open");
-    event.currentTarget.setAttribute("aria-expanded", String(open));
-  });
-  $(".scene-controls").addEventListener("keydown", (event) => {
-    if (event.key !== "Escape") return;
-    $(".scene-controls").classList.remove("is-open");
-    $("#controls-toggle").setAttribute("aria-expanded", "false");
-    $("#history").focus({ preventScroll: true });
-  });
-  $("#view-memory").addEventListener("click", () => {
-    if (state.selected) selectEvent(state.selected, true);
-  });
   $("#memory-previous").addEventListener("click", () => scene.travel(-1));
   $("#memory-next").addEventListener("click", () => scene.travel(1));
-  $("#jump-latest").addEventListener("click", () => {
-    if (state.layout === "horizontal") scene.seek(0);
-    else if (state.events[0]) {
-      selectEvent(state.events[0].event_id);
-      journal.reveal(state.events[0].event_id);
-    }
-  });
   $("#memory-scrubber").addEventListener("input", (event) => {
     const index = Number(event.target.value);
-    if (state.layout === "horizontal") scene.seek(index);
+    if (state.layout === "horizontal") scene.scrub(index / 1000);
     else if (state.events[index]) {
       selectEvent(state.events[index].event_id);
       journal.reveal(state.events[index].event_id);
     }
+  });
+  $("#memory-scrubber").addEventListener("change", (event) => {
+    const end = state.layout === "horizontal" ? 1000 : state.events.length - 1;
+    if (Number(event.target.value) >= end) requestOlder();
+  });
+  $("#history").addEventListener("scroll", () => {
+    const history = $("#history");
+    if (
+      state.layout === "vertical" &&
+      history.scrollTop + history.clientHeight >= history.scrollHeight - 80
+    )
+      requestOlder();
   });
 
   $("#motion-toggle").addEventListener("click", (event) => {

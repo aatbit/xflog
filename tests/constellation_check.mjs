@@ -228,7 +228,8 @@ function exercise(refreshRate, speed = 1, duration = 1000) {
       },
     },
   };
-  const sky = { style: {} };
+  const sky = { style: {}, setAttribute() {} };
+  const meteor = { style: {}, dataset: {}, setAttribute() {} };
   const reduced = {
     matches: false,
     addEventListener(type, callback) {
@@ -277,7 +278,7 @@ function exercise(refreshRate, speed = 1, duration = 1000) {
     scrollWidth: 800,
     scrollLeft: 0,
     classList: { contains: () => true, toggle() {} },
-    querySelector: () => sky,
+    querySelector: (selector) => (selector === ".shooting-star" ? meteor : sky),
     querySelectorAll: (selector) => (selector === ".sky-star" ? [star] : []),
     addEventListener() {},
     removeEventListener() {},

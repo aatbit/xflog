@@ -98,3 +98,12 @@ def test_browser_notification_permission_and_fallbacks():
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_shooting_star_intervals_and_fades():
+    result = subprocess.run(
+        ["node", str(Path(__file__).with_name("shooting_star_check.mjs")), str(ASSETS)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr

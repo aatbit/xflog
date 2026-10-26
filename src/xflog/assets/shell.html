@@ -114,98 +114,63 @@
         </button>
       </nav>
       <div class="scene-controls">
-        <button
-          type="button"
-          id="controls-toggle"
-          class="controls-toggle"
-          aria-label="Timeline controls"
-          title="Timeline controls"
-          aria-expanded="false"
-          aria-controls="scene-control-content"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="m6 14 6-6 6 6" />
-          </svg>
-        </button>
         <div id="scene-control-content" class="controls-content">
-          <div class="journey-bar">
-            <div class="journey-date">
-              <span id="journey-date">Your story starts here</span
-              ><span id="journey-position" class="sr-only"
-                >No memories yet</span
-              >
-            </div>
-            <div class="journey-actions">
-              <button
-                type="button"
-                id="view-memory"
-                class="button subtle"
-                disabled
-              >
-                Open memory <span aria-hidden="true">↗</span>
-              </button>
-            </div>
-            <div class="journey-help">
-              <span>Scroll or swipe to travel</span
-              ><span>← Older · Newer →</span>
-            </div>
-          </div>
-          <div class="zoom-strip">
-            <div
-              class="zoom-controls"
-              role="group"
-              aria-label="Constellation zoom"
-            >
-              <button type="button" id="zoom-fit" aria-pressed="false">
-                Fit</button
-              ><button
-                type="button"
-                id="zoom-out"
-                aria-label="Zoom out of constellation"
-              >
-                −</button
-              ><label class="sr-only" for="scene-zoom">Constellation zoom</label
-              ><input
-                id="scene-zoom"
-                type="range"
-                min="0"
-                max="2"
-                step="0.05"
-                value="1"
-              /><button
-                type="button"
-                id="zoom-in"
-                aria-label="Zoom into constellation"
-              >
-                +</button
-              ><output id="zoom-value" for="scene-zoom">100%</output>
-            </div>
-            <span class="gesture-hint">Wheel to drift · drag to explore</span>
-          </div>
+          <span id="journey-position" class="sr-only">No memories yet</span>
           <div class="scrubber">
-            <label class="sr-only" for="memory-scrubber"
-              >Move through loaded history</label
-            >
-            <div class="navigator-track">
-              <div id="navigator-marks" aria-hidden="true"></div>
-              <span id="navigator-window" aria-hidden="true"></span
-              ><span id="navigator-cursor" aria-hidden="true"></span
-              ><input
-                id="memory-scrubber"
-                type="range"
-                min="0"
-                max="0"
-                value="0"
-                disabled
-              />
-            </div>
-            <div>
-              <button type="button" id="jump-latest" class="text-button">
-                Latest</button
-              ><span id="history-count">0 events loaded</span
-              ><button type="button" id="load-more" class="text-button" hidden>
-                ← Load older memories
-              </button>
+            <div class="navigator-row">
+              <label class="sr-only" for="memory-scrubber"
+                >Move through loaded history</label
+              >
+              <div class="navigator-track">
+                <input
+                  id="memory-scrubber"
+                  type="range"
+                  min="0"
+                  max="1000"
+                  value="0"
+                  disabled
+                />
+              </div>
+              <div
+                class="zoom-controls"
+                role="group"
+                aria-label="Constellation zoom"
+              >
+                <button
+                  type="button"
+                  id="zoom-out"
+                  aria-label="Zoom out of constellation"
+                  title="Zoom out"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="10" cy="10" r="6" />
+                    <path d="m15 15 5 5M7 10h6" />
+                  </svg>
+                </button>
+                <label class="sr-only" for="scene-zoom"
+                  >Constellation zoom</label
+                >
+                <input
+                  id="scene-zoom"
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="0.05"
+                  value="0.8"
+                />
+                <button
+                  type="button"
+                  id="zoom-in"
+                  aria-label="Zoom into constellation"
+                  title="Zoom in"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="10" cy="10" r="6" />
+                    <path d="m15 15 5 5M7 10h6M10 7v6" />
+                  </svg>
+                </button>
+                <output id="zoom-value" for="scene-zoom">80%</output>
+              </div>
             </div>
           </div>
         </div>

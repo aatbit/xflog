@@ -7,6 +7,7 @@ import {
   visibleLabels,
   seed,
 } from "./constellation-layout.js";
+import { createShootingStar } from "./shooting-star.js";
 
 export function createConstellation({
   element,
@@ -19,14 +20,17 @@ export function createConstellation({
   gained,
   onSelect,
   onOpen,
+  hasOlder = () => false,
+  onOlder = () => {},
 }) {
   const $ = (selector) => root.querySelector(selector);
+  const shootingStar = createShootingStar();
   let events = [],
     selected = null,
     modules = [],
     lens = "none",
     geometry = null;
-  let zoom = 0.55,
+  let zoom = 0.8,
     frame = 0,
     last = 0,
     clock = 0,
@@ -44,14 +48,12 @@ export function createConstellation({
     !document.hidden;
   const moving = () => !reduced.matches && root.dataset.motion !== "off";
   const current = () => events.find((event) => event.event_id === selected);
-  const indexOf = () =>
-    Math.max(
-      0,
-      events.findIndex((event) => event.event_id === selected),
-    );
   const maximum = () => Math.max(0, element.scrollWidth - element.clientWidth);
   const position = () =>
     geometry?.people.find((person) => person.id === current()?.actor_id);
+  const selectedProfileIndex = () =>
+    geometry?.people.findIndex((person) => person.id === current()?.actor_id) ??
+    -1;
   const eventDate = (event) => new Date(event.provider_at || event.received_at);
 
   function personLabel(person, event = person.event) {
@@ -70,12 +72,7 @@ export function createConstellation({
   function navigator() {
     if (!geometry) return;
     travelControls();
-    $("#zoom-value").textContent =
-      zoom === 0
-        ? geometry.overview
-          ? "Groups"
-          : "Fit"
-        : `${Math.round(zoom * 100)}%`;
+    $("#zoom-value").textContent = `${Math.round(zoom * 100)}%`;
     $("#scene-zoom").value = zoom;
     $("#scene-zoom").setAttribute(
       "aria-valuetext",
@@ -83,30 +80,40 @@ export function createConstellation({
         ? "Audience groups overview"
         : `${Math.round(zoom * 100)} percent`,
     );
-    $("#zoom-fit").setAttribute("aria-pressed", String(zoom === 0));
-    for (const id of ["#scene-zoom", "#zoom-fit", "#zoom-in", "#zoom-out"])
+    for (const id of ["#scene-zoom", "#zoom-in", "#zoom-out"])
       $(id).disabled = geometry.people.length < 2;
     $("#zoom-out").disabled ||= zoom === 0;
     $("#zoom-in").disabled ||= zoom === 2;
-    const fraction = Math.min(1, element.clientWidth / geometry.width);
-    $("#navigator-window").style.setProperty(
-      "--window-width",
-      `${fraction * 100}%`,
-    );
-    $("#navigator-window").style.setProperty(
-      "--window-start",
-      `${(element.scrollLeft / geometry.width) * 100}%`,
-    );
-    $("#navigator-cursor").style.left =
-      `${events.length > 1 ? (1 - indexOf() / (events.length - 1)) * 100 : 50}%`;
+    const history = $("#memory-scrubber");
+    history.max = 1000;
+    history.disabled = !geometry.canPan;
+    history.value = maximum()
+      ? Math.round((1 - element.scrollLeft / maximum()) * 1000)
+      : 500;
     $("#scene-people-count").textContent =
       `${geometry.people.length} ${geometry.people.length === 1 ? "person" : "people"} in loaded history`;
   }
+  function selectVisibleProfile() {
+    const center = element.scrollLeft + element.clientWidth / 2;
+    const closest = geometry.people.reduce(
+      (best, person) =>
+        Math.abs(person.x - center) < Math.abs(best.x - center) ? person : best,
+      geometry.people[0],
+    );
+    if (closest && closest.id !== current()?.actor_id) {
+      select(closest.event.event_id);
+      onSelect(closest.event.event_id);
+    }
+  }
   function travelControls() {
-    const canPan = geometry?.canPan;
+    const index = selectedProfileIndex();
+    const canPan = geometry?.canPan && index >= 0;
     for (const [id, available] of [
-      ["#memory-next", canPan && element.scrollLeft > 2],
-      ["#memory-previous", canPan && element.scrollLeft < maximum() - 2],
+      [
+        "#memory-next",
+        canPan && (index < geometry.people.length - 1 || hasOlder()),
+      ],
+      ["#memory-previous", canPan && index > 0],
     ]) {
       const button = $(id);
       button.disabled = !available;
@@ -170,6 +177,18 @@ export function createConstellation({
       actor = current()?.actor_id;
     element.querySelector(".constellation-sky").style.transform =
       `translateX(${left}px)`;
+    const meteor = element.querySelector(".shooting-star");
+    const meteorTail = element.querySelector(".shooting-tail");
+    const shot = moving()
+      ? shootingStar(clock, element.clientWidth, element.clientHeight)
+      : null;
+    meteor.style.opacity = String(shot?.opacity || 0);
+    meteor.dataset.active = String(Boolean(shot && shot.opacity > 0));
+    if (shot)
+      for (const key of ["x1", "y1", "x2", "y2"]) {
+        meteor.setAttribute(key, shot[key].toFixed(2));
+        meteorTail.setAttribute(key, shot[key].toFixed(2));
+      }
     const candidates = [];
     for (const item of labels) {
       const chosen = item.person.id === actor;
@@ -224,22 +243,9 @@ export function createConstellation({
       trail.setAttribute("y2", (a.y + (b.y - a.y) * part).toFixed(2));
     });
     if (geometry.canPan && !seeking && !drag) {
-      const closest = geometry.people.reduce(
-        (best, person) =>
-          Math.abs(person.x - left - element.clientWidth / 2) <
-          Math.abs(best.x - left - element.clientWidth / 2)
-            ? person
-            : best,
-        geometry.people[0],
-      );
-      if (
-        closest &&
-        closest.id !== actor &&
-        target === null &&
-        element.dataset.userScrolling === "true"
-      ) {
-        select(closest.event.event_id);
-        onSelect(closest.event.event_id);
+      if (target === null && element.dataset.userScrolling === "true") {
+        selectVisibleProfile();
+        delete element.dataset.userScrolling;
       }
     }
     navigator();
@@ -274,7 +280,7 @@ export function createConstellation({
         .slice(1)
         .map((person, index) => ({ a: person, b: people[index] }));
     });
-    element.innerHTML = `<svg class="constellation-sky" viewBox="0 0 ${element.clientWidth} ${element.clientHeight}" aria-hidden="true">${background}</svg><div class="constellation-canvas" style="width:${geometry.width}px"><svg class="constellation-links" viewBox="0 0 ${geometry.width} ${element.clientHeight}" aria-hidden="true">${geometry.overview ? "" : links.map(({ a, b }) => `<path d="M${a.x},${a.y}L${b.x},${b.y}"/><line class="sequence-trail"/><circle class="sequence-spark" r="2"/>`).join("")}</svg>${geometry.people.map((person) => `<article class="constellation-person" data-person="${esc(person.id)}"><button class="constellation-star ${esc(person.tone)}" type="button" style="left:${person.x}px;top:${person.y}px" data-actor="${esc(person.id)}" data-event="${esc(person.event.event_id)}" aria-label="${esc(person.event.name || person.event.handle || "X account")}, ${esc(label(person.event))}, ${person.events.length} recorded events"><span class="star-core" aria-hidden="true"></span><span class="star-initials" aria-hidden="true">${esc(initials(person.event))}</span></button><button type="button" class="star-label" data-label="${esc(person.id)}" aria-label="Open recorded event for ${esc(person.event.name || person.event.handle || "X account")}">${personLabel(person)}</button></article>`).join("")}${geometry.overview ? geometry.groups.map((group) => `<button type="button" class="constellation-group ${esc(group.tone)}" style="left:${group.x}px;top:${group.y}px" data-group="${esc(group.key)}" aria-label="Explore ${esc(group.label)}, ${group.people.length} ${group.people.length === 1 ? "person" : "people"}"><span class="cluster-count">${group.people.length}</span><strong title="${esc(group.label)}">${esc(group.label)}</strong><span>${group.people.length === 1 ? "person" : "people"}</span></button>`).join("") : ""}</div>`;
+    element.innerHTML = `<svg class="constellation-sky" viewBox="0 0 ${element.clientWidth} ${element.clientHeight}" aria-hidden="true">${background}<defs><linearGradient id="xf-shooting-tail" class="shooting-tail" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="currentColor" stop-opacity="0"/><stop offset="1" stop-color="currentColor"/></linearGradient></defs><line class="shooting-star" data-active="false" stroke="url(#xf-shooting-tail)" opacity="0"/></svg><div class="constellation-canvas" style="width:${geometry.width}px"><svg class="constellation-links" viewBox="0 0 ${geometry.width} ${element.clientHeight}" aria-hidden="true">${geometry.overview ? "" : links.map(({ a, b }) => `<path d="M${a.x},${a.y}L${b.x},${b.y}"/><line class="sequence-trail"/><circle class="sequence-spark" r="2"/>`).join("")}</svg>${geometry.people.map((person) => `<article class="constellation-person" data-person="${esc(person.id)}"><button class="constellation-star ${esc(person.tone)}" type="button" style="left:${person.x}px;top:${person.y}px" data-actor="${esc(person.id)}" data-event="${esc(person.event.event_id)}" aria-label="${esc(person.event.name || person.event.handle || "X account")}, ${esc(label(person.event))}, ${person.events.length} recorded events"><span class="star-core" aria-hidden="true"></span><span class="star-initials" aria-hidden="true">${esc(initials(person.event))}</span></button><button type="button" class="star-label" data-label="${esc(person.id)}" aria-label="Open recorded event for ${esc(person.event.name || person.event.handle || "X account")}">${personLabel(person)}</button></article>`).join("")}${geometry.overview ? geometry.groups.map((group) => `<button type="button" class="constellation-group ${esc(group.tone)}" style="left:${group.x}px;top:${group.y}px" data-group="${esc(group.key)}" aria-label="Explore ${esc(group.label)}, ${group.people.length} ${group.people.length === 1 ? "person" : "people"}"><span class="cluster-count">${group.people.length}</span><strong title="${esc(group.label)}">${esc(group.label)}</strong><span>${group.people.length === 1 ? "person" : "people"}</span></button>`).join("") : ""}</div>`;
     stars = [...element.querySelectorAll(".sky-star")];
     const labelNodes = new Map(
       [...element.querySelectorAll("[data-label]")].map((item) => [
@@ -329,12 +335,6 @@ export function createConstellation({
         );
       }),
     );
-    $("#navigator-marks").innerHTML = events
-      .map(
-        (_, index) =>
-          `<i style="left:${events.length > 1 ? (1 - index / (events.length - 1)) * 100 : 50}%"></i>`,
-      )
-      .join("");
     const point = position();
     element.scrollLeft =
       geometry.canPan && point
@@ -373,22 +373,34 @@ export function createConstellation({
     zoom = clamp(Math.round(value * 20) / 20, 0, 2);
     render(events, selected);
   }
+  function scrub(progress) {
+    if (!geometry?.canPan) return;
+    target = null;
+    seeking = false;
+    element.scrollLeft = (1 - clamp(progress, 0, 1)) * maximum();
+    delete element.dataset.userScrolling;
+    selectVisibleProfile();
+    navigator();
+    queue();
+  }
   function travel(delta) {
     if (!geometry?.canPan) return;
-    const center = element.scrollLeft + element.clientWidth / 2;
-    const candidates = geometry.people.filter((person) =>
-      delta > 0 ? person.x < center - 2 : person.x > center + 2,
-    );
-    const next = candidates.sort(
-      (a, b) => Math.abs(a.x - center) - Math.abs(b.x - center),
-    )[0];
+    const index = selectedProfileIndex();
+    if (index < 0) return;
+    const next = geometry.people[index + Math.sign(delta)];
     if (next)
       seek(events.findIndex((event) => event.event_id === next.event.event_id));
+    else if (delta > 0) onOlder();
   }
   function onWheel(event) {
     if (!geometry || !geometry.canPan || event.ctrlKey || event.metaKey) return;
     const delta = wheelDistance(event, element.clientWidth);
     if (!delta) return;
+    if (delta < 0 && element.scrollLeft <= 2 && hasOlder()) {
+      event.preventDefault();
+      selectVisibleProfile();
+      onOlder();
+    }
     const next = clamp((target ?? element.scrollLeft) + delta, 0, maximum());
     if (next === (target ?? element.scrollLeft)) return;
     event.preventDefault();
@@ -495,7 +507,6 @@ export function createConstellation({
     [document, "visibilitychange", refresh],
     [$("#zoom-in"), "click", () => setZoom(zoom + 0.25)],
     [$("#zoom-out"), "click", () => setZoom(zoom - 0.25)],
-    [$("#zoom-fit"), "click", () => setZoom(0)],
     [$("#scene-zoom"), "input", (event) => setZoom(Number(event.target.value))],
   ];
   listeners.forEach(([target, type, listener, options]) =>
@@ -516,6 +527,7 @@ export function createConstellation({
     render,
     select,
     seek,
+    scrub,
     setZoom,
     travel,
     configure: (nextModules, nextLens) => {
@@ -527,8 +539,9 @@ export function createConstellation({
       stop();
       geometry = null;
       events = [];
+      $("#memory-scrubber").disabled = true;
       travelControls();
-      for (const id of ["#scene-zoom", "#zoom-fit", "#zoom-in", "#zoom-out"])
+      for (const id of ["#scene-zoom", "#zoom-in", "#zoom-out"])
         $(id).disabled = true;
     },
     destroy: () => {

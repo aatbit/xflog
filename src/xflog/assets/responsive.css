@@ -7,17 +7,8 @@
     height: calc(100dvh - 80px);
     min-height: 560px;
   }
-  .journey-bar {
-    padding: 0 28px 12px;
-  }
   .scrubber {
     padding: 0 28px 16px;
-  }
-  .journey-help {
-    display: none;
-  }
-  .journey-bar {
-    grid-template-columns: 1fr auto;
   }
   .header-actions {
     gap: 4px;
@@ -80,42 +71,8 @@
   .constellation-canvas {
     min-height: 400px;
   }
-  .journey-bar {
-    padding: 0 20px 8px;
-    gap: 12px;
-  }
-  .journey-date > span:first-child {
-    font-size: 14px;
-  }
-  .journey-date > span:last-child {
-    font-size: 11px;
-  }
-  .journey-actions {
-    gap: 5px;
-  }
-  .journey-actions .button {
-    padding: 8px;
-    gap: 6px;
-    font-size: 12px;
-    min-height: 44px;
-  }
-  .journey-actions .icon-button {
-    width: 38px;
-    height: 38px;
-    font-size: 18px !important;
-  }
   .scrubber {
     padding: 0 20px 12px;
-  }
-  .scrubber > div {
-    font-size: 11px;
-    gap: 12px;
-  }
-  .scrubber input {
-    height: 28px;
-  }
-  .scrubber .text-button {
-    font-size: 11px;
   }
   .notice {
     margin: 0 20px;
