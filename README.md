@@ -50,7 +50,7 @@ less install-xflog.sh
 bash install-xflog.sh
 ```
 
-Choose **install**, **update** or **uninstall**. A new install asks for Docker or native Linux, a fresh installation directory, local port, browser-facing origin, X credentials and a separate instance password. Secrets are hidden while typing and saved in an owner-only `.env`; a blank password generates one there. The browser username is **`xflog`**. Review the prepared configuration before the final activation prompt. New installs refuse existing paths and services. Do not run the installer with `sudo`.
+Choose **install**, **update** or **uninstall**. A new install asks for Docker or native Linux, a fresh installation directory, local port, browser-facing origin, X credentials and a password for opening XFlog in your browser. Tokens and passwords are hidden while you type and saved in `.env`. See [the password explanation below](#opening-xflog-username-and-password). Review the prepared configuration before the final activation prompt. New installs refuse existing paths and services. Do not run the installer with `sudo`.
 
 - **Docker:** install Docker Engine, its Compose plugin and git first, and ensure your user can access the daemon. Choose a Compose project name and optionally an existing Docker network for your reverse proxy. The app keeps its private default network and localhost-only published port. Compose builds and starts it with `restart: unless-stopped`; enable Docker's own boot startup separately if your OS has not done so.
 - **Native:** Linux, Bash, git, Python 3.12+ with `venv`/`ensurepip`, and a working systemd user session are required. A private virtual environment runs a user `xflog.service`. The installer enables user lingering for startup without an interactive login; the OS may request administrator authorization for that step. It does not install Python or system packages. History defaults to `~/.local/share/xflog/data/history.sqlite3` for this installation method.
@@ -64,6 +64,28 @@ To update an installer-managed deployment, run the same script, choose **update*
 To uninstall, choose **uninstall** and the same mode/directory. This removes the Docker runtime or disables/removes the native user service. By default the checkout, native virtual environment, `.env`, history and network overrides remain for recovery; **update** can activate that retained installation again. Separate prompts require typing **`DELETE`** to remove recorded history and to remove `.env`. Docker deletion is restricted to the installation's owned `history` volume; native deletion removes only the configured database, its SQLite sidecars and pause marker. Custom/external volumes, proxy networks, backups and shared user lingering are never deleted. Pause tracking in the UI before uninstalling if X subscriptions need cleanup; uninstall makes no X calls and never revokes external tokens.
 
 A retained or restored database keeps its saved Start choice, so remove credentials or pause before activation if collection should stay stopped. Manual Docker `down` keeps history; **`down -v` deletes it**. Environment changes require container recreation (`docker compose up -d --force-recreate`) or a native service restart. If maintenance was interrupted, remove `.xflog-maintenance.lock` only after verifying that no updater/uninstaller is still running.
+
+### Opening XFlog: username and password
+
+The XFlog password protects your saved history and tracking controls. It is separate from your X account, X API tokens and computer login. You do not need to register an XFlog account.
+
+When your browser asks for a username and password, use:
+
+- **Username:** `xflog` (always the same).
+- **Password:** the value saved as `XFLOG_ADMIN_PASSWORD` in your installation's `.env` file.
+
+At the installer's password prompt, you can type your own password of at least 16 ASCII characters, or **press Enter to generate a random one**. The installer saves the generated password in `.env`; open that file locally to read it. Pressing Enter does **not** turn off password protection.
+
+| Setup | Is a browser password needed? |
+| --- | --- |
+| Manual native run, accessible only on your own computer through localhost | Optional. You can leave `XFLOG_ADMIN_PASSWORD` unset when both the server bind address and HTTP browser address are local. |
+| Interactive installer, Docker or native | The installer always sets a password, even for local use. |
+| Supplied Docker Compose setup | Required, even when you only open it on localhost. |
+| VPS or another remotely accessible setup | Required. Use HTTPS when accessing it remotely. |
+
+The installer and Docker setup use a password by default so the same installation is protected if you later make it remotely accessible. A manual native run can be password-free when it stays on localhost.
+
+The installer gives `.env` file permissions of `0600`, so other ordinary users on the machine cannot read it. **The file is plain text, not encrypted.** Host administrators can still read it; keep the file and its backups private.
 
 ## Docker Compose
 
@@ -128,7 +150,7 @@ docker compose up -d --force-recreate
 | `X_APP_BEARER_TOKEN` | Required for live tracking. App credential for public subscriptions and the Activity stream. |
 | `X_USER_ID` | Required for live tracking. Numeric target account ID, not an @handle. |
 | `X_USER_ACCESS_TOKEN` | Required for paid-subscription tracking; optional for followers only. OAuth 2.0 token for the target account; obtain and refresh it externally. |
-| `XFLOG_ADMIN_PASSWORD` | Instance access password; required for Docker/network binding and HTTPS origins. Browser username is `xflog`. Optional for native loopback-only use. |
+| `XFLOG_ADMIN_PASSWORD` | Password for opening XFlog; browser username is always `xflog`. The installer always sets one, and Docker/remote setups require it. Optional only for a manual native run on localhost. See [the password explanation](#opening-xflog-username-and-password). |
 | `XFLOG_ORIGIN` | Browser origin. Default `http://127.0.0.1:7860`; use HTTPS for a public domain. |
 | `XFLOG_PUBLISH_PORT` | Compose host port, default `7860`. Update `XFLOG_ORIGIN` to match local port changes. |
 | `XFLOG_DATABASE` | SQLite path. Docker defaults to `/data/history.sqlite3`; keep it under `/data` for persistence. |
