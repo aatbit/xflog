@@ -39,7 +39,8 @@ export function createConstellation({
     drag = null;
   let stars = [],
     labels = [],
-    sparks = [];
+    sparks = [],
+    labelInset = 16;
   const reduced = matchMedia("(prefers-reduced-motion: reduce)");
   const active = () =>
     geometry &&
@@ -198,7 +199,7 @@ export function createConstellation({
       const bottom = geometry.lower + 25;
       let top = item.person.y + 27;
       if (top + height > bottom) top = item.person.y - height - 25;
-      top = clamp(top, 16, Math.max(16, bottom - height));
+      top = clamp(top, labelInset, Math.max(labelInset, bottom - height));
       const center = chosen
         ? clamp(x, width / 2 + 16, element.clientWidth - width / 2 - 16)
         : x;
@@ -257,6 +258,7 @@ export function createConstellation({
     stop();
     events = nextEvents;
     selected = identity;
+    labelInset = ($(".scene-context")?.offsetHeight || 0) + 28;
     geometry = constellationLayout({
       events,
       width: element.clientWidth,

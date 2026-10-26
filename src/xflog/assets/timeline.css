@@ -1,3 +1,10 @@
+.scene-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 400px;
+}
 .history {
   position: relative;
   flex: 1;
@@ -139,9 +146,13 @@
   font-size: 12px !important;
 }
 .history.vertical {
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 8px max(24px, calc((100% - 780px) / 2)) 190px;
+  padding: 8px max(24px, calc((100% - 780px) / 2)) 24px;
+}
+#timeline-view[data-layout="vertical"] .scrubber {
+  display: none;
 }
 #timeline-view[data-layout="vertical"] .scene-context {
   position: relative;
@@ -455,10 +466,8 @@
   position: relative;
 }
 .scene-controls {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  position: relative;
+  flex-shrink: 0;
   z-index: 300;
 }
 .controls-content {

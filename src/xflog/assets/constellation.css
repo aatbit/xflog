@@ -59,7 +59,7 @@
 #lens-trigger[aria-expanded="true"] .lens-chevron {
   transform: rotate(180deg);
 }
-#audience-lens {
+.choice-popover {
   position: fixed;
   inset: auto;
   margin: 0;
@@ -73,7 +73,7 @@
   box-shadow: 0 12px 40px #0005; /* taste-skill-ignore: floating native popover */
   animation: lens-arrive var(--quick) var(--ease);
 }
-#audience-lens button {
+.choice-popover button {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -89,16 +89,23 @@
   font: inherit;
   font-size: 13px;
 }
-#audience-lens button:hover,
-#audience-lens button:focus-visible {
+.choice-popover button:hover,
+.choice-popover button:focus-visible {
   background: var(--active);
   color: var(--text);
 }
-#audience-lens button[aria-checked="true"] {
+.choice-popover button[aria-checked="true"] {
   color: var(--accent);
 }
-#audience-lens button[aria-checked="true"]::after {
-  content: "✓";
+.choice-popover button[aria-checked="true"]::after {
+  content: "";
+  width: 5px;
+  height: 9px;
+  flex-shrink: 0;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  margin-right: 3px;
 }
 @keyframes lens-arrive {
   from {
@@ -166,7 +173,7 @@
 }
 .scene-travel {
   position: absolute;
-  top: 62%;
+  bottom: 24px;
   left: 32px;
   right: 32px;
   z-index: 8;
@@ -175,13 +182,14 @@
   pointer-events: none;
 }
 .scene-travel button {
-  min-width: 88px;
+  width: 44px;
+  min-width: 44px;
   min-height: 44px;
-  padding: 10px 15px;
-  border: 1px solid var(--control);
-  border-radius: 24px;
-  background: var(--ground);
-  color: var(--text);
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
   display: flex;
   gap: 8px;
   align-items: center;
@@ -195,7 +203,18 @@
     visibility 0s;
 }
 .scene-travel button:hover {
+  color: var(--accent);
+  background: var(--surface);
   border-color: var(--accent);
+}
+.scene-travel button svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .scene-travel button.is-unavailable {
   opacity: 0 !important;
@@ -444,7 +463,6 @@
   .scene-travel {
     left: 20px;
     right: 20px;
-    top: 66%;
   }
   .scene-context {
     left: 20px;

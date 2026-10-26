@@ -15,9 +15,10 @@ from pydantic import BaseModel, ConfigDict, StrictBool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import audience_groups
+from .activity_summary import PERIODS, SUBJECT_TYPES, activity_window, readings
 from .collector import DEFAULT_SELECTION, Collector
 from .config import ASSETS, Config
-from .demo import demo_history
+from .demo import demo_activity, demo_history
 from .demo import encounter_context as demo_encounter_context
 from .errors import SetupError
 from .storage import Store
@@ -191,6 +192,17 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
             "audience_groups": audience_groups.catalog(await store.setting("audience_groups", {})),
         }
 
+    @app.get("/api/activity-summary")
+    async def activity_summary(period: str = "24h", subject: str = "followers", demo: bool = False):
+        if period not in PERIODS or subject not in SUBJECT_TYPES:
+            raise HTTPException(422, "Invalid activity period or audience.")
+        if demo:
+            return demo_activity(period, subject)
+        window = activity_window(period)
+        account = await store.setting("account")
+        counts = await store.activity_counts(account["id"], window, subject) if account else {}
+        return {**readings(counts, window, subject), "synthetic": False}
+
     @app.get("/api/events")
     async def history(kind: str = "all", subject: str = "followers", before: int = 0):
         if (
@@ -282,6 +294,7 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
                     "constellation.css",
                     "settings.css",
                     "responsive.css",
+                    "activity-hud.css",
                 )
             ],
             favicon_path=str(ASSETS / "mark.svg"),

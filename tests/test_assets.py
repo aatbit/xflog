@@ -107,3 +107,12 @@ def test_shooting_star_intervals_and_fades():
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_activity_readings_and_period_request_order():
+    result = subprocess.run(
+        ["node", str(Path(__file__).with_name("activity_hud_check.mjs")), str(ASSETS)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr

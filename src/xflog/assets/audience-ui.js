@@ -1,3 +1,5 @@
+import { bindPopover } from "./popover.js";
+
 export function resolveLens(groups, current) {
   return groups.some((group) => group.enabled && group.key === current)
     ? current
@@ -8,51 +10,7 @@ export function createAudienceControls({ root, onToggle, onLens }) {
   const $ = (selector) => root.querySelector(selector);
   const trigger = $("#lens-trigger"),
     picker = $("#audience-lens");
-  const items = () => [...picker.querySelectorAll("button")];
-  const position = () => {
-    const rect = trigger.getBoundingClientRect();
-    picker.style.top = `${rect.bottom + 8}px`;
-    picker.style.left = `${Math.max(16, Math.min(rect.right - 200, innerWidth - 216))}px`;
-  };
-  const close = () => {
-    picker.hidePopover();
-    trigger.focus();
-  };
-  picker.addEventListener("beforetoggle", (event) => {
-    if (event.newState === "open") position();
-  });
-  picker.addEventListener("toggle", (event) => {
-    const open = event.newState === "open";
-    trigger.setAttribute("aria-expanded", String(open));
-    if (open)
-      (picker.querySelector('[aria-checked="true"]') || items()[0])?.focus();
-  });
-  trigger.addEventListener("keydown", (event) => {
-    if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
-    event.preventDefault();
-    picker.showPopover();
-  });
-  picker.addEventListener("keydown", (event) => {
-    const options = items(),
-      index = options.indexOf(document.activeElement);
-    const keys = {
-      ArrowDown: (index + 1) % options.length,
-      ArrowUp: (index - 1 + options.length) % options.length,
-      Home: 0,
-      End: options.length - 1,
-    };
-    if (Object.hasOwn(keys, event.key)) {
-      event.preventDefault();
-      options[keys[event.key]]?.focus();
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      close();
-    } else if (event.key === "Tab") close();
-  });
-  const resize = () => {
-    if (picker.matches(":popover-open")) position();
-  };
-  window.addEventListener("resize", resize);
+  const menu = bindPopover(trigger, picker);
   return {
     render(groups, lens) {
       const enabled = groups.filter((group) => group.enabled);
@@ -75,7 +33,7 @@ export function createAudienceControls({ root, onToggle, onLens }) {
         item.textContent = option.label;
         item.addEventListener("click", () => {
           onLens(option.key);
-          close();
+          menu.close();
         });
         picker.append(item);
       }
@@ -101,7 +59,7 @@ export function createAudienceControls({ root, onToggle, onLens }) {
       }
     },
     destroy() {
-      window.removeEventListener("resize", resize);
+      menu.destroy();
     },
   };
 }

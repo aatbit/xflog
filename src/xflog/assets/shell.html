@@ -43,78 +43,125 @@
     <div id="notice" class="notice" role="status" hidden></div>
     <section id="timeline-view" aria-labelledby="timeline-title">
       <h1 id="timeline-title" class="sr-only">Audience history</h1>
-      <div class="scene-context">
-        <span
-          ><strong id="scene-lens-label">Ungrouped</strong
-          ><span id="scene-people-count"></span
-        ></span>
-        <div id="lens-control" hidden>
+      <div class="scene-stage">
+        <div class="scene-context">
+          <span
+            ><strong id="scene-lens-label">Ungrouped</strong
+            ><span id="scene-people-count"></span
+          ></span>
+          <div id="lens-control" hidden>
+            <button
+              type="button"
+              id="lens-trigger"
+              popovertarget="audience-lens"
+              aria-label="Choose audience lens"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              aria-controls="audience-lens"
+              title="Choose audience lens"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="m4 12 11-6 5 5-11 6zM8 17l-3 4m4-4 3 4M15 6l2-2 5 5-2 2"
+                />
+              </svg>
+              <svg class="lens-chevron" viewBox="0 0 12 12" aria-hidden="true">
+                <path d="m3 4 3 3 3-3" />
+              </svg>
+            </button>
+            <div
+              id="audience-lens"
+              class="choice-popover"
+              popover="auto"
+              role="menu"
+              aria-label="Audience lens"
+            ></div>
+          </div>
+        </div>
+        <div
+          id="history"
+          class="history horizontal"
+          role="region"
+          aria-label="Follower event timeline"
+          tabindex="0"
+        >
+          <div class="empty-state">
+            <h2>Every connection<br />has a chapter.</h2>
+            <p>Your follower history begins when you start tracking.</p>
+            <button class="button primary" type="button" id="empty-demo">
+              Explore the demo <span aria-hidden="true">→</span>
+            </button>
+          </div>
+        </div>
+        <nav class="scene-travel" aria-label="Move through constellation">
           <button
             type="button"
-            id="lens-trigger"
-            popovertarget="audience-lens"
-            aria-label="Choose audience lens"
-            aria-haspopup="menu"
-            aria-expanded="false"
-            aria-controls="audience-lens"
-            title="Choose audience lens"
+            id="memory-next"
+            class="is-unavailable"
+            aria-label="Older memory"
+            title="Older memory"
+            aria-hidden="true"
+            disabled
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                d="m4 12 11-6 5 5-11 6zM8 17l-3 4m4-4 3 4M15 6l2-2 5 5-2 2"
-              />
-            </svg>
-            <svg class="lens-chevron" viewBox="0 0 12 12" aria-hidden="true">
-              <path d="m3 4 3 3 3-3" />
+              <path d="M19 12H5m6-6-6 6 6 6" />
             </svg>
           </button>
-          <div
-            id="audience-lens"
-            popover="auto"
-            role="menu"
-            aria-label="Audience lens"
-          ></div>
-        </div>
-      </div>
-      <div
-        id="history"
-        class="history horizontal"
-        role="region"
-        aria-label="Follower event timeline"
-        tabindex="0"
-      >
-        <div class="empty-state">
-          <h2>Every connection<br />has a chapter.</h2>
-          <p>Your follower history begins when you start tracking.</p>
-          <button class="button primary" type="button" id="empty-demo">
-            Explore the demo <span aria-hidden="true">→</span>
+          <button
+            type="button"
+            id="memory-previous"
+            class="is-unavailable"
+            aria-label="Newer memory"
+            title="Newer memory"
+            aria-hidden="true"
+            disabled
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 12h14m-6-6 6 6-6 6" />
+            </svg>
           </button>
-        </div>
+        </nav>
       </div>
-      <nav class="scene-travel" aria-label="Move through constellation">
-        <button
-          type="button"
-          id="memory-next"
-          class="is-unavailable"
-          aria-label="Older memory"
-          aria-hidden="true"
-          disabled
-        >
-          <span aria-hidden="true">←</span> Older
-        </button>
-        <button
-          type="button"
-          id="memory-previous"
-          class="is-unavailable"
-          aria-label="Newer memory"
-          aria-hidden="true"
-          disabled
-        >
-          Newer <span aria-hidden="true">→</span>
-        </button>
-      </nav>
       <div class="scene-controls">
         <div id="scene-control-content" class="controls-content">
+          <section
+            id="activity-hud"
+            class="activity-hud"
+            aria-label="Recorded activity"
+            aria-busy="true"
+          >
+            <dl id="activity-readings" class="activity-readings"></dl>
+            <div class="hud-tools">
+              <button
+                type="button"
+                id="activity-period-trigger"
+                popovertarget="activity-periods"
+                aria-haspopup="menu"
+                aria-expanded="false"
+                aria-label="Activity period: 24h"
+                title="Choose activity period"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="8" />
+                  <path d="M12 7v5l3 2" />
+                </svg>
+                <span id="activity-period-value">24h</span>
+                <svg class="hud-chevron" viewBox="0 0 12 12" aria-hidden="true">
+                  <path d="m3 4.5 3 3 3-3" />
+                </svg>
+              </button>
+            </div>
+            <p id="activity-error" class="hud-error" role="status" hidden>
+              Readings unavailable. Retrying shortly.
+            </p>
+            <div
+              id="activity-periods"
+              class="choice-popover"
+              popover
+              role="menu"
+              aria-label="Activity period"
+            ></div>
+          </section>
           <span id="journey-position" class="sr-only">No memories yet</span>
           <div class="scrubber">
             <div class="navigator-row">
@@ -403,24 +450,6 @@
           One star per person in the loaded history. Lines trace recorded
           sequence, not relationships.
         </p>
-      </section>
-      <section class="panel-section" aria-labelledby="recorded-title">
-        <h3 id="recorded-title">Recorded events</h3>
-        <div class="summary" aria-label="Event history totals">
-          <div>
-            <strong id="net-value">0</strong
-            ><span id="net-label">Net follower events</span>
-          </div>
-          <div>
-            <strong id="gained-value">0</strong
-            ><span id="gained-label">Followers gained</span>
-          </div>
-          <div>
-            <strong id="lost-value">0</strong
-            ><span id="lost-label">Followers lost</span>
-          </div>
-        </div>
-        <p class="setting-description">Since tracking began.</p>
       </section>
       <details class="workspace-settings">
         <summary>

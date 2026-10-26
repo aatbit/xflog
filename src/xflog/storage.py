@@ -4,6 +4,7 @@ from pathlib import Path
 
 import aiosqlite
 
+from .activity_summary import SUBJECT_TYPES, ActivityWindow
 from .events import EVENT_TYPES, Event, utc_now
 
 SCHEMA = """
@@ -21,6 +22,7 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS event_account_sequence ON events(account_id, sequence DESC);
 CREATE INDEX IF NOT EXISTS event_actor_sequence ON events(account_id, actor_id, sequence DESC);
+CREATE INDEX IF NOT EXISTS event_account_receipt ON events(account_id, received_at, kind);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS subscriptions (
  id TEXT PRIMARY KEY, kind TEXT NOT NULL, account_id TEXT NOT NULL,
@@ -137,6 +139,27 @@ class Store:
         ) as cursor:
             counts = {row["kind"]: row["count"] for row in await cursor.fetchall()}
         return {kind: counts.get(kind, 0) for kind in EVENT_TYPES}
+
+    async def activity_counts(self, account_id: str, window: ActivityWindow, subject: str) -> dict:
+        gained, lost = SUBJECT_TYPES[subject]
+        async with self.db.execute(
+            """SELECT CASE WHEN received_at>=? THEN 'current' ELSE 'previous' END AS bucket,
+            kind, COUNT(*) AS count FROM events
+            WHERE account_id=? AND received_at>=? AND received_at<? AND kind IN (?,?)
+            GROUP BY bucket,kind""",
+            (
+                window.start.isoformat(),
+                account_id,
+                window.previous_start.isoformat(),
+                window.end.isoformat(),
+                gained,
+                lost,
+            ),
+        ) as cursor:
+            counts = {"current": {}, "previous": {}}
+            for row in await cursor.fetchall():
+                counts[row["bucket"]][row["kind"]] = row["count"]
+        return counts
 
     async def encounter_context(self, events: list[dict]) -> dict[int, dict]:
         if not events:

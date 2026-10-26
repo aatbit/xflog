@@ -68,8 +68,9 @@
       .join("")
       .toUpperCase();
   const { createConstellation } = await import("/static/xf/constellation.js");
-  const { normalizeMotionSpeed } =
-    await import("/static/xf/constellation-layout.js");
+  const { normalizeMotionSpeed } = await import(
+    "/static/xf/constellation-layout.js"
+  );
   const {
     requestBrowserNotifications,
     notifyActivity,
@@ -104,8 +105,9 @@
       // Restricted browser storage must not prevent changing the current speed.
     }
   });
-  const { createAudienceControls, resolveLens } =
-    await import("/static/xf/audience-ui.js");
+  const { createAudienceControls, resolveLens } = await import(
+    "/static/xf/audience-ui.js"
+  );
   const scene = createConstellation({
     element: $("#history"),
     root,
@@ -131,6 +133,12 @@
     label: eventLabel,
     initials,
     onOpen: (identity) => selectEvent(identity, true),
+  });
+  const { createActivityHud } = await import("/static/xf/activity-hud.js");
+  const activityHud = createActivityHud({
+    root,
+    api,
+    context: () => ({ demo: state.demo, subject: state.subject }),
   });
   const announce = (text) => {
     $("#announcer").textContent = text;
@@ -206,6 +214,7 @@
       name === "profile" ? "Timeline" : "Profile";
     history.replaceState(null, "", `#${name}`);
     root.dataset.route = name;
+    if (name === "timeline") activityHud.refresh();
     $(".back-button").hidden = name === "timeline";
     if ($("#explore-dialog").open) $("#explore-dialog").close();
     if (document.activeElement !== document.body)
@@ -251,7 +260,6 @@
     $(".workspace-avatar").textContent = (
       state.demo ? "M" : (account?.name || account?.username || "X")[0]
     ).toUpperCase();
-    if (!state.demo) renderSummary(status.counts);
     if ($("#notice").textContent === "Failed to fetch") notice("");
     if (status.cleanup_warning) notice(status.cleanup_warning);
     else if (["reconnecting", "reconnect", "error"].includes(status.state))
@@ -313,28 +321,6 @@
     groupControls.render(groups, state.lens);
     scene.configure(groups, state.lens);
     if (state.layout === "vertical") renderEvents();
-  }
-  function renderSummary(counts) {
-    const subscription = state.subject === "subscriptions";
-    const plus =
-      counts?.[subscription ? "subscriptions.subscribe" : "follow.follow"] || 0;
-    const minus =
-      counts?.[
-        subscription ? "subscriptions.unsubscribe" : "follow.unfollow"
-      ] || 0;
-    const net = plus - minus;
-    $("#net-value").textContent = net > 0 ? `+${net}` : String(net);
-    $("#gained-value").textContent = plus.toLocaleString();
-    $("#lost-value").textContent = minus.toLocaleString();
-    $("#net-label").textContent = subscription
-      ? "Net subscriber events"
-      : "Net follower events";
-    $("#gained-label").textContent = subscription
-      ? "Subscriptions started"
-      : "Followers gained";
-    $("#lost-label").textContent = subscription
-      ? "Subscriptions expired"
-      : "Followers lost";
   }
   function renderEvents() {
     const list = $("#history");
@@ -463,7 +449,6 @@
       else
         $("#detail-panel").innerHTML =
           '<div class="detail-placeholder"><h2>A closer look</h2><p>Select an event to see the account and its recorded timestamps.</p><div class="detail-illustration" aria-hidden="true"><span>↗</span><span class="path-dot"></span><span>↘</span></div></div>';
-      if (demo) renderSummary(result.counts);
       announce(
         `${result.events.length} ${state.subject} events ${append ? "added" : "loaded"}.`,
       );
@@ -489,7 +474,9 @@
     state.events = [];
     state.selected = null;
     state.next = null;
-    $("#demo-toggle").textContent = enabled ? "Leave demo ↗" : "Explore demo ↗";
+    $("#demo-toggle").textContent = enabled
+      ? "Leave demo ↗"
+      : "Explore demo ↗";
     notice("");
     if (state.status) renderStatus(state.status);
     view("timeline");
@@ -602,7 +589,7 @@
       );
       state.events = [];
       state.selected = null;
-      if (!state.demo) renderSummary(state.status?.counts);
+      activityHud.refresh();
       load();
     }),
   );
@@ -710,11 +697,13 @@
     if (!root.isConnected) {
       scene.destroy();
       groupControls.destroy();
+      activityHud.destroy();
       return;
     }
     if (!document.hidden || state.status?.selection.notifications) {
       try {
         renderStatus(await api("/api/status"));
+        if (root.dataset.route === "timeline") activityHud.refresh();
       } catch (error) {
         notice(error.message);
       }
@@ -725,7 +714,10 @@
     renderStatus(await api("/api/status"));
     if (new URLSearchParams(location.search).get("demo") === "1")
       await setDemo(true);
-    else await load();
+    else {
+      activityHud.refresh();
+      await load();
+    }
     const hash = location.hash.slice(1);
     if (["profile", "about"].includes(hash)) view(hash);
     setTimeout(poll, 10000);

@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta, timezone
 
 from . import audience_groups
+from .activity_summary import SUBJECT_TYPES, activity_window, readings
 from .events import FOLLOW_TYPES, Event
 
 PEOPLE = [
@@ -86,6 +87,23 @@ def demo_events() -> list[dict]:
         event["sequence"] = 76 - index
         events.append(event)
     return events
+
+
+def demo_activity(period: str, subject: str) -> dict:
+    events = demo_events()
+    end = max(datetime.fromisoformat(event["received_at"]) for event in events)
+    window = activity_window(period, end + timedelta(seconds=1))
+    counts = {"current": {}, "previous": {}}
+    for event in events:
+        received = datetime.fromisoformat(event["received_at"])
+        if event["kind"] not in SUBJECT_TYPES[subject] or not (
+            window.previous_start <= received < window.end
+        ):
+            continue
+        bucket = "current" if received >= window.start else "previous"
+        kind = event["kind"]
+        counts[bucket][kind] = counts[bucket].get(kind, 0) + 1
+    return {**readings(counts, window, subject), "synthetic": True}
 
 
 async def encounter_context(events: list[dict]) -> dict[int, dict]:

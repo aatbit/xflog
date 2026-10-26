@@ -114,8 +114,7 @@ body {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-#xf .num,
-.summary strong {
+#xf .num {
   font-variant-numeric: tabular-nums;
 }
 .skip {
@@ -575,26 +574,6 @@ body {
   line-height: 1.6;
   color: var(--muted);
   margin: 8px 0 0;
-}
-.summary {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  padding: 16px;
-  border-radius: 12px;
-  background: #ffffff06;
-}
-.summary span {
-  font-size: 12px;
-  display: block;
-  color: var(--muted);
-  margin-top: 6px;
-}
-.summary strong {
-  font-size: 24px;
-  line-height: 1.2;
-  font-weight: 400;
-  display: block;
 }
 .workspace-settings {
   margin-top: 12px;
