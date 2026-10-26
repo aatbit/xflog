@@ -3,6 +3,7 @@ set +x
 set -Eeuo pipefail
 umask 077
 export LC_ALL=C
+ENV_ASSIGNMENT='^[[:space:]]*(export[[:space:]]+)?([A-Z][A-Z0-9_]*)[[:space:]]*=(.*)$'
 
 die() { printf 'XFlog: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "Install $1 first, then run this installer again."; }
@@ -54,7 +55,48 @@ write_environment() {
     fi
   } > "$install_dir/.env"
   chmod 600 "$install_dir/.env"
+  merge_defaults
 }
+
+# Never source a settings file: even an operator's edited .env is data, not shell code.
+saved_setting() {
+  local key=$1 value=$2 line
+  while IFS= read -r line || [[ -n $line ]]; do
+    if [[ $line =~ $ENV_ASSIGNMENT && ${BASH_REMATCH[2]} == "$key" ]]; then
+      [[ $mode != native || -z ${BASH_REMATCH[1]} ]] || die "Native EnvironmentFile does not support export $key; use KEY=value."
+      value=${BASH_REMATCH[3]}
+    fi
+  done < "$install_dir/.env"
+  value=${value#"${value%%[![:space:]]*}"}
+  value=${value%"${value##*[![:space:]]}"}
+  if [[ $value == \"*\" || $value == \'*\' ]]; then value=${value:1:${#value}-2}; fi
+  [[ $value =~ ^[A-Za-z0-9_./:~-]*$ ]] || die "Unsupported $key format; use a literal value in .env."
+  printf '%s' "$value"
+}
+
+merge_defaults() (
+  local temporary line key value existing found
+  temporary=$(mktemp "$install_dir/.env.XXXXXX")
+  trap 'rm -f -- "$temporary"' EXIT
+  cat "$install_dir/.env" > "$temporary"
+  while IFS= read -r line || [[ -n $line ]]; do
+    [[ $line =~ $ENV_ASSIGNMENT ]] || continue
+    key=${BASH_REMATCH[2]}; value=${BASH_REMATCH[3]}; found=false
+    while IFS= read -r existing || [[ -n $existing ]]; do
+      if [[ $existing =~ $ENV_ASSIGNMENT && ${BASH_REMATCH[2]} == "$key" ]]; then found=true; break; fi
+    done < "$temporary"
+    $found && continue
+    case $key in
+      XFLOG_ADMIN_PASSWORD) value=$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n'); line=$(env_line "$key" "$value");;
+      XFLOG_ORIGIN) line=$(env_line "$key" "$origin");;
+      XFLOG_PUBLISH_PORT) line=$(env_line "$key" "$port");;
+    esac
+    printf '\n%s\n' "$line" >> "$temporary"
+    printf 'Added missing setting: %s (default saved; value hidden).\n' "$key" >&3
+  done < "$install_dir/.env.example"
+  chmod 600 "$temporary"
+  mv -- "$temporary" "$install_dir/.env"
+)
 
 write_network() {
   [[ -n $network ]] || return 0
@@ -111,26 +153,24 @@ WantedBy=default.target
 EOF
 }
 
-install_native() (
+sync_native() (
   local bootstrap_dir
   bootstrap_dir=$(mktemp -d "${TMPDIR:-/tmp}/xflog-bootstrap.XXXXXX")
   trap 'rm -rf -- "$bootstrap_dir"' EXIT
   "$python" -m venv "$bootstrap_dir"
   "$bootstrap_dir/bin/python" -m pip install --disable-pip-version-check --quiet 'uv==0.11.29'
   "$bootstrap_dir/bin/uv" sync --project "$install_dir" --locked --no-dev --no-editable --python "$python"
-  mkdir -p "$data_dir" "$HOME/.local/share/xflog/locks" "$unit_dir"
-  chmod 700 "$data_dir"
+)
+
+save_unit() {
+  write_unit
   systemd-analyze --user verify "$install_dir/xflog.service"
-  if [[ $(loginctl show-user "$(id -un)" -p Linger --value) != yes ]]; then
-    if ! loginctl enable-linger "$(id -un)"; then
-      need sudo
-      sudo loginctl enable-linger "$(id -un)"
-    fi
-  fi
-  [[ ! -e $unit_dir/xflog.service ]] || die 'A user xflog.service already exists; not overwriting it.'
+  mkdir -p "$unit_dir"
   install -m 600 "$install_dir/xflog.service" "$unit_dir/xflog.service"
   systemctl --user daemon-reload
-  systemctl --user enable --now xflog.service
+}
+
+wait_native() {
   local attempt
   for ((attempt=0; attempt<30; attempt++)); do
     if systemctl --user is-active --quiet xflog.service &&
@@ -140,23 +180,153 @@ install_native() (
     sleep 1
   done
   die 'Service did not become healthy. Inspect: journalctl --user -u xflog.service'
+}
+
+start_runtime() {
+  if [[ $mode == docker ]]; then
+    compose up -d --build --wait --wait-timeout 120
+  else
+    systemctl --user enable --now xflog.service
+    wait_native
+  fi
+}
+
+install_native() {
+  sync_native
+  mkdir -p "$data_dir" "$HOME/.local/share/xflog/locks"
+  chmod 700 "$data_dir"
+  if [[ $(loginctl show-user "$(id -un)" -p Linger --value) != yes ]]; then
+    if ! loginctl enable-linger "$(id -un)"; then
+      need sudo
+      sudo loginctl enable-linger "$(id -un)"
+    fi
+  fi
+  [[ ! -e $unit_dir/xflog.service ]] || die 'A user xflog.service already exists; not overwriting it.'
+  save_unit
+  start_runtime
+}
+
+load_installation() {
+  [[ -f $install_dir/.env && ! -L $install_dir/.env ]] || die 'A regular saved .env is required; it will never be executed.'
+  [[ $(git -C "$install_dir" rev-parse --show-toplevel) == "$install_dir" ]] || die 'Choose the root of the installed checkout.'
+  local remote
+  remote=$(git -C "$install_dir" remote get-url origin)
+  [[ $remote == https://github.com/aatbit/xflog.git || $remote == git@github.com:aatbit/xflog.git ]] || die 'The checkout must use the official aatbit/xflog origin.'
+  if [[ $mode == docker ]]; then
+    project=$(saved_setting COMPOSE_PROJECT_NAME '')
+    [[ $project =~ ^[a-z0-9][a-z0-9_-]*$ ]] || die 'Saved COMPOSE_PROJECT_NAME is required to identify the existing stack safely.'
+    port=$(saved_setting XFLOG_PUBLISH_PORT 7860)
+    [[ -f $install_dir/compose.yaml ]] || die 'Saved Compose configuration is missing.'
+    local container working_directory containers
+    containers=$(docker ps -aq --filter "label=com.docker.compose.project=$project")
+    for container in $containers; do
+      working_directory=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$container")
+      [[ $working_directory == "$install_dir" ]] || die 'This Compose project belongs to another checkout; no runtime changed.'
+    done
+  else
+    [[ -f $install_dir/xflog.service && ! -L $install_dir/xflog.service ]] || die 'The regular installer-generated xflog.service is missing.'
+    grep -Fxq "WorkingDirectory=$install_dir" "$install_dir/xflog.service" || die 'The saved service belongs to another checkout.'
+    if [[ -e $unit_dir/xflog.service ]]; then
+      cmp -s "$unit_dir/xflog.service" "$install_dir/xflog.service" || die 'The installed user unit differs; reconcile it manually before continuing.'
+    fi
+    port=$(saved_setting XFLOG_PORT 7860)
+    database=$(saved_setting XFLOG_DATABASE "$HOME/.local/share/xflog/history.sqlite3")
+    valid_path "$database" || die 'Use an absolute literal XFLOG_DATABASE path.'
+    data_dir=${database%/*}
+  fi
+  valid_port "$port" || die 'Saved port is invalid.'
+  origin=$(saved_setting XFLOG_ORIGIN "http://127.0.0.1:$port")
+  valid_origin "$origin" || die 'Saved origin is invalid.'
+}
+
+update_installation() {
+  if ! git -C "$install_dir" diff --quiet || ! git -C "$install_dir" diff --cached --quiet; then
+    die 'Tracked files have local changes; commit or move them before updating.'
+  fi
+  [[ ! -L $install_dir/.env.example ]] || die 'The environment template must be a regular file.'
+  git -C "$install_dir" fetch --depth 1 origin "$reference"
+  printf 'Update %s installation at %s to %s. Saved settings, history and network overrides stay.\n' "$mode" "$install_dir" "$reference" >&3
+  printf 'Back up history before updating. A saved Start choice may resume collection.\n' >&3
+  ask 'Update and restart this installation now? [y/N]'
+  [[ $reply == y || $reply == Y ]] || { printf 'Update canceled.\n' >&3; return; }
+  git -C "$install_dir" checkout --quiet --detach FETCH_HEAD
+  [[ -f $install_dir/.env.example && -f $install_dir/uv.lock ]] || die 'The fetched source is incomplete.'
+  merge_defaults
+  if [[ $mode == docker ]]; then
+    compose config --quiet
+  else
+    [[ -x $install_dir/.venv/bin/python ]] || die 'The existing Python environment is missing; restore it before updating.'
+    python=$install_dir/.venv/bin/python
+    if [[ -e $unit_dir/xflog.service ]]; then systemctl --user stop xflog.service; fi
+    printf 'Native service stopped; a failed dependency update leaves it stopped for repair.\n' >&3
+    sync_native
+    save_unit
+  fi
+  start_runtime
+  printf 'Updated. History and saved settings retained.\n' >&3
+}
+
+uninstall_installation() {
+  printf 'Remove the %s runtime at %s. Checkout, .env and history are retained by default.\n' "$mode" "$install_dir" >&3
+  printf 'Pause tracking in the UI first if X subscriptions need cleanup; uninstall does not revoke tokens.\n' >&3
+  ask 'Uninstall this runtime now? [y/N]'
+  [[ $reply == y || $reply == Y ]] || { printf 'Uninstall canceled.\n' >&3; return; }
+  if [[ $mode == docker ]]; then
+    compose down
+  elif [[ -e $unit_dir/xflog.service ]]; then
+    systemctl --user disable --now xflog.service
+    rm -- "$unit_dir/xflog.service"
+    systemctl --user daemon-reload
+  fi
+  if [[ $mode == docker ]]; then
+    printf 'Recorded history: Docker volume %s_history (other/external volumes are never deleted).\n' "$project" >&3
+  else
+    printf 'Recorded history: %s and its SQLite sidecars/pause marker.\n' "$database" >&3
+  fi
+  ask 'Delete recorded history permanently? Type DELETE to confirm [keep]'
+  if [[ $reply == DELETE ]]; then
+    if [[ $mode == docker ]]; then
+      local volume=${project}_history owner label
+      owner=$(docker volume inspect --format '{{index .Labels "com.docker.compose.project"}}' "$volume")
+      label=$(docker volume inspect --format '{{index .Labels "com.docker.compose.volume"}}' "$volume")
+      [[ $owner == "$project" && $label == history ]] || die 'History volume ownership could not be verified; no data deleted.'
+      docker volume rm "$volume"
+    else
+      rm -f -- "$database" "$database-wal" "$database-shm" "$database-journal" "$database.paused"
+    fi
+  fi
+  ask 'Delete saved .env credentials and settings? Type DELETE to confirm [keep]'
+  if [[ $reply == DELETE ]]; then rm -- "$install_dir/.env"; fi
+  printf 'Runtime removed. Unselected data/settings and checkout remain at %s. User lingering and external networks are unchanged.\n' "$install_dir" >&3
+}
+
+manage_installation() (
+  mkdir "$install_dir/.xflog-maintenance.lock" || die 'Maintenance lock exists; another operation may be running. Remove a stale lock only after checking.'
+  trap 'rmdir -- "$install_dir/.xflog-maintenance.lock"' EXIT
+  load_installation
+  if [[ $action == update ]]; then update_installation; else uninstall_installation; fi
 )
 
 main() {
   if [[ ${1:-} == --help ]]; then
-    printf '%s\n' 'XFlog interactive installer: Docker Compose or native Linux/systemd user service.' \
+    printf '%s\n' 'XFlog interactive install/update/uninstall: Docker Compose or native Linux/systemd user service.' \
       'Requires Bash, git and an interactive terminal. Docker mode needs Docker Compose v2.' \
       'Native mode needs Python 3.12+, venv/pip and a working systemd user session.' \
-      'Optional: XFLOG_REF=branch/tag/commit (default: main). Existing installs are never overwritten.'
+      'Optional: XFLOG_REF=branch/tag/commit (default: main). Updates preserve settings/history; uninstall asks before deletion.'
     return
   fi
   [[ $# == 0 ]] || die 'Only --help is supported.'
   exec 3<> /dev/tty || die 'An interactive terminal is required (including for curl | bash).'
   need git
-  local mode port origin install_dir bearer user_id user_token password network='' project='' python='' data_dir='' unit_dir=''
+  local action mode port origin install_dir bearer user_id user_token password database='' network='' project='' python='' data_dir='' unit_dir=''
   local reference=${XFLOG_REF:-main}
   [[ $reference =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || die 'Invalid XFLOG_REF.'
   printf '\nXFlog — interactive setup\nNo X login is performed. Full functionality requires an externally obtained user access token.\n' >&3
+  while :; do
+    ask 'Action: install, update or uninstall? [install]'
+    action=${reply:-install}
+    [[ $action == install || $action == update || $action == uninstall ]] && break
+  done
   while :; do
     ask 'Run with Docker or native Linux? [docker]'
     mode=${reply:-docker}
@@ -170,20 +340,28 @@ main() {
     [[ $(uname -s) == Linux && $EUID != 0 ]] || die 'Native mode requires Linux and a regular user; do not run it with sudo.'
     need systemctl; need systemd-analyze; need loginctl
     systemctl --user show-environment >/dev/null || die 'No systemd user session. Log in normally or choose Docker.'
-    ask 'Python 3.12+ executable? [python3]'
-    python=$(command -v "${reply:-python3}") || die 'Python executable not found.'
-    "$python" -c 'import sys; assert sys.version_info >= (3, 12), "Python 3.12+ is required"; import venv, ensurepip'
     unit_dir=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
-    [[ ! -e $unit_dir/xflog.service ]] || die 'A user xflog.service already exists; not overwriting it.'
+    if [[ $action == install ]]; then
+      ask 'Python 3.12+ executable? [python3]'
+      python=$(command -v "${reply:-python3}") || die 'Python executable not found.'
+      "$python" -c 'import sys; assert sys.version_info >= (3, 12), "Python 3.12+ is required"; import venv, ensurepip'
+      [[ ! -e $unit_dir/xflog.service ]] || die 'A user xflog.service already exists; not overwriting it.'
+    fi
   fi
   while :; do
     ask "Installation directory? [$HOME/.local/share/xflog/app]"
     install_dir=${reply:-$HOME/.local/share/xflog/app}
     install_dir=${install_dir/#\~/$HOME}; install_dir=${install_dir%/}
     valid_path "$install_dir" || { printf 'Use an absolute path with letters, digits, /, ., _ and - only.\n' >&3; continue; }
-    [[ ! -e $install_dir ]] || die 'Installation path already exists. Choose a fresh path; existing data is never overwritten.'
+    if [[ $action == install ]]; then
+      [[ ! -e $install_dir ]] || die 'Installation path already exists. Choose a fresh path; existing data is never overwritten.'
+    else
+      [[ -d $install_dir ]] || die 'Choose an existing installer checkout.'
+      install_dir=$(cd "$install_dir" && pwd -P)
+    fi
     break
   done
+  if [[ $action != install ]]; then manage_installation; return; fi
   while :; do
     ask 'Local port (localhost only)? [7860]'
     port=${reply:-7860}
@@ -203,7 +381,9 @@ main() {
       project=${reply:-xflog}
       [[ $project =~ ^[a-z0-9][a-z0-9_-]*$ ]] && break
     done
-    [[ -z $(docker ps -aq --filter "label=com.docker.compose.project=$project") ]] || die 'This Compose project already has containers; choose a different project.'
+    local containers
+    containers=$(docker ps -aq --filter "label=com.docker.compose.project=$project")
+    [[ -z $containers ]] || die 'This Compose project already has containers; choose a different project.'
     printf 'Available Docker networks:\n' >&3
     docker network ls --format '{{.Name}}' >&3
     while :; do
@@ -263,7 +443,7 @@ main() {
   ask 'Activate this installation now? [y/N]'
   [[ $reply == y || $reply == Y ]] || { printf 'Canceled before activation. Prepared files remain for review.\n' >&3; return; }
   if [[ $mode == docker ]]; then
-    compose up -d --build --wait --wait-timeout 120
+    start_runtime
   else
     install_native
   fi

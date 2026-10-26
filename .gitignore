@@ -13,3 +13,8 @@ dist/
 /docs/
 /evidence/
 /marketing/
+/compose.override.yaml
+/xflog.service
+/.xflog-maintenance.lock/
+.env.*
+!.env.example
