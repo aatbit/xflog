@@ -128,5 +128,5 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           gh release create "$RELEASE_TAG" dist/* --verify-tag --generate-notes \
-            --title "XFlog $RELEASE_TAG" \
+            --title "$RELEASE_TAG" \
             --notes "Install: pip install xflog. Container: ghcr.io/aatbit/xflog:$RELEASE_TAG. See CHANGELOG.md for the first-release feature summary."
