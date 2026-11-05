@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>XFlog — brand field notes</title>
+    <link rel="stylesheet" href="/static/xf/fonts.css" />
+    <style>
+      :root {
+        font-family: "IBM Plex Sans", sans-serif;
+        color: #172027;
+        background: #f3f6f9;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+      }
+      main {
+        max-width: 1240px;
+        margin: auto;
+        padding: 40px 32px;
+      }
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 14px;
+      }
+      header a {
+        color: inherit;
+        text-decoration: none;
+      }
+      h1 {
+        font-size: clamp(48px, 8vw, 104px);
+        line-height: 1;
+        letter-spacing: -4px;
+        font-weight: 500;
+        margin: 90px 0 24px;
+      }
+      h2 {
+        font-size: 24px;
+        font-weight: 500;
+        margin: 0 0 16px;
+      }
+      p {
+        line-height: 1.6;
+        font-size: 18px;
+        max-width: 560px;
+      }
+      .identity {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        margin: 64px 0 72px;
+        gap: 16px;
+      }
+      .tile {
+        min-height: 320px;
+        padding: 48px;
+        background: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+      }
+      .tile img {
+        max-width: 100%;
+        width: 360px;
+      }
+      .tile small {
+        position: absolute;
+        bottom: 20px;
+        left: 24px;
+        font-size: 12px;
+        color: #5d6570;
+      }
+      .tile.ink {
+        background: #172027;
+      }
+      .tile.ink img {
+        width: 140px;
+        filter: grayscale(1) brightness(0) invert(1);
+      }
+      .tile.ink small {
+        color: #b9c3cd;
+      }
+      .palette {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        margin: 32px 0 72px;
+      }
+      .swatch {
+        height: 180px;
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .swatch strong {
+        font-size: 20px;
+        font-weight: 500;
+      }
+      .swatch span {
+        font-size: 13px;
+      }
+      .type {
+        display: grid;
+        grid-template-columns: 1fr 1.2fr;
+        gap: 48px;
+        margin-bottom: 72px;
+      }
+      .type-sample {
+        font-size: 54px;
+        line-height: 1.3;
+        letter-spacing: -1px;
+      }
+      .rules {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 48px;
+        margin: 64px 0;
+      }
+      .rules p {
+        font-size: 16px;
+      }
+      .motion {
+        background: #fff;
+        padding: 40px;
+        display: flex;
+        gap: 32px;
+        align-items: center;
+        margin: 48px 0;
+      }
+      .motion img {
+        width: 64px;
+      }
+      .motion:hover img {
+        transform: translateX(8px);
+      }
+      .motion img {
+        transition: transform 240ms cubic-bezier(0.2, 0, 0, 1);
+      }
+      footer {
+        padding: 32px 0;
+        border-top: 1px solid #dce2e8;
+        font-size: 13px;
+        display: flex;
+        justify-content: space-between;
+      }
+      footer a {
+        color: inherit;
+      }
+      a:focus-visible {
+        outline: 3px solid #2164d9;
+        outline-offset: 4px;
+      }
+      @media (max-width: 650px) {
+        main {
+          padding: 24px 20px;
+        }
+        h1 {
+          letter-spacing: -2px;
+          margin-top: 64px;
+        }
+        .identity,
+        .type,
+        .rules {
+          grid-template-columns: 1fr;
+          gap: 20px;
+        }
+        .identity {
+          margin: 48px 0;
+        }
+        .tile {
+          min-height: 240px;
+          padding: 32px;
+        }
+        .palette {
+          grid-template-columns: 1fr 1fr;
+        }
+        .type-sample {
+          font-size: 40px;
+        }
+        .motion {
+          padding: 24px;
+        }
+        footer {
+          gap: 24px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .motion img {
+          transition: none;
+        }
+        .motion:hover img {
+          transform: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <a href="/">← Back to XFlog</a
+        ><span>Brand field notes · October 2026</span>
+      </header>
+      <h1>People cross paths.<br />Keep the story.</h1>
+      <p>
+        XFlog is a quiet record of the changes in your X audience. A clear
+        signal, kept close.
+      </p>
+      <div class="identity">
+        <div class="tile">
+          <img
+            src="/static/xf/wordmark.svg"
+            alt="XFlog logo and custom geometric wordmark"
+          /><small>Crossing paths · Primary lockup</small>
+        </div>
+        <div class="tile ink">
+          <img src="/static/xf/mark.svg" alt="XFlog mark in white" /><small
+            >One color. Every size.</small
+          >
+        </div>
+      </div>
+      <h2>A little blue. A lot of clarity.</h2>
+      <p>
+        Ink and paper do the work. Signal blue marks a point of interest. Color
+        supports the event; words tell its meaning.
+      </p>
+      <div class="palette">
+        <div class="swatch" style="background: #172027; color: white">
+          <strong>Ink</strong><span>#172027</span>
+        </div>
+        <div class="swatch" style="background: #2164d9; color: white">
+          <strong>Signal</strong><span>#2164D9</span>
+        </div>
+        <div class="swatch" style="background: #e9eef3">
+          <strong>Quiet</strong><span>#E9EEF3</span>
+        </div>
+        <div class="swatch" style="background: white">
+          <strong>Paper</strong><span>#FFFFFF</span>
+        </div>
+      </div>
+      <div class="type">
+        <div>
+          <h2>Clear, with character.</h2>
+          <p>
+            IBM Plex Sans. Regular for the record, medium for direction, tabular
+            figures for the details.
+          </p>
+        </div>
+        <div class="type-sample">
+          Aa Bb Cc<br />0123456789<br />Arrive. Leave. Repeat.
+        </div>
+      </div>
+      <div class="rules">
+        <div>
+          <h2>The mark</h2>
+          <p>
+            Two paths cross, then continue. A small break keeps the paths
+            legible and makes the intersection the point of interest. The mark
+            works without color, from a browser tab to a full sheet.
+          </p>
+          <p>
+            Keep clear space of at least a quarter of the mark’s width on every
+            side. Minimum mark size: 20px; favicon exception: 16px. Never
+            stretch, rotate, outline, or add effects.
+          </p>
+        </div>
+        <div>
+          <h2>The voice</h2>
+          <p>
+            Calm, precise, human. “Followed you.” “Tracking paused.” “Provider
+            time not supplied.” Say what happened and what is known.
+          </p>
+          <p>
+            Never imply surveillance, blame, a complete follower count, or
+            guaranteed recovery. A follower event is a change; a paid
+            subscription is a separate relationship.
+          </p>
+        </div>
+      </div>
+      <div class="motion">
+        <img src="/static/xf/mark.svg" alt="" />
+        <div>
+          <h2>Move with a reason.</h2>
+          <p>
+            Quick feedback. A quiet arrival. No endless performance. 140 / 240 /
+            360ms with a single decelerating curve. Reduced motion is always
+            respected.
+          </p>
+        </div>
+      </div>
+      <footer>
+        <span
+          >XFlog — X Follower Log.<br />Independent software. Not affiliated
+          with X.</span
+        ><a href="/static/xf/wordmark.svg" download>Download SVG lockup ↗</a>
+      </footer>
+    </main>
+  </body>
+</html>

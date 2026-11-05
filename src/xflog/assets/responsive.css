@@ -1,0 +1,216 @@
+@media (max-width: 1000px) {
+  .scene-header {
+    padding: 0 28px;
+    height: 80px;
+  }
+  #timeline-view {
+    height: calc(100dvh - 80px);
+    min-height: 560px;
+  }
+  .scrubber {
+    padding: 0 28px 16px;
+  }
+  .header-actions {
+    gap: 4px;
+  }
+  .notice {
+    top: 80px;
+    margin: 0 28px;
+  }
+  #profile-view,
+  #about-view {
+    padding-left: 28px;
+    padding-right: 28px;
+  }
+  .workspace {
+    gap: 8px;
+  }
+  .workspace-avatar {
+    display: none;
+  }
+}
+@media (max-width: 680px) {
+  #xf h1 {
+    font-size: 22px;
+    letter-spacing: -0.5px;
+  }
+  .scene-header {
+    height: 72px;
+    padding: 0 20px;
+    gap: 16px;
+  }
+  .brand {
+    font-size: 22px;
+    gap: 8px;
+  }
+  .brand img {
+    width: 28px;
+    height: 28px;
+  }
+  .workspace {
+    display: none;
+  }
+  .header-actions {
+    gap: 4px;
+  }
+  .header-actions .text-button {
+    font-size: 13px;
+    gap: 7px;
+  }
+  .header-actions [data-nav="profile"] span {
+    display: none;
+  }
+  .header-actions [data-nav="profile"] {
+    width: 44px;
+    justify-content: center;
+  }
+  #timeline-view {
+    height: calc(100dvh - 72px);
+    min-height: 560px;
+  }
+  .history,
+  .constellation-canvas {
+    min-height: 400px;
+  }
+  .scrubber {
+    padding: 0 20px 12px;
+  }
+  .notice {
+    top: 72px;
+    margin: 0 20px;
+    font-size: 12px;
+  }
+  .empty-state {
+    padding: 36px 24px;
+    min-height: 400px;
+  }
+  #xf .empty-state h2 {
+    font-size: 30px;
+  }
+  .empty-state p {
+    font-size: 14px;
+    max-width: 280px;
+  }
+  #xf .explore-drawer {
+    top: auto;
+    bottom: 12px;
+    left: 0;
+    right: 0;
+    margin: 0 auto;
+    width: calc(100% - 24px);
+    max-width: 430px;
+    max-height: calc(100dvh - 88px);
+    padding: 0;
+    animation: panel-arrive var(--standard) var(--ease);
+  }
+  .panel-header {
+    padding-left: 20px;
+    padding-right: 16px;
+  }
+  .panel-body {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+  .panel-footer {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+  #about-view {
+    padding: 0 20px 32px;
+  }
+  #xf #profile-view {
+    width: calc(100% - 24px);
+    padding: 4px 20px 20px;
+  }
+  .back-button {
+    margin: 8px 0 8px 16px;
+  }
+  #xf[data-route="profile"] .back-button {
+    margin: 8px 0 8px 16px;
+  }
+  .page-heading {
+    margin-bottom: 24px;
+  }
+  .settings-row {
+    padding: 16px 0;
+  }
+
+  .settings-panel {
+    padding: 16px;
+  }
+  .preference-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .settings-row > div:first-child > p {
+    max-width: none;
+  }
+  .event {
+    padding-left: 24px;
+  }
+  .event:before {
+    left: 5px;
+  }
+  .event-dot {
+    left: 1px;
+  }
+  .event-button {
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 14px 12px;
+    min-height: 84px;
+  }
+  .avatar {
+    width: 32px;
+    height: 32px;
+  }
+  .event-name {
+    font-size: 14px;
+  }
+  .event-kind,
+  .event-time {
+    font-size: 11px;
+  }
+  .event-handle {
+    font-size: 12px;
+  }
+  .history.vertical {
+    padding: 4px 20px 190px;
+  }
+  #timeline-view[data-layout="vertical"] .scene-context {
+    width: calc(100% - 40px);
+  }
+  .date-group {
+    padding-left: 24px;
+  }
+  #xf dialog {
+    padding: 28px 24px;
+  }
+  #xf dialog h2 {
+    font-size: 22px;
+  }
+  #xf .about-story h2 {
+    font-size: 28px !important;
+  }
+}
+@media (max-height: 650px) and (min-width: 681px) {
+  #timeline-view {
+    min-height: 560px;
+  }
+  .history,
+  .constellation-canvas {
+    min-height: 400px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #xf *,
+  #xf *:before,
+  #xf *:after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+  .history {
+    scroll-behavior: auto;
+  }
+}

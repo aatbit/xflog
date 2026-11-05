@@ -1,0 +1,290 @@
+#xf .explore-drawer,
+#xf #profile-view {
+  border: 1px solid #ffffff18;
+  border-radius: 20px;
+  background: var(--surface);
+}
+/* The user requested glass for this floating settings surface. */
+#xf .explore-drawer {
+  margin: 0 24px 0 auto;
+  top: 80px;
+  width: 430px;
+  padding: 0;
+  max-height: calc(100dvh - 104px);
+  box-shadow: 0 24px 80px #0006; /* taste-skill-ignore: floating native dialog */
+  overflow: hidden;
+  animation: drawer-arrive var(--standard) var(--ease);
+}
+#xf .explore-drawer[open] {
+  display: flex;
+  flex-direction: column;
+}
+@supports (
+  (backdrop-filter: blur(24px)) or (-webkit-backdrop-filter: blur(24px))
+) {
+  /* taste-skill-ignore: user requested glass settings */
+  #xf .explore-drawer,
+  #xf #profile-view {
+    background: rgb(20 26 29 / 94%);
+    -webkit-backdrop-filter: blur(24px) saturate(120%); /* taste-skill-ignore: WebKit glass surface */
+    backdrop-filter: blur(24px) saturate(120%); /* taste-skill-ignore: user requested glass settings */
+  }
+}
+#xf .explore-drawer::backdrop {
+  background: #05080b66;
+}
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  padding: 8px 12px 0 24px;
+  flex-shrink: 0;
+}
+#xf .panel-header h2 {
+  margin: 0;
+  font-size: 21px;
+  letter-spacing: -0.4px;
+}
+.panel-header .dialog-close {
+  width: 44px;
+  height: 44px;
+  position: static;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+}
+.panel-header .dialog-close:hover {
+  background: #ffffff0a;
+}
+.panel-header .dialog-close svg {
+  width: 20px;
+  height: 20px;
+}
+.panel-body {
+  padding: 0 24px 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #62707d transparent;
+  min-height: 0;
+}
+.panel-section {
+  padding: 16px 0;
+}
+#xf .panel-section h3 {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  margin-bottom: 16px;
+}
+.setting-block + .setting-block {
+  margin-top: 16px;
+}
+.setting-label {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+.segmented {
+  display: flex;
+  padding: 4px;
+  gap: 4px;
+  border-radius: 12px;
+  background: var(--ground);
+}
+.segmented button {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  padding: 8px 10px;
+  font-size: 13px !important;
+  transition:
+    background var(--quick),
+    color var(--quick),
+    transform var(--quick) var(--ease);
+}
+.segmented button:hover {
+  color: var(--text);
+  background: #ffffff08;
+}
+.segmented button[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--active);
+}
+.segmented button:active {
+  transform: scale(0.97);
+}
+.segmented svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.motion-switch {
+  width: 100%;
+  min-height: 56px;
+  position: relative;
+  text-align: left;
+  border: 0;
+  background: none;
+  color: var(--text);
+  padding: 16px 62px 8px 0;
+  font-size: 14px !important;
+}
+.motion-switch:before {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 21px;
+  width: 36px;
+  height: 22px;
+  border-radius: 20px;
+  background: var(--control);
+  transition: background var(--quick);
+}
+.motion-switch:after {
+  content: "";
+  position: absolute;
+  top: 24px;
+  right: 17px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text);
+  transition:
+    transform var(--standard) var(--ease),
+    background var(--quick);
+}
+.motion-switch[aria-pressed="true"]:before {
+  background: var(--accent);
+}
+.motion-switch[aria-pressed="true"]:after {
+  transform: translateX(14px);
+  background: var(--ground);
+}
+#xf .explore-drawer .setting-description {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  margin: 8px 0 0;
+}
+.workspace-settings {
+  margin-top: 12px;
+  border-radius: 12px;
+  background: #ffffff06;
+  overflow: hidden;
+}
+.workspace-settings summary {
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 16px;
+  min-height: 52px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.workspace-settings summary::-webkit-details-marker {
+  display: none;
+}
+.workspace-settings svg,
+.setting-action svg {
+  width: 16px;
+  height: 16px;
+}
+.workspace-settings summary svg {
+  color: var(--muted);
+  transition: transform var(--standard) var(--ease);
+}
+.workspace-settings[open] summary svg {
+  transform: rotate(90deg);
+}
+.workspace-controls {
+  padding: 0 16px 16px;
+}
+.setting-action {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 48px;
+  padding: 8px 0;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  text-align: left;
+  font-size: 13px !important;
+}
+.setting-action:hover {
+  color: var(--text);
+}
+.workspace-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+#xf .workspace-buttons .button {
+  margin: 0;
+  flex: 1;
+  font-size: 12px;
+  padding: 10px;
+  gap: 6px;
+}
+.panel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 24px;
+  background: #080c1233;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.panel-footer .text-button {
+  font-size: 12px;
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  #xf .explore-drawer,
+  #xf #profile-view {
+    background: var(--surface);
+    -webkit-backdrop-filter: none; /* taste-skill-ignore: respect reduced transparency */
+    backdrop-filter: none; /* taste-skill-ignore: respect reduced transparency */
+  }
+}
+.gain-text {
+  color: var(--positive);
+}
+.loss-text {
+  color: var(--negative);
+}
+@keyframes panel-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes drawer-arrive {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

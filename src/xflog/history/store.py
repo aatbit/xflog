@@ -1,0 +1,287 @@
+import asyncio
+import json
+from pathlib import Path
+
+import aiosqlite
+
+from ..interactions.store import SCHEMA as INTERACTION_SCHEMA
+from ..tracking.events import EVENT_TYPES, Event, utc_now
+from .profiles import SCHEMA as PROFILE_SCHEMA
+from .profiles import backfill_profiles, remember_profile
+from .summary import SUBJECT_TYPES, ActivityWindow
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS events (
+ sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+ event_id TEXT NOT NULL,
+ kind TEXT NOT NULL,
+ account_id TEXT NOT NULL,
+ actor_id TEXT NOT NULL,
+ handle TEXT,
+ name TEXT,
+ provider_at TEXT,
+ received_at TEXT NOT NULL,
+ UNIQUE(account_id, event_id)
+);
+CREATE INDEX IF NOT EXISTS event_account_sequence ON events(account_id, sequence DESC);
+CREATE INDEX IF NOT EXISTS event_actor_sequence ON events(account_id, actor_id, sequence DESC);
+CREATE INDEX IF NOT EXISTS event_account_receipt ON events(account_id, received_at, kind);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS subscriptions (
+ id TEXT PRIMARY KEY, kind TEXT NOT NULL, account_id TEXT NOT NULL,
+ expires_at TEXT, tag TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS gaps (
+ id INTEGER PRIMARY KEY, account_id TEXT NOT NULL, started_at TEXT NOT NULL,
+ ended_at TEXT, reason TEXT NOT NULL
+);
+"""
+
+
+class Store:
+    def __init__(self, path: Path):
+        self.path = path
+        self.lock = asyncio.Lock()
+        self.db = None
+
+    async def open(self):
+        await asyncio.to_thread(self._prepare_path)
+        self.db = await aiosqlite.connect(self.path)
+        self.db.row_factory = aiosqlite.Row
+        await self.db.executescript(SCHEMA + INTERACTION_SCHEMA + PROFILE_SCHEMA)
+        for table, column in (("events", "group_data"), ("interactions", "profile_data")):
+            async with self.db.execute(f"PRAGMA table_info({table})") as cursor:
+                columns = {row["name"] for row in await cursor.fetchall()}
+            if column not in columns:
+                await self.db.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {column} TEXT NOT NULL DEFAULT '{{}}'"
+                )
+        await self.db.execute("PRAGMA journal_mode=WAL")
+        await self.db.execute("PRAGMA busy_timeout=5000")
+        if not await self.setting("profile_cache_backfilled", False):
+            await backfill_profiles(self.db)
+            await self.db.execute(
+                "INSERT INTO settings VALUES ('profile_cache_backfilled','true')"
+                " ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+            )
+        await self.db.commit()
+
+    def _prepare_path(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.path.touch(mode=0o600, exist_ok=True)
+        self.path.chmod(0o600)
+
+    async def close(self):
+        if self.db:
+            await self.db.close()
+            self.db = None
+
+    async def block_restart(self):
+        await asyncio.to_thread(self.path.with_name(self.path.name + ".paused").touch, mode=0o600)
+
+    async def restart_blocked(self) -> bool:
+        return await asyncio.to_thread(self.path.with_name(self.path.name + ".paused").exists)
+
+    async def allow_restart(self):
+        await asyncio.to_thread(
+            self.path.with_name(self.path.name + ".paused").unlink, missing_ok=True
+        )
+
+    async def setting(self, key: str, default=None):
+        async with self.db.execute("SELECT value FROM settings WHERE key=?", (key,)) as cursor:
+            row = await cursor.fetchone()
+        return json.loads(row[0]) if row else default
+
+    async def save_setting(self, key: str, value):
+        async with self.lock:
+            await self.db.execute(
+                "INSERT INTO settings VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, json.dumps(value)),
+            )
+            await self.db.commit()
+
+    async def event_actor(self, account_id: str, event_id: str) -> str | None:
+        if event_id.startswith("timeline:"):
+            parts = event_id.split(":")
+            if len(parts) != 3 or parts[1] not in {"event", "interaction"}:
+                return None
+            value = parts[2]
+            if (
+                not value.isascii()
+                or not value.isdigit()
+                or len(value) > 19
+                or not 0 < int(value) <= 9223372036854775807
+            ):
+                return None
+            async with self.db.execute(
+                (
+                    "SELECT person_id FROM interactions WHERE account_id=? AND sequence=?"
+                    if parts[1] == "interaction"
+                    else "SELECT actor_id FROM events WHERE account_id=? AND sequence=?"
+                ),
+                (account_id, int(value)),
+            ) as cursor:
+                row = await cursor.fetchone()
+            return row[0] if row else None
+        async with self.db.execute(
+            "SELECT actor_id FROM events WHERE account_id=? AND event_id=?",
+            (account_id, event_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return row[0] if row else None
+
+    async def insert(self, event: Event) -> bool:
+        async with self.lock:
+            try:
+                cursor = await self.db.execute(
+                    """INSERT OR IGNORE INTO events
+                    (event_id,kind,account_id,actor_id,handle,name,provider_at,received_at,group_data)
+                    VALUES (:event_id,:kind,:account_id,:actor_id,:handle,:name,:provider_at,:received_at,:group_data)""",
+                    {**vars(event), "group_data": json.dumps(event.group_data)},
+                )
+                if cursor.rowcount == 1:
+                    await remember_profile(
+                        self.db,
+                        event.account_id,
+                        {
+                            "id": event.actor_id,
+                            "name": event.name,
+                            "handle": event.handle,
+                        },
+                    )
+                await self.db.commit()
+                return cursor.rowcount == 1
+            except BaseException:
+                await self.db.rollback()
+                raise
+
+    async def history(self, account_id: str, query: dict) -> dict:
+        kind = query.get("kind", "all")
+        subject = query.get("subject", "followers")
+        before = max(0, int(query.get("before", 0)))
+        limit = min(50, max(1, int(query.get("limit", 25))))
+        types = EVENT_TYPES[:2] if subject == "followers" else EVENT_TYPES[2:]
+        if kind == "gained":
+            types = types[:1]
+        elif kind == "lost":
+            types = types[1:]
+        placeholders = ",".join("?" for _ in types)
+        clause = f"account_id=? AND kind IN ({placeholders})"
+        params = (account_id, *types)
+        if before:
+            clause += " AND sequence<?"
+            params += (before,)
+        async with self.db.execute(
+            f"SELECT * FROM events WHERE {clause} ORDER BY sequence DESC LIMIT ?",
+            (*params, limit + 1),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        events = []
+        for row in rows[:limit]:
+            values = dict(row)
+            values["group_data"] = json.loads(values["group_data"])
+            sequence = values.pop("sequence")
+            events.append({**Event(**values).public(), "sequence": sequence})
+        return {
+            "events": events,
+            "next": events[-1]["sequence"] if len(rows) > limit else None,
+        }
+
+    async def summary(self, account_id: str) -> dict:
+        async with self.db.execute(
+            "SELECT kind,COUNT(*) AS count FROM events WHERE account_id=? GROUP BY kind",
+            (account_id,),
+        ) as cursor:
+            counts = {row["kind"]: row["count"] for row in await cursor.fetchall()}
+        return {kind: counts.get(kind, 0) for kind in EVENT_TYPES}
+
+    async def activity_counts(self, account_id: str, window: ActivityWindow, subject: str) -> dict:
+        gained, lost = SUBJECT_TYPES[subject]
+        async with self.db.execute(
+            """SELECT CASE WHEN received_at>=? THEN 'current' ELSE 'previous' END AS bucket,
+            kind, COUNT(*) AS count FROM events
+            WHERE account_id=? AND received_at>=? AND received_at<? AND kind IN (?,?)
+            GROUP BY bucket,kind""",
+            (
+                window.start.isoformat(),
+                account_id,
+                window.previous_start.isoformat(),
+                window.end.isoformat(),
+                gained,
+                lost,
+            ),
+        ) as cursor:
+            counts = {"current": {}, "previous": {}}
+            for row in await cursor.fetchall():
+                counts[row["bucket"]][row["kind"]] = row["count"]
+        return counts
+
+    async def encounter_context(self, events: list[dict]) -> dict[int, dict]:
+        if not events:
+            return {}
+        account_id = events[0]["account_id"]
+        if any(event["account_id"] != account_id for event in events):
+            raise ValueError("History context must belong to one account.")
+        sequences = [event["sequence"] for event in events]
+        placeholders = ",".join("?" for _ in sequences)
+        async with self.db.execute(
+            f"""SELECT current.sequence,
+            EXISTS (SELECT 1 FROM events prior
+                WHERE prior.account_id=current.account_id AND prior.actor_id=current.actor_id
+                AND prior.sequence<current.sequence) AS seen_before,
+            (SELECT prior.kind FROM events prior
+                WHERE prior.account_id=current.account_id AND prior.actor_id=current.actor_id
+                AND prior.sequence<current.sequence AND prior.kind IN ('follow.follow','follow.unfollow')
+                ORDER BY prior.sequence DESC LIMIT 1) AS previous_follow_kind
+            FROM events current WHERE current.account_id=? AND current.sequence IN ({placeholders})""",
+            (account_id, *sequences),
+        ) as cursor:
+            return {
+                row["sequence"]: {
+                    "seen_before": bool(row["seen_before"]),
+                    "previous_follow_kind": row["previous_follow_kind"],
+                }
+                for row in await cursor.fetchall()
+            }
+
+    async def subscriptions(self) -> list[dict]:
+        async with self.db.execute("SELECT * FROM subscriptions") as cursor:
+            return [dict(row) for row in await cursor.fetchall()]
+
+    async def save_subscription(self, subscription: dict):
+        async with self.lock:
+            await self.db.execute(
+                "INSERT OR REPLACE INTO subscriptions VALUES (:id,:kind,:account_id,:expires_at,:tag)",
+                subscription,
+            )
+            await self.db.commit()
+
+    async def forget_subscription(self, identity: str):
+        async with self.lock:
+            await self.db.execute("DELETE FROM subscriptions WHERE id=?", (identity,))
+            await self.db.commit()
+
+    async def gap(self, account_id: str, reason: str):
+        async with self.lock:
+            await self.db.execute(
+                """INSERT INTO gaps(account_id,started_at,reason)
+                SELECT ?,?,? WHERE NOT EXISTS
+                (SELECT 1 FROM gaps WHERE account_id=? AND ended_at IS NULL)""",
+                (account_id, utc_now(), reason, account_id),
+            )
+            await self.db.commit()
+
+    async def end_gap(self, account_id: str):
+        async with self.lock:
+            await self.db.execute(
+                "UPDATE gaps SET ended_at=? WHERE account_id=? AND ended_at IS NULL",
+                (utc_now(), account_id),
+            )
+            await self.db.commit()
+
+    async def gaps(self, account_id: str) -> list[dict]:
+        async with self.db.execute(
+            "SELECT * FROM gaps WHERE account_id=? ORDER BY id DESC LIMIT 10",
+            (account_id,),
+        ) as cursor:
+            return [dict(row) for row in await cursor.fetchall()]

@@ -1,0 +1,564 @@
+.scene-stage {
+  --constellation-0: #75c9dd;
+  --constellation-1: #ed997f;
+  --constellation-2: #e6c77e;
+  --constellation-3: #91afe9;
+  --constellation-4: #91c7a0;
+  --constellation-5: #dba6c0;
+  --constellation-6: #9dc9c6;
+  --constellation-7: #dcb088;
+  --constellation-8: #bdc989;
+  --constellation-9: #cea4a0;
+  --constellation-10: #99c0e3;
+  --constellation-unknown: #a2acb7;
+  --constellation-overview-more: #d4d7d9;
+}
+.scene-context {
+  position: absolute;
+  left: 48px;
+  right: 48px;
+  top: 14px;
+  z-index: 5;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  pointer-events: none;
+}
+.scene-context > span {
+  min-width: 0;
+}
+.constellation-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  max-width: 680px;
+  margin-top: 9px;
+  animation: group-arrive 220ms var(--ease);
+}
+.constellation-key[hidden] {
+  display: none;
+}
+.constellation-key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  pointer-events: auto;
+}
+.constellation-key-item svg {
+  width: 22px;
+  height: 12px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+.constellation-key-label {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.constellation-key-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--faint);
+}
+@keyframes group-arrive {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
+}
+.scene-context strong {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text);
+  display: block;
+}
+.scene-context #scene-people-count {
+  font-size: 12px;
+  color: var(--faint);
+  display: block;
+  margin-top: 3px;
+}
+#lens-control {
+  pointer-events: auto;
+  flex-shrink: 0;
+}
+#lens-trigger {
+  width: 56px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: transparent;
+  color: var(--muted);
+  transition:
+    background var(--quick),
+    border-color var(--quick),
+    color var(--quick);
+}
+#lens-trigger:hover,
+#lens-trigger[aria-expanded="true"] {
+  color: var(--accent);
+  border-color: var(--control);
+  background: var(--surface);
+}
+#lens-trigger svg {
+  width: 20px;
+  height: 20px;
+}
+#lens-trigger .lens-chevron {
+  width: 10px;
+  height: 10px;
+  transition: transform var(--quick) var(--ease);
+}
+#lens-trigger[aria-expanded="true"] .lens-chevron {
+  transform: rotate(180deg);
+}
+.choice-popover {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  width: 200px;
+  max-width: calc(100vw - 32px);
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 12px 40px #0005; /* taste-skill-ignore: floating native popover */
+  animation: lens-arrive var(--quick) var(--ease);
+}
+.choice-popover button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  border-radius: 7px;
+  padding: 10px 12px;
+  text-align: left;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+}
+.choice-popover button:hover,
+.choice-popover button:focus-visible {
+  background: var(--active);
+  color: var(--text);
+}
+.choice-popover button[aria-checked="true"] {
+  color: var(--accent);
+}
+.choice-popover button[aria-checked="true"]::after {
+  content: "";
+  width: 5px;
+  height: 9px;
+  flex-shrink: 0;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  margin-right: 3px;
+}
+@keyframes lens-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.constellation-canvas {
+  position: relative;
+  height: 100%;
+  min-height: 400px;
+  isolation: isolate;
+}
+.constellation-sky {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+}
+.shooting-star {
+  color: var(--text);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.constellation-links {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+.sky-star {
+  fill: var(--text);
+  stroke: none;
+  opacity: 0.4;
+}
+.constellation-links path {
+  stroke: var(--muted);
+  stroke-width: 1;
+  opacity: 0.22;
+  fill: none;
+}
+.sequence-spark {
+  fill: var(--accent);
+  stroke: none;
+  opacity: 0.65;
+}
+.sequence-trail {
+  stroke: var(--accent);
+  stroke-width: 2.2;
+  opacity: 0.35;
+}
+.constellation-links.is-grouped {
+  animation: group-arrive 220ms var(--ease);
+}
+.constellation-links.is-grouped path {
+  stroke: currentColor;
+  stroke-width: 1.2;
+  opacity: 0.64;
+}
+.constellation-links.is-grouped .sequence-trail {
+  stroke: currentColor;
+  opacity: 0.7;
+}
+.constellation-links.is-grouped .sequence-spark {
+  fill: currentColor;
+  opacity: 0.9;
+}
+.is-grouped .constellation-person:not(.is-selected) .constellation-star {
+  color: var(--group-color);
+}
+.constellation-person {
+  position: static;
+}
+.scene-travel {
+  position: absolute;
+  bottom: 24px;
+  left: 32px;
+  right: 32px;
+  z-index: 8;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.scene-travel button {
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity var(--quick),
+    transform var(--standard) var(--ease),
+    visibility 0s;
+}
+.scene-travel button:hover {
+  color: var(--accent);
+  background: var(--surface);
+  border-color: var(--accent);
+}
+.scene-travel button svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.scene-travel button.is-unavailable {
+  opacity: 0 !important;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(-10px);
+  transition:
+    opacity var(--quick),
+    transform var(--standard) var(--ease),
+    visibility 0s var(--quick);
+}
+.scene-travel button:last-child.is-unavailable {
+  transform: translateX(10px);
+}
+.constellation-star {
+  position: absolute;
+  width: 48px;
+  height: 48px;
+  transform: translate(-50%, -50%);
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  z-index: 2;
+}
+.constellation-star.positive {
+  color: var(--positive);
+}
+.constellation-star.negative {
+  color: var(--negative);
+}
+.star-core {
+  width: 11px;
+  height: 11px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  background: var(--ground);
+  transition:
+    transform var(--standard) var(--ease),
+    background var(--quick);
+}
+.constellation-star:hover .star-core {
+  transform: scale(1.4);
+  background: currentColor;
+}
+.star-initials {
+  display: none;
+}
+.is-selected .constellation-star {
+  width: 58px;
+  height: 58px;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  background: var(--surface);
+}
+.is-selected .star-core {
+  position: absolute;
+  inset: -10px;
+  width: auto;
+  height: auto;
+  border: 1px solid var(--accent);
+  opacity: 0.3;
+}
+.is-selected .star-initials {
+  display: block;
+  font-size: 15px;
+  color: var(--text);
+}
+.star-label {
+  visibility: hidden;
+  position: absolute;
+  transform: translateX(-50%);
+  z-index: 4;
+  width: 126px;
+  padding: 0 4px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: center;
+  line-height: 1.4;
+}
+.star-label strong {
+  font-size: 14px;
+  font-weight: 400;
+  display: block;
+  overflow-wrap: anywhere;
+  text-shadow: 0 1px 4px #000;
+}
+.star-label .star-handle {
+  font-size: 11px;
+  color: var(--muted);
+  display: block;
+  overflow-wrap: anywhere;
+}
+.star-label .star-kind {
+  display: none;
+}
+.is-selected .star-label {
+  width: 190px;
+  z-index: 6;
+}
+.is-selected .star-label strong {
+  font-size: 20px;
+}
+.is-selected .star-label .star-handle {
+  font-size: 12px;
+  margin-top: 4px;
+}
+.is-selected .star-label .star-kind {
+  display: block;
+  font-size: 12px;
+  margin-top: 10px;
+}
+.is-selected .star-label .star-kind.positive {
+  color: var(--positive);
+}
+.is-selected .star-label .star-kind.negative {
+  color: var(--negative);
+}
+.star-label strong,
+.star-label span {
+  background: var(--ground);
+  box-decoration-break: clone;
+}
+.constellation-group {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  width: 150px;
+  min-height: 136px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  padding: 12px;
+  z-index: 5;
+  transition: transform var(--quick) var(--ease);
+}
+.constellation-group:hover {
+  transform: translate(-50%, -50%) scale(1.04);
+}
+.cluster-count {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 27px;
+  color: var(--group-color, var(--accent));
+  margin-bottom: 14px;
+  background: var(--surface);
+}
+.constellation-group.positive .cluster-count {
+  color: var(--group-color, var(--positive));
+}
+.constellation-group.negative .cluster-count {
+  color: var(--group-color, var(--negative));
+}
+.constellation-group strong {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text);
+  max-width: 140px;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.is-group-overview .constellation-star {
+  pointer-events: none;
+  opacity: 0.35;
+  width: 48px;
+  height: 48px;
+  border: 0;
+  background: transparent;
+}
+.is-group-overview .star-initials {
+  display: none;
+}
+.is-group-overview .star-core {
+  position: static;
+  width: 6px;
+  height: 6px;
+  border: 0;
+  background: currentColor;
+  opacity: 0.6;
+}
+#xf[data-motion="off"] .star-core {
+  transition: none;
+}
+#audience-group-options {
+  margin-top: 12px;
+}
+#audience-group-options .switch-row {
+  gap: 20px;
+  padding: 13px 0;
+}
+#audience-group-options .switch-row strong {
+  font-weight: 400;
+}
+#audience-group-options .switch-row small {
+  max-width: 290px;
+  line-height: 1.6;
+  font-size: 12px;
+  color: var(--faint);
+}
+@media (max-width: 1000px) {
+  .scene-context {
+    left: 28px;
+    right: 28px;
+  }
+}
+@media (max-width: 680px) {
+  .scene-travel {
+    left: 20px;
+    right: 20px;
+  }
+  .scene-context {
+    left: 20px;
+    right: 20px;
+    top: 12px;
+    gap: 10px;
+  }
+  .scene-context #scene-people-count {
+    max-width: 150px;
+    font-size: 11px;
+  }
+  .constellation-group {
+    width: 142px;
+    min-height: 110px;
+    padding: 6px;
+  }
+  .cluster-count {
+    width: 48px;
+    height: 48px;
+    font-size: 23px;
+    margin-bottom: 10px;
+  }
+  .is-selected .star-label strong {
+    font-size: 18px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .constellation-key,
+  .constellation-links.is-grouped {
+    animation: none;
+  }
+  .constellation-star,
+  .star-core,
+  .constellation-group {
+    transition: none;
+  }
+}
+[data-motion="off"] .constellation-key,
+[data-motion="off"] .constellation-links.is-grouped {
+  animation: none;
+}

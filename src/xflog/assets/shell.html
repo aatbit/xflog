@@ -1,0 +1,615 @@
+<div id="xf" data-motion="on" data-route="timeline">
+  <a class="skip" href="#main">Skip to timeline</a>
+  <header class="scene-header">
+    <a class="brand" href="/" aria-label="XFlog home" title="XFlog"
+      ><img src="/static/xf/mark.svg" width="32" height="32" alt=""
+    /></a>
+    <div class="workspace">
+      <span class="workspace-avatar" aria-hidden="true">X</span
+      ><span
+        ><strong id="scope-name">Your workspace</strong
+        ><span id="scope-handle">Local to this device</span></span
+      >
+    </div>
+    <div class="header-actions">
+      <button
+        type="button"
+        id="explore-button"
+        class="text-button"
+        aria-haspopup="dialog"
+        aria-label="Timeline settings"
+        title="Timeline settings"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 7h16M4 17h16" />
+          <circle cx="9" cy="7" r="3" />
+          <circle cx="15" cy="17" r="3" />
+        </svg></button
+      ><button
+        type="button"
+        class="text-button"
+        data-nav="profile"
+        aria-label="Open profile"
+        title="Profile"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="8" r="4" />
+          <path d="M4 21v-2a8 8 0 0 1 16 0v2" />
+        </svg>
+      </button>
+    </div>
+  </header>
+  <main id="main" tabindex="-1">
+    <div id="notice" class="notice" hidden>
+      <div class="notice-content" role="status" aria-atomic="true">
+        <svg class="notice-icon" viewBox="0 0 24 24" aria-hidden="true"></svg>
+        <span id="notice-kind" class="sr-only"></span>
+        <span id="notice-message"></span>
+      </div>
+      <button id="notice-dismiss" class="icon-button" type="button" aria-label="Dismiss notification" title="Dismiss">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+      </button>
+    </div>
+    <section id="timeline-view" aria-labelledby="timeline-title">
+      <h1 id="timeline-title" class="sr-only">Audience history</h1>
+      <div class="scene-stage">
+        <div class="scene-context">
+          <span
+            ><strong id="scene-lens-label">Ungrouped</strong
+            ><span id="scene-people-count"></span
+            ><span id="constellation-key" class="constellation-key" role="list" aria-label="Constellation groups" hidden></span
+          ></span>
+          <div id="lens-control" hidden>
+            <button
+              type="button"
+              id="lens-trigger"
+              popovertarget="audience-lens"
+              aria-label="Choose audience lens"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              aria-controls="audience-lens"
+              title="Choose audience lens"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="m4 12 11-6 5 5-11 6zM8 17l-3 4m4-4 3 4M15 6l2-2 5 5-2 2"
+                />
+              </svg>
+              <svg class="lens-chevron" viewBox="0 0 12 12" aria-hidden="true">
+                <path d="m3 4 3 3 3-3" />
+              </svg>
+            </button>
+            <div
+              id="audience-lens"
+              class="choice-popover"
+              popover="auto"
+              role="menu"
+              aria-label="Audience lens"
+            ></div>
+          </div>
+        </div>
+        <div
+          id="history"
+          class="history horizontal"
+          role="region"
+          aria-label="Follower event timeline"
+          tabindex="0"
+        >
+          <div class="empty-state">
+            <h2>Every connection<br />has a chapter.</h2>
+            <p>Your follower history begins when you start tracking.</p>
+            <button class="button primary" type="button" id="empty-demo">
+              Explore the demo <span aria-hidden="true">→</span>
+            </button>
+          </div>
+        </div>
+        <nav class="scene-travel" aria-label="Move through constellation">
+          <button
+            type="button"
+            id="memory-next"
+            class="is-unavailable"
+            aria-label="Older memory"
+            title="Older memory"
+            aria-hidden="true"
+            disabled
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M19 12H5m6-6-6 6 6 6" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            id="memory-previous"
+            class="is-unavailable"
+            aria-label="Newer memory"
+            title="Newer memory"
+            aria-hidden="true"
+            disabled
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 12h14m-6-6 6 6-6 6" />
+            </svg>
+          </button>
+        </nav>
+        <button
+          type="button"
+          id="selected-signal"
+          class="selected-signal"
+          aria-label="Open selected signal details"
+          aria-describedby="signal-verification signal-handle signal-profile signal-activity signal-received"
+          hidden
+        >
+          <svg class="signal-target" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="6" />
+            <path d="M12 2v4m0 12v4M2 12h4m12 0h4" />
+          </svg>
+          <span id="signal-identity" class="signal-identity">
+            <span class="signal-person">
+              <span class="signal-name">
+                <strong id="signal-name"></strong>
+                <span id="signal-verification"></span>
+              </span>
+              <span id="signal-handle"></span>
+            </span>
+            <span id="signal-profile" class="signal-profile" hidden></span>
+          </span>
+          <span class="signal-activity">
+            <small>Activity</small>
+            <span id="signal-activity"></span>
+          </span>
+          <span class="signal-time">
+            <small>Last signal</small>
+            <time id="signal-received"></time>
+          </span>
+          <svg class="signal-open" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m9 5 7 7-7 7" />
+          </svg>
+        </button>
+        <button
+          id="signal-follow"
+          type="button"
+          class="follow-button follow-hud"
+          data-follow-button
+          hidden
+          disabled
+        >
+          Follow
+        </button>
+      </div>
+      <div class="scene-controls">
+        <div id="scene-control-content" class="controls-content">
+          <section
+            id="activity-hud"
+            class="activity-hud"
+            aria-label="Recorded activity"
+            aria-busy="true"
+          >
+            <dl id="activity-readings" class="activity-readings"></dl>
+            <div class="hud-tools">
+              <button
+                type="button"
+                id="activity-period-trigger"
+                popovertarget="activity-periods"
+                aria-haspopup="menu"
+                aria-expanded="false"
+                aria-label="Activity period: 24h"
+                title="Choose activity period"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="8" />
+                  <path d="M12 7v5l3 2" />
+                </svg>
+                <span id="activity-period-value">24h</span>
+                <svg class="hud-chevron" viewBox="0 0 12 12" aria-hidden="true">
+                  <path d="m3 4.5 3 3 3-3" />
+                </svg>
+              </button>
+            </div>
+            <p id="activity-error" class="hud-error" role="status" hidden>
+              Readings unavailable. Retrying shortly.
+            </p>
+            <div
+              id="activity-periods"
+              class="choice-popover"
+              popover
+              role="menu"
+              aria-label="Activity period"
+            ></div>
+          </section>
+          <span id="journey-position" class="sr-only">No memories yet</span>
+          <div class="scrubber">
+            <div class="navigator-row">
+              <label class="sr-only" for="memory-scrubber"
+                >Move through loaded history</label
+              >
+              <div class="navigator-track">
+                <input
+                  id="memory-scrubber"
+                  type="range"
+                  min="0"
+                  max="1000"
+                  value="0"
+                  disabled
+                />
+              </div>
+              <div
+                class="zoom-controls"
+                role="group"
+                aria-label="Constellation zoom"
+              >
+                <button
+                  type="button"
+                  id="zoom-out"
+                  aria-label="Zoom out of constellation"
+                  title="Zoom out"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="10" cy="10" r="6" />
+                    <path d="m15 15 5 5M7 10h6" />
+                  </svg>
+                </button>
+                <label class="sr-only" for="scene-zoom"
+                  >Constellation zoom</label
+                >
+                <input
+                  id="scene-zoom"
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="0.05"
+                  value="0.8"
+                />
+                <button
+                  type="button"
+                  id="zoom-in"
+                  aria-label="Zoom into constellation"
+                  title="Zoom in"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="10" cy="10" r="6" />
+                    <path d="m15 15 5 5M7 10h6M10 7v6" />
+                  </svg>
+                </button>
+                <output id="zoom-value" for="scene-zoom">80%</output>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <button
+      type="button"
+      class="back-button text-button"
+      aria-label="Return to the constellation"
+      title="Return to the constellation"
+      data-nav="timeline"
+      hidden
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M19 12H5m7-7-7 7 7 7" />
+      </svg>
+    </button>
+    <section id="profile-view" hidden aria-labelledby="profile-title">
+      <h1 id="profile-title" class="sr-only">Profile & settings</h1>
+      <div class="settings-row">
+        <div>
+          <h2>Tracked account</h2>
+          <p id="profile-account">No account configured.</p>
+        </div>
+        <div class="settings-panel">
+          <div id="profile-state">Setup missing</div>
+          <p id="profile-message">Tracking is paused.</p>
+          <ul
+            id="profile-missing-settings"
+            class="missing-settings"
+            hidden
+          ></ul>
+          <p id="profile-environment" hidden></p>
+        </div>
+      </div>
+      <form id="preferences-form">
+        <div class="settings-row">
+          <div>
+            <h2>Activity</h2>
+            <p>Choose the activity recorded by this instance.</p>
+          </div>
+          <div class="settings-panel">
+            <label class="switch-row"
+              ><span><strong>Follower events</strong></span
+              ><input
+                type="checkbox"
+                role="switch"
+                name="followers"
+                checked /></label
+            ><label class="switch-row"
+              ><span
+                ><strong>Paid subscription events</strong
+                ><small
+                  >New subscribers and expired subscriptions. Requires
+                  X_USER_ACCESS_TOKEN in the server environment.</small
+                ></span
+              ><input
+                type="checkbox"
+                role="switch"
+                name="subscriptions" /></label
+            ><label class="switch-row"
+              ><span><strong>Activity notifications</strong></span
+              ><input type="checkbox" role="switch" name="notifications"
+            /></label>
+            <label class="switch-row"
+              ><span
+                ><strong>Allow Follow/Unfollow</strong
+                ><small id="follow-actions-help"
+                  >Extra X requests apply. Requires X_USER_ACCESS_TOKEN with
+                  follows.read and follows.write.</small
+                ></span
+              ><input
+                type="checkbox"
+                role="switch"
+                name="follow_actions"
+                aria-describedby="follow-actions-help"
+            /></label>
+            <label class="switch-row" title="X user lookup charges apply once per new person. Names and handles are saved locally. Disable and re-enable to retry unavailable profiles. Grouping data is not requested.">
+              <span><strong>Resolve names &amp; handles</strong><small>X user lookups · cached</small></span>
+              <input type="checkbox" role="switch" name="profile_names" aria-label="Resolve names and handles; billable X user lookups, saved locally" />
+            </label>
+            <details class="interaction-settings">
+              <summary>Interaction history</summary>
+              <div id="interaction-options"></div>
+              <p class="setting-description">
+                Requires users.read and tweet.read; likes also need like.read.
+                <a
+                  href="https://docs.x.com/x-api/activity/event-pricing"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  >X prices ↗</a
+                >
+              </p>
+            </details>
+            <div class="preference-actions">
+              <button type="submit" class="button primary">
+                Save preferences
+              </button>
+            </div>
+          </div>
+        </div>
+      </form>
+    </section>
+    <section id="about-view" hidden aria-labelledby="about-title">
+      <div class="page-heading">
+        <div>
+          <h1 id="about-title">A little more signal.</h1>
+          <p>XFlog — X Follower Log.</p>
+        </div>
+      </div>
+      <div class="about-story">
+        <img
+          src="/static/xf/mark.svg"
+          width="96"
+          height="96"
+          alt="XFlog crossing paths mark"
+        />
+        <h2>People come. People go.<br />Keep the story.</h2>
+        <p>
+          A local event journal for the changes in your X audience. Incoming
+          follower activity is the default. Paid subscriber history is an
+          optional, separate view.
+        </p>
+        <p>
+          XFlog uses the official X Activity API. It never scrapes your account,
+          requests your password, or builds follower-list snapshots.
+        </p>
+        <a href="/static/xf/brand.html" target="_blank" rel="noopener"
+          >Explore the brand ↗</a
+        >
+      </div>
+    </section>
+  </main>
+  <dialog
+    id="explore-dialog"
+    class="explore-drawer"
+    aria-labelledby="explore-title"
+  >
+    <header class="panel-header">
+      <h2 id="explore-title" class="sr-only">Timeline settings</h2>
+      <form method="dialog">
+        <button class="dialog-close" aria-label="Close timeline settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m6 6 12 12M6 18 18 6" />
+          </svg>
+        </button>
+      </form>
+    </header>
+    <div class="panel-body">
+      <section class="panel-section" aria-labelledby="history-settings-title">
+        <h3 id="history-settings-title">History</h3>
+        <div class="setting-block">
+          <span class="setting-label" id="audience-label">Audience</span>
+          <div
+            class="segmented subject-tabs"
+            role="group"
+            aria-labelledby="audience-label"
+          >
+            <button type="button" data-subject="followers" aria-pressed="true">
+              Activity
+            </button>
+            <button
+              type="button"
+              data-subject="subscriptions"
+              aria-pressed="false"
+            >
+              Paid subscribers
+            </button>
+          </div>
+        </div>
+        <div class="setting-block">
+          <span class="setting-label" id="events-label">Events</span>
+          <div
+            class="segmented filters"
+            role="group"
+            aria-labelledby="events-label"
+          >
+            <button type="button" data-filter="all" aria-pressed="true">
+              All events
+            </button>
+            <button type="button" data-filter="gained" aria-pressed="false">
+              Gained
+            </button>
+            <button type="button" data-filter="lost" aria-pressed="false">
+              Lost
+            </button>
+          </div>
+        </div>
+      </section>
+      <section class="panel-section" aria-labelledby="appearance-title">
+        <h3 id="appearance-title">Appearance</h3>
+        <div class="setting-block">
+          <span class="setting-label" id="layout-label">Layout</span>
+          <div
+            class="segmented layout-control"
+            role="group"
+            aria-labelledby="layout-label"
+          >
+            <button
+              type="button"
+              data-layout="horizontal"
+              aria-pressed="true"
+              aria-label="Constellation view"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m5 7 7 9 7-11M12 16l8 4" />
+                <circle cx="5" cy="7" r="2" />
+                <circle cx="12" cy="16" r="2" />
+                <circle cx="19" cy="5" r="2" /></svg
+              >Constellation
+            </button>
+            <button
+              type="button"
+              data-layout="vertical"
+              aria-pressed="false"
+              aria-label="Vertical timeline"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M8 5h13M8 12h13M8 19h13M3 5h.01M3 12h.01M3 19h.01"
+                /></svg
+              >Journal
+            </button>
+          </div>
+        </div>
+        <button
+          type="button"
+          id="motion-toggle"
+          class="motion-switch"
+          aria-pressed="true"
+          aria-describedby="motion-description"
+        >
+          Ambient motion on
+        </button>
+        <p id="motion-description" class="setting-description">
+          Light travels between recorded encounters. Names stay still.
+        </p>
+        <div class="motion-speed-control">
+          <div>
+            <label for="motion-speed">Motion speed</label>
+            <output id="motion-speed-value" for="motion-speed">1×</output>
+          </div>
+          <input
+            id="motion-speed"
+            type="range"
+            min="0.25"
+            max="2"
+            step="0.25"
+            value="1"
+          />
+        </div>
+      </section>
+      <details class="workspace-settings audience-group-settings">
+        <summary>
+          <h3 id="audience-groups-title">Audience Groups</h3>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m9 5 7 7-7 7" />
+          </svg>
+        </summary>
+        <div class="workspace-controls">
+          <div id="audience-group-options"></div>
+          <p class="setting-description">
+            One star per person in the loaded history. Lines trace recorded
+            sequence, not relationships.
+          </p>
+        </div>
+      </details>
+      <details class="workspace-settings">
+        <summary>
+          Workspace<svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m9 5 7 7-7 7" />
+          </svg>
+        </summary>
+        <div class="workspace-controls">
+          <button type="button" id="view-gaps" class="setting-action">
+            <span>Connection history</span
+            ><svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m9 5 7 7-7 7" />
+            </svg>
+          </button>
+          <button type="button" id="demo-toggle" class="setting-action">
+            Explore demo ↗
+          </button>
+          <div class="workspace-buttons">
+            <button type="button" id="tracking-button" class="button primary">
+              Start tracking →
+            </button>
+          </div>
+          <p id="history-end" class="setting-description">
+            Only activity received while tracking appears here.
+          </p>
+        </div>
+      </details>
+    </div>
+    <footer class="panel-footer">
+      <span id="connection-label" class="connection">Setup missing</span
+      ><button type="button" data-nav="about" class="text-button">
+        About XFlog ↗
+      </button>
+    </footer>
+  </dialog>
+  <dialog id="action-dialog" aria-labelledby="dialog-title">
+    <form method="dialog">
+      <button class="dialog-close" aria-label="Close dialog">×</button>
+    </form>
+    <div id="dialog-body"></div>
+  </dialog>
+  <dialog id="detail-dialog" aria-label="Event detail">
+    <form method="dialog">
+      <button class="dialog-close" aria-label="Close event detail">×</button>
+    </form>
+    <div id="mobile-detail"></div>
+  </dialog>
+  <dialog id="interaction-dialog" aria-labelledby="interaction-title">
+    <form method="dialog">
+      <button class="dialog-close" aria-label="Close interaction history">
+        ×
+      </button>
+    </form>
+    <header class="interaction-heading">
+      <div>
+        <h2 id="interaction-title" tabindex="-1">Interaction history</h2>
+        <p id="interaction-person"></p>
+      </div>
+    </header>
+    <div class="interaction-body" data-interaction-content></div>
+    <footer class="interaction-note">
+      X reads: $0.005/post · up to 100 per page. Saved activity opens without X
+      requests.
+    </footer>
+  </dialog>
+
+  <div id="page-crumb" hidden></div>
+  <div
+    class="sr-only"
+    id="announcer"
+    role="status"
+    aria-live="polite"
+    aria-atomic="true"
+  ></div>
+</div>

@@ -1,0 +1,7 @@
+XFlog
+Copyright 2026 XFlog contributors
+
+XFlog's original source code is licensed under the Apache License, Version 2.0.
+
+The bundled IBM Plex fonts remain licensed under the SIL Open Font License,
+Version 1.1. See src/xflog/assets/FONT-LICENSE.txt for their copyright and license.
