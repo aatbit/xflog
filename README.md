@@ -113,15 +113,24 @@ curl -fsSL https://raw.githubusercontent.com/aatbit/xflog/main/install.sh | bash
 The same installer can **check for updates**, **update** or **uninstall**. History and settings are kept unless you explicitly choose to delete them.
 
 <details>
-<summary>Use the released Docker image instead of building locally</summary>
+<summary>Build and run with Docker Compose manually</summary>
 
-Release images are available at **`ghcr.io/aatbit/xflog:v1.0.0`** for Linux AMD64 and ARM64. From a checkout with your private `.env` configured, run:
+Clone the repository and create your private settings file:
 
 ```bash
-docker compose -f compose.yaml -f compose.registry.yaml up -d --no-build --pull always
+git clone https://github.com/aatbit/xflog.git
+cd xflog
+cp .env.example .env
+chmod 600 .env
 ```
 
-This uses the same localhost port, security settings and saved history as the normal Compose setup. Keep both `-f` options when managing this installation. To upgrade, set `XFLOG_IMAGE_TAG` in `.env` to the new version tag and run the command again. Back up your history first. The interactive installer continues to build from source.
+Edit `.env` using the [setup checklist](#x-prerequisites), then build and start XFlog:
+
+```bash
+docker compose up -d --build
+```
+
+Open `http://127.0.0.1:7860`. Leave X credentials blank for the offline demo. Compose builds the image on your machine, keeps history in a Docker volume and publishes the port only on localhost. No GHCR image or registry login is needed. Use `docker compose down` to stop; **do not add `-v` unless you want to delete history**.
 
 </details>
 
@@ -469,9 +478,9 @@ Pull requests to `main` and updates on `main` run lint, formatting and the mock-
 <details>
 <summary>How maintainers publish a release</summary>
 
-1. Update the version in `pyproject.toml`, run `uv lock`, and update the image version in `compose.registry.yaml`. Merge the passing release PR into `main`.
+1. Update the version in `pyproject.toml` and run `uv lock`. Merge the passing release PR into `main`.
 2. Tag that commit, for example `git tag v1.0.0`, then `git push origin v1.0.0`.
-3. Actions repeats the checks and verifies the tag matches the package version and belongs to `main`. It builds and checks the Python packages, publishes them to PyPI, and builds the version-tagged AMD64/ARM64 image on GHCR. Once both publications succeed, it creates a GitHub release with package downloads and automatically generated change notes.
+3. Actions repeats the checks and verifies the tag matches the package version and belongs to `main`. It builds and checks the Python packages, publishes them to PyPI, then creates a GitHub release with package downloads and automatically generated change notes. Docker users build locally with Compose; releases do not publish a container image.
 
 PyPI uses Trusted Publishing from this repository’s `release.yml` workflow and `pypi` environment; no long-lived PyPI token is stored in GitHub. Actions are pinned to full commit hashes, with Dependabot checking for updates. If a job fails, inspect it and rerun the failed jobs; do not reuse a published version for different files. Changing a version tag does not replace files already published to PyPI.
 
