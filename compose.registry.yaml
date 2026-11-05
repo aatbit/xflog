@@ -1,0 +1,3 @@
+services:
+  xflog:
+    image: ghcr.io/aatbit/xflog:${XFLOG_IMAGE_TAG:-v1.0.0}

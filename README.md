@@ -90,23 +90,6 @@ Each command makes one user lookup, which can cost credits. It prints the ID wit
 
 </details>
 
-## Which features use X credits?
-
-**Self-hosting does not remove X’s API fees.** Before live tracking, add credits, set a spending limit and check automatic top-ups in the [X Developer Console](https://console.x.com).
-
-| Feature | X API cost |
-| --- | --- |
-| **Offline demo** | None; no X requests. |
-| **Account discovery and `user-id` lookup** | One user read, which can be billed. With `X_USER_ID` blank, discovery runs once at every startup. |
-| **Groups, filters, layouts, zoom, statistics and notifications** | No extra X requests or charges. Live events you record still follow X’s event pricing. |
-| **Live follower tracking** | Follow and unfollow events are billed on X’s pay-per-use plan. |
-| **Paid-subscription tracking** | New-subscription and expiry events are currently listed as **not billed**; [setup requirements](#x-prerequisites) still apply. |
-| **Allow Follow/Unfollow** | Extra relationship checks and actions can be billed, even if you check someone without pressing Follow. |
-| **Interaction history** | Off by default. $0.005 per delivered reply, mention, quote, repost or own-post event; $0.001 per like event. Turning on your posts also receives standalone posts. |
-| **Thread loading** | Only on click: $0.005 per returned post, up to 100 per page. A missing conversation may need one extra post lookup. Account verification can add a user read. Saved copies reopen without X requests. |
-
-Checked **4 November 2026** against [X’s event prices](https://docs.x.com/x-api/activity/event-pricing) and [API pricing](https://docs.x.com/x-api/getting-started/pricing). Prices can change. XFlog’s activity counts are **not a bill or spending limit**. Hosting costs are separate.
-
 ## Local installation
 
 | Method | Install these first |
@@ -128,6 +111,19 @@ curl -fsSL https://raw.githubusercontent.com/aatbit/xflog/main/install.sh | bash
 **Local use can be password-free:** press Enter at the password prompt. If you set one, use at least 16 English letters, numbers or symbols (ASCII); the browser username is **`xflog`**. This protects XFlog and is separate from your X password. Secrets are hidden while typing.
 
 The same installer can **check for updates**, **update** or **uninstall**. History and settings are kept unless you explicitly choose to delete them.
+
+<details>
+<summary>Use the released Docker image instead of building locally</summary>
+
+Release images are available at **`ghcr.io/aatbit/xflog:v1.0.0`** for Linux AMD64 and ARM64. From a checkout with your private `.env` configured, run:
+
+```bash
+docker compose -f compose.yaml -f compose.registry.yaml up -d --no-build --pull always
+```
+
+This uses the same localhost port, security settings and saved history as the normal Compose setup. Keep both `-f` options when managing this installation. To upgrade, set `XFLOG_IMAGE_TAG` in `.env` to the new version tag and run the command again. Back up your history first. The interactive installer continues to build from source.
+
+</details>
 
 <details>
 <summary>Read the installer before running it</summary>
@@ -168,6 +164,23 @@ Saved renewal tokens stay with the history database. Deleting only `.env` keeps 
 - Remove a stale `.xflog-maintenance.lock` only after checking that no updater or uninstaller is still running.
 
 </details>
+
+## Which features use X credits?
+
+**Self-hosting does not remove X’s API fees.** Before live tracking, add credits, set a spending limit and check automatic top-ups in the [X Developer Console](https://console.x.com).
+
+| Feature | X API cost |
+| --- | --- |
+| **Offline demo** | None; no X requests. |
+| **Account discovery and `user-id` lookup** | One user read, which can be billed. With `X_USER_ID` blank, discovery runs once at every startup. |
+| **Groups, filters, layouts, zoom, statistics and notifications** | No extra X requests or charges. Live events you record still follow X’s event pricing. |
+| **Live follower tracking** | Follow and unfollow events are billed on X’s pay-per-use plan. |
+| **Paid-subscription tracking** | New-subscription and expiry events are currently listed as **not billed**; [setup requirements](#x-prerequisites) still apply. |
+| **Allow Follow/Unfollow** | Extra relationship checks and actions can be billed, even if you check someone without pressing Follow. |
+| **Interaction history** | Off by default. $0.005 per delivered reply, mention, quote, repost or own-post event; $0.001 per like event. Turning on your posts also receives standalone posts. |
+| **Thread loading** | Only on click: $0.005 per returned post, up to 100 per page. A missing conversation may need one extra post lookup. Account verification can add a user read. Saved copies reopen without X requests. |
+
+Checked **4 November 2026** against [X’s event prices](https://docs.x.com/x-api/activity/event-pricing) and [API pricing](https://docs.x.com/x-api/getting-started/pricing). Prices can change. XFlog’s activity counts are **not a bill or spending limit**. Hosting costs are separate.
 
 ## Preferences and notifications
 
@@ -368,15 +381,26 @@ Visit your domain and enter username **`xflog`** and the password from `.env`. N
 
 ## Use it in your own applications
 
-Use XFlog as a Python library without installing the browser interface. Python **3.12+** is required. Install from this repo with either command (a PyPI release is not published yet):
+Use XFlog as a Python library without installing the browser interface. Python **3.12+** is required. Install the package from PyPI:
 
 ```bash
-pip install "xflog @ git+https://github.com/aatbit/xflog.git@main"
-# Or, inside a uv-managed environment:
-uv pip install "xflog @ git+https://github.com/aatbit/xflog.git@main"
+python -m pip install xflog
+# Or, add it to a uv project:
+uv add xflog
 ```
 
-The base package installs only the tracking and storage dependencies. For the self-hosted browser app, use `xflog[ui]` instead of `xflog` in either command. Docker and the interactive installer include the UI automatically.
+The base package installs only the tracking and storage dependencies. In an existing Python environment, `uv pip install xflog` works too.
+
+For the browser app, install **`xflog[ui]`** instead, then run **`xflog`** (or `uv run xflog` in a uv project). Set your [environment settings](#environment-configuration) before running it; a plain Python launch does not load `.env` automatically. Docker and the interactive installer include the UI automatically. Installing the package does not create an OS service.
+
+<details>
+<summary>Upgrades and installing from source</summary>
+
+Use `python -m pip install --upgrade xflog` or `uv lock --upgrade-package xflog` followed by `uv sync`. Keep the `[ui]` extra in your pip command if you use the browser app. Stop XFlog and back up history before upgrading, then restart it with the same settings.
+
+For unreleased development code, use `python -m pip install "xflog @ git+https://github.com/aatbit/xflog.git@main"`. Prefer a released version for normal use.
+
+</details>
 
 <details>
 <summary>Use XFlog from another application</summary>
@@ -435,6 +459,21 @@ Handle these errors at your application's boundary:
 `xflog.app.create_app` remains the self-hosted entry point, using `xflog.config.Config` for its additional browser settings. Its runtime is available as `app.state.runtime`; `Runtime.lifespan(app)` is the ASGI adapter for the same async context.
 
 To run the full development suite from a checkout, use `uv sync --extra ui --extra dev` then `uv run --no-sync pytest`. To check the SDK without web packages, create a separate environment, install the base package plus `pytest` and `pytest-asyncio`, then run `python -m pytest tests/test_runtime.py tests/test_identity.py tests/test_cli.py`. No tests make live X requests.
+
+</details>
+
+## Releases and contributing
+
+Pull requests to `main` and updates on `main` run lint, formatting and the mock-data tests on Python 3.12–3.14. No X credentials are needed. See the [changelog](CHANGELOG.md) and [release notes](https://github.com/aatbit/xflog/releases) for published changes.
+
+<details>
+<summary>How maintainers publish a release</summary>
+
+1. Update the version in `pyproject.toml`, run `uv lock`, and update the image version in `compose.registry.yaml`. Merge the passing release PR into `main`.
+2. Tag that commit, for example `git tag v1.0.0`, then `git push origin v1.0.0`.
+3. Actions repeats the checks and verifies the tag matches the package version and belongs to `main`. It builds and checks the Python packages, publishes them to PyPI, and builds the version-tagged AMD64/ARM64 image on GHCR. Once both publications succeed, it creates a GitHub release with package downloads and automatically generated change notes.
+
+PyPI uses Trusted Publishing from this repository’s `release.yml` workflow and `pypi` environment; no long-lived PyPI token is stored in GitHub. Actions are pinned to full commit hashes, with Dependabot checking for updates. If a job fails, inspect it and rerun the failed jobs; do not reuse a published version for different files. Changing a version tag does not replace files already published to PyPI.
 
 </details>
 

@@ -6,7 +6,7 @@ FROM base AS build
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 UV_PYTHON_DOWNLOADS=never
 WORKDIR /app
-COPY pyproject.toml uv.lock LICENSE NOTICE ./
+COPY pyproject.toml uv.lock README.md LICENSE NOTICE ./
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --extra ui --no-install-project
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --extra ui --no-editable
