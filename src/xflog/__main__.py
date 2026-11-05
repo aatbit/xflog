@@ -50,8 +50,7 @@ def serve() -> None:
         if error.name not in {"uvicorn", "fastapi", "gradio"}:
             raise
         raise SystemExit(
-            "The browser UI is optional. Install it with: pip install "
-            '"xflog[ui] @ git+https://github.com/aatbit/xflog.git@main" '
+            'The browser UI is optional. Install it with: pip install "xflog[ui]" '
             "(or use uv pip install with the same argument)."
         ) from None
     config = Config.from_env()

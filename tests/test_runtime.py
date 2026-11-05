@@ -302,4 +302,4 @@ from xflog.__main__ import main
 main()
 """
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
-    assert result.returncode != 0 and 'pip install "xflog[ui] @ git+' in result.stderr
+    assert result.returncode != 0 and 'pip install "xflog[ui]"' in result.stderr
