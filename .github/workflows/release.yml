@@ -76,42 +76,9 @@ jobs:
       - name: Publish the verified files with Trusted Publishing
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
 
-  container:
-    name: Publish container to GHCR
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
-        with:
-          platforms: arm64
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ghcr.io/aatbit/xflog:${{ github.ref_name }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/aatbit/xflog
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ github.ref_name }}
-            org.opencontainers.image.licenses=Apache-2.0
-
   release:
     name: Create GitHub release and changelog
-    needs: [pypi, container]
+    needs: pypi
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -129,4 +96,4 @@ jobs:
         run: |
           gh release create "$RELEASE_TAG" dist/* --verify-tag --generate-notes \
             --title "$RELEASE_TAG" \
-            --notes "Install: pip install xflog. Container: ghcr.io/aatbit/xflog:$RELEASE_TAG. See CHANGELOG.md for the first-release feature summary."
+            --notes "Install: pip install xflog. Docker: build from source with docker compose up -d --build. See CHANGELOG.md for the first-release feature summary."

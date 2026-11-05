@@ -14,4 +14,4 @@ First public release:
 - Optional Follow/Unfollow actions, name lookups and open-page notifications.
 - Persistent SQLite history, automatic user-token renewal and a headless Python API.
 - Interactive install, update and uninstall for Docker or native Linux services.
-- PyPI packages and version-tagged AMD64/ARM64 container images under Apache 2.0.
+- PyPI packages and local Docker Compose builds under Apache 2.0.
