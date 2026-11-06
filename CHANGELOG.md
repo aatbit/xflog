@@ -3,6 +3,16 @@
 Each tagged release has an automatically generated list of merged pull requests
 and contributors on the [GitHub releases page](https://github.com/aatbit/xflog/releases).
 
+## 1.0.7 — 2026-11-07
+
+### Changed
+
+- Constellation group badges and legend counts show total recorded actions, matching
+  their event stars. Tooltips and accessible labels include unique people.
+- Shared count formatting handles singular and plural actions and people consistently.
+
+No database migration or new environment settings are required.
+
 ## 1.0.6 — 2026-11-06
 
 ### Fixed
