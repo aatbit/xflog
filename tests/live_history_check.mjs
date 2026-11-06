@@ -195,3 +195,34 @@ assert.equal(rangeReads,2);
 
 const serverStart = "2026-11-06T09:00:59.000Z";
 assert.equal(groupSince({...groupedState,groupRange:"1h",demo:false,rangeWindow:{period:"1h",subject:"followers",demo:false,start:serverStart}},Date.parse("2026-11-06T10:00:00Z")),serverStart,"Use the same server cutoff as HUD even if the browser clock differs");
+
+const totalRows = Array.from({length:195},(_,i)=>({...event(1000+i),actor_id:String(i%88),received_at:new Date(Date.now()-(i<176?3600000:172800000)).toISOString()}));
+const rangeCalls=[];
+const rangeApi=async path=>{
+  const q=new URL(path,"http://local").searchParams;
+  rangeCalls.push(q);
+  const rows=totalRows.filter(row=>!q.get("since") || row.received_at>=q.get("since"));
+  const start=Number(q.get("before"));
+  return {events:rows.slice(start,start+25),next:start+25<rows.length?String(start+25):null};
+};
+const allState={...groupedState,lens:"none",groupRange:"all",since:"",events:[],selected:null,next:null,status:{...state.status,timeline_revision:"all-first"}};
+const savedAll=[];
+for await(const page of historyPages(rangeApi,allState)) savedAll.push(...page.events);
+const day=[];
+for await(const page of historyPages(rangeApi,{...allState,since:new Date(Date.now()-86400000).toISOString()})) day.push(...page.events);
+assert.equal(savedAll.length,195);
+assert.equal(day.length,176);
+assert.ok(day.every(row=>savedAll.some(saved=>saved.event_id===row.event_id)),"All saved is a superset of the same 24h filter");
+assert.ok(rangeCalls.filter(q=>q.get("before")!=="0").every(q=>q.get("local_only")==="true"),"Completing all saved pages never triggers extra profile lookups");
+let allLive={...allState};
+const allFeed=createLiveHistory({read:()=>({...allLive}),api:rangeApi,apply:(events,next)=>{allLive.events=events;allLive.next=next;},refreshInteractions:async()=>{}});
+await allFeed.refresh();
+assert.equal(allLive.events.length,195,"An empty All saved live refresh must also read beyond page one");
+assert.equal(allLive.next,null);
+
+let retryAll={...allState,events:day,next:null,selected:day[2].event_id};
+const retryFeed=createLiveHistory({read:()=>({...retryAll}),api:rangeApi,apply:(events,next)=>{retryAll.events=events;retryAll.next=next;},refreshInteractions:async()=>{}});
+await retryFeed.refresh();
+assert.equal(retryAll.events.length,195,"A first live pass must complete All saved even when a failed range load left older 24h rows in the view");
+await retryFeed.refresh();
+assert.equal(retryAll.events.length,195);

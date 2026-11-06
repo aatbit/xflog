@@ -20,8 +20,8 @@ export function historyPath(state, before = "0") {
   }
   if (state.since) {
     params.set("since", state.since);
-    if (before !== "0") params.set("local_only", "true");
   }
+  if (before !== "0") params.set("local_only", "true");
   return `/api/${state.demo ? "demo" : "timeline"}?${params}`;
 }
 
@@ -76,8 +76,7 @@ export function createLiveHistory({ api, read, apply, refreshInteractions }) {
           incoming.push(...page.events);
           const selectionLoaded = !state.selected || !known.has(state.selected) ||
             incoming.some(event => event.event_id === state.selected);
-          if ((!known.size && (!state.lens || state.lens === "none") && !state.since) ||
-              (selectionLoaded && page.events.some(event => known.has(event.event_id)))) break;
+          if (appliedScope === scope && selectionLoaded && page.events.some(event => known.has(event.event_id))) break;
         }
         const profiles = new Map(incoming.filter(event => event.name && event.handle)
           .map(event => [event.actor_id, {name:event.name,handle:event.handle,profile_url:event.profile_url}]));

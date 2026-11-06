@@ -3,6 +3,17 @@
 Each tagged release has an automatically generated list of merged pull requests
 and contributors on the [GitHub releases page](https://github.com/aatbit/xflog/releases).
 
+## 1.0.8 — 2026-11-07
+
+### Fixed
+
+- All saved completes every history page in the ungrouped timeline instead of
+  stopping after the first 25 events. Its contents include the matching 24h subset.
+- Live refresh completes empty views and recovers correctly when a failed range
+  change leaves earlier rows visible. Additional pages stay local-only.
+
+No database migration or new environment settings are required.
+
 ## 1.0.7 — 2026-11-07
 
 ### Changed
