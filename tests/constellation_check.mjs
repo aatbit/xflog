@@ -42,13 +42,8 @@ for (const width of [320, 390, 798, 1440])
         modules,
         lens: locations.key,
       });
-      if (zoom <= 0.25) {
-        assert.ok(layout.groups.length <= 6);
-        assert.ok(layout.groups.some((group) => group.key === "overview-more"));
-      } else {
-        assert.equal(layout.groups.length,40,"Zoomed constellations retain every location group separately");
-        assert.ok(!layout.groups.some(group=>group.key==="overview-more"));
-      }
+      assert.equal(layout.groups.length,40,"Every available location group remains separate at every zoom");
+      assert.ok(!layout.groups.some(group=>group.key==="overview-more"));
       assert.ok(layout.groups.some((group) => group.key === "unknown"));
       assert.equal(
         layout.groups.reduce((total, group) => total + group.people.length, 0),
@@ -186,7 +181,7 @@ for (const width of [320, 390, 798, 1440])
               point.y < height,
           ),
         );
-        if (layout.canPan) {
+        if (layout.canPan && !layout.overview) {
           layout.people
             .slice(1)
             .forEach((point, index) =>
@@ -210,8 +205,8 @@ for (const width of [320, 390, 798, 1440])
           );
         }
         if (zoom <= 0.25) {
-          assert.equal(layout.width, width);
-          assert.equal(layout.canPan, false);
+          assert.ok(layout.width >= width);
+          assert.equal(layout.canPan, layout.width > width + 0.5);
           assert.equal(layout.overview, lens !== "none");
         }
       }
