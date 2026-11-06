@@ -52,6 +52,14 @@ export function peopleFromEvents(events) {
   );
 }
 
+export function entriesFromEvents(events) {
+  const entries = new Map();
+  for (const event of events)
+    if (!entries.has(event.event_id))
+      entries.set(event.event_id, { id: event.event_id, event, events: [event] });
+  return [...entries.values()].sort((a, b) => compareEvents(a.event, b.event));
+}
+
 function labelsOverlap(a, b) {
   return (
     a.left < b.right + 12 && a.right > b.left - 12 &&
@@ -103,7 +111,7 @@ export function constellationLayout({
   modules,
   lens,
 }) {
-  const people = peopleFromEvents(events);
+  const people = entriesFromEvents(events);
   const upper = Math.min(90, height * 0.14);
   const rowHeight = width < 680 ? 124 : 156;
   const availableColumns = width < 700 ? 2 : 3;
@@ -118,7 +126,8 @@ export function constellationLayout({
   const groups = buckets
     ? buckets.map(({ events, ...bucket }) => ({
         ...bucket,
-        people: peopleFromEvents(events),
+        people: entriesFromEvents(events),
+        personCount: peopleFromEvents(events).length,
       }))
     : [{ key: "all", label: "Loaded audience", tone: "neutral", people }];
   const occupied = colorGroups(
