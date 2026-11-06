@@ -95,24 +95,6 @@ export function visibleLabels(candidates, selected) {
   return visible;
 }
 
-function compactGroups(groups, limit) {
-  if (!groups || groups.length <= limit) return groups;
-  const unknown = groups.filter((group) => group.key === "unknown");
-  const known = groups
-    .filter((group) => group.key !== "unknown");
-  const kept = known.slice(0, limit - 1 - unknown.length);
-  return [
-    ...kept,
-    {
-      key: "overview-more",
-      label: "More groups",
-      tone: "neutral",
-      events: known.slice(kept.length).flatMap((group) => group.events),
-    },
-    ...unknown,
-  ];
-}
-
 export function constellationLayout({
   events,
   width,
@@ -127,13 +109,12 @@ export function constellationLayout({
   const availableColumns = width < 700 ? 2 : 3;
   const availableRows = Math.max(
     1,
-    Math.floor((height - upper - 80) / rowHeight),
+    Math.floor((height - upper - Math.max(80, upper + 1)) / rowHeight),
   );
-  const groupLimit = Math.max(2, Math.min(6, availableColumns * availableRows));
   let rawBuckets = groupEvents(events, modules, lens);
   const module = modules.find(module => module.key === lens && module.enabled);
   if (rawBuckets) rawBuckets = colorGroups(rawBuckets, module);
-  const buckets = zoom <= 0.25 ? compactGroups(rawBuckets, groupLimit) : rawBuckets;
+  const buckets = rawBuckets;
   const groups = buckets
     ? buckets.map(({ events, ...bucket }) => ({
         ...bucket,
@@ -144,7 +125,10 @@ export function constellationLayout({
     groups.filter((group) => group.people.length),
     module,
   );
-  const columns = Math.min(occupied.length, width < 700 ? 2 : 3);
+  const columns = zoom <= 0.25 && buckets
+    ? Math.min(occupied.length, Math.max(availableColumns, Math.ceil(occupied.length / availableRows)))
+    : Math.min(occupied.length, availableColumns);
+  const overviewWidth = buckets ? Math.max(width, columns * 160) : width;
   const rows = zoom <= 0.25 ? Math.ceil(occupied.length / Math.max(1, columns)) : 1;
   const lower = Math.max(
     upper + rows * rowHeight,
@@ -154,21 +138,21 @@ export function constellationLayout({
   occupied.forEach((group, index) => {
     const row = Math.floor(index / Math.max(1, columns));
     const inRow = Math.min(columns, occupied.length - row * columns);
-    group.x = width * (((index % columns) + 0.5) / inRow);
+    group.x = (zoom <= 0.25 ? overviewWidth : width) * (((index % columns) + 0.5) / inRow);
     group.y = zoom <= 0.25 ? upper + areaHeight * ((row + 0.5) / rows) : upper + areaHeight / 2;
   });
   const blend = clamp((zoom - 0.25) / 0.75, 0, 1);
   const spacing = (width < 680 ? 245 : 285) * zoom;
   const orderedPeople = buckets ? [...occupied].reverse().flatMap(group => group.people) : people;
   const groupGap = buckets ? width * 0.5 * blend : 0;
-  const worldWidth = width + Math.max(0, orderedPeople.length - 1) * spacing * blend +
+  const worldWidth = zoom <= 0.25 ? overviewWidth : width + Math.max(0, orderedPeople.length - 1) * spacing * blend +
     Math.max(0, occupied.length - 1) * groupGap;
   const points = orderedPeople.map((person, index) => {
     const group = occupied.find((item) => item.people.includes(person));
     const member = group.people.indexOf(person);
     const angle = member * 2.399963229728653;
     const radius = Math.min(width < 600 ? 44 : 76, 14 + Math.sqrt(member) * 13);
-    const fitX = clamp(group.x + Math.cos(angle) * radius, 32, width - 32);
+    const fitX = clamp(group.x + Math.cos(angle) * radius, 32, (zoom <= 0.25 ? overviewWidth : width) - 32);
     const fitY = clamp(group.y + Math.sin(angle) * radius * 0.6, upper, lower);
     const timelineX = width / 2 + (orderedPeople.length - 1 - index) * spacing;
     const groupOffset = occupied.indexOf(group) * groupGap;

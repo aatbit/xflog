@@ -3,6 +3,18 @@
 Each tagged release has an automatically generated list of merged pull requests
 and contributors on the [GitHub releases page](https://github.com/aatbit/xflog/releases).
 
+## 1.0.5 — 2026-11-06
+
+### Fixed
+
+- Constellation overview shows every available group separately instead of combining
+  additional groups under More groups. Counts and colors stay attached to their groups.
+- Dense overviews use the existing horizontal scroll and history slider when the
+  available screen space is too small, keeping group targets readable and clickable.
+  Group selection, zoom, person actions and ambient motion are preserved.
+
+No database migration or new environment settings are required.
+
 ## 1.0.4 — 2026-11-06
 
 ### Changed
