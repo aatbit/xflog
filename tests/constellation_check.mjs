@@ -13,7 +13,7 @@ const {
 } = await import(new URL("constellation-layout.js", base));
 const { createConstellation } = await import(new URL("constellation.js", base));
 const { resolveLens } = await import(new URL("audience-ui.js", base));
-const { groupKey } = await import(new URL("constellation-colors.js", base));
+const { groupKey, groupDescription } = await import(new URL("constellation-colors.js", base));
 const { groupEvents } = await import(new URL("audience-groups.js", base));
 const modules = JSON.parse(process.argv[3]);
 const locations = modules.find((module) => module.key === "profile-location");
@@ -440,3 +440,12 @@ assert.equal(entryLayout.people.length,2);
 assert.notEqual(entryLayout.people[0].x,entryLayout.people[1].x);
 assert.notEqual(entryLayout.people[0].id,entryLayout.people[1].id);
 assert.equal(entriesFromEvents([...repeated,repeated[0]]).length,2,"Duplicate delivery of the same event does not add another entry");
+
+const repeatedGroup = {label:"Likes", people:entriesFromEvents(repeated), personCount:1};
+assert.equal(groupDescription(repeatedGroup), "2 actions · 1 person");
+const repeatedKey = groupKey([repeatedGroup], String);
+assert.ok(repeatedKey.includes('constellation-key-count">2</span>'));
+assert.ok(repeatedKey.includes('title="2 actions · 1 person"'));
+assert.ok(repeatedKey.includes('aria-label="Likes, 2 actions · 1 person"'));
+assert.equal(groupDescription({...repeatedGroup,people:repeatedGroup.people.slice(0,1)}),"1 action · 1 person");
+assert.equal(groupDescription({...repeatedGroup,personCount:2}),"2 actions · 2 people");

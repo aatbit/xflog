@@ -32,6 +32,11 @@ export function colorGroups(groups, module) {
   return groups.map(group => ({ ...group, ...styles.get(group.key) }));
 }
 
+export function groupDescription(group) {
+  const actions = group.people.length;
+  return `${actions} ${actions === 1 ? "action" : "actions"} · ${group.personCount} ${group.personCount === 1 ? "person" : "people"}`;
+}
+
 export function groupKey(groups, escape) {
-  return groups.map(group => `<span class="constellation-key-item" role="listitem" title="${escape(group.label)} · ${group.personCount}"><svg viewBox="0 0 22 12" aria-hidden="true" style="color:${group.color}"><path d="M1 6H21" stroke-dasharray="${group.dash}"/></svg><span class="constellation-key-label">${escape(group.label)}</span><span class="constellation-key-count">${group.personCount}</span></span>`).join("");
+  return groups.map(group => `<span class="constellation-key-item" role="listitem" tabindex="0" title="${escape(groupDescription(group))}" aria-label="${escape(group.label)}, ${escape(groupDescription(group))}"><svg viewBox="0 0 22 12" aria-hidden="true" style="color:${group.color}"><path d="M1 6H21" stroke-dasharray="${group.dash}"/></svg><span class="constellation-key-label">${escape(group.label)}</span><span class="constellation-key-count">${group.people.length}</span></span>`).join("");
 }
