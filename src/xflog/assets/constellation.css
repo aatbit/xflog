@@ -591,3 +591,45 @@
 [data-motion="off"] .constellation-links.is-grouped {
   animation: none;
 }
+
+.star-identity {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+}
+.star-label .star-kind {
+  display: inline-flex;
+  margin-top: 5px;
+  line-height: 1;
+}
+.star-kind svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.star-post { display: none; }
+.is-selected .star-post {
+  display: block;
+  margin-top: 8px;
+  padding: 6px 9px;
+  border-left: 2px solid var(--accent);
+  color: var(--text);
+  background: var(--ground);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+.star-post:hover { text-decoration: underline; }
+.star-post > span:first-child::before { content: "“"; }
+.star-post > span:first-child::after { content: "”"; }

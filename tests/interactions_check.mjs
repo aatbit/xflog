@@ -220,6 +220,8 @@ assert.equal(
 );
 assert(!content.markup.includes("<script>"));
 assert.equal((content.markup.match(/data-conversation=/g) || []).length, 1);
+assert.ok(content.markup.includes('class="conversation-external" href="https://x.com/i/status/800"'));
+assert.ok(content.markup.includes('rel="noopener noreferrer">Open thread on X'));
 assert(content.markup.includes("2 replies"));
 assert(!content.markup.includes("Costs &amp; updates"));
 assert(!content.markup.includes("Open post ↗"));

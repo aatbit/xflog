@@ -1,6 +1,6 @@
+import { postPreview } from "./post-preview.js";
 import {
   esc,
-  postLink,
   eventTone,
   eventLabel,
   initials,
@@ -23,12 +23,7 @@ export function renderPersonDetail(root, event) {
     value
       ? `<time datetime="${esc(value)}" title="${esc(fullFormat.format(new Date(value)))}">${esc(dateFormat.format(new Date(value)))} · ${esc(timeFormat.format(new Date(value)))}</time>`
       : '<span title="Not supplied by X">—</span>';
-  const link = event.kind.startsWith("interaction.") ? postLink(event.post_id) : "";
-  const characters = Array.from(typeof event.post_text === "string" ? event.post_text.trim() : "");
-  const excerpt = characters.length > 280 ? characters.slice(0, 279).join("") + "…" : characters.join("");
-  const preview = link && excerpt
-    ? `<a class="detail-post" href="${esc(link)}" target="_blank" rel="noopener noreferrer"><span>${esc(excerpt)}</span><span aria-hidden="true">↗</span><span class="sr-only">Open post on X</span></a>`
-    : "";
+  const preview = postPreview(event, 280, "detail-post");
   const detail = `<h2>Event details</h2><div class="detail-person"><span class="avatar" aria-hidden="true">${esc(initials(event))}</span><div class="detail-identity"><h3>${personName}</h3><p>${esc(event.handle ? "@" + event.handle : "ID " + event.actor_id)}</p></div></div><div class="detail-kind ${eventTone(event) === "negative" ? "lost" : eventTone(event)}"><span aria-hidden="true">${eventTone(event) === "neutral" ? "·" : eventTone(event) === "positive" ? "↗" : "↘"}</span>${eventLabel(event)}</div>${preview}<dl class="detail-data"><div><dt>Event time</dt><dd>${detailTime(event.provider_at)}</dd></div><div><dt>Received</dt><dd>${detailTime(event.received_at)}</dd></div><div><dt>Account ID</dt><dd>${esc(event.actor_id)}</dd></div></dl>`;
   const panel = root.querySelector("#mobile-detail");
   panel.innerHTML = detail;
