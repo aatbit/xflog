@@ -170,6 +170,7 @@ export function createConstellation({
         item.identity = event.event_id;
       }
       item.controls = item.label.querySelectorAll?.("button,a") || [];
+      item.preview = item.label.querySelector?.(".star-post");
       const box = item.label.getBoundingClientRect();
       item.width = box.width;
       item.height = box.height;
@@ -226,8 +227,13 @@ export function createConstellation({
         height = item.height;
       const bottom = geometry.lower + 25;
       let top = item.person.y + 27;
-      if (top + height > bottom) top = item.person.y - height - 25;
+      const previewHeight = chosen && item.preview ? item.preview.offsetHeight : 0;
+      if (top + height + (previewHeight ? previewHeight + 8 : 0) > bottom)
+        top = item.person.y - height - (previewHeight ? 40 : 25);
       top = clamp(top, labelInset, Math.max(labelInset, bottom - height));
+      const previewTop = Math.max(item.person.y + 40, top < item.person.y ? 0 : top + height + 8);
+      if (chosen && item.preview) item.preview.style.top = `${previewTop - top}px`;
+      const previewBottom = chosen && item.preview ? previewTop + item.preview.offsetHeight : top + height;
       const center = clamp(
         x, width / 2 + 16, element.clientWidth - width / 2 - 16,
       );
@@ -244,9 +250,9 @@ export function createConstellation({
           left: center - width / 2,
           right: center + width / 2,
           top,
-          bottom: top + height,
+          bottom: Math.max(top + height, previewBottom),
           minTop: labelInset,
-          maxBottom: bottom,
+          maxBottom: Math.max(bottom, previewBottom),
           distance: Math.abs(center - element.clientWidth / 2),
         };
         const alternateTop = clamp(

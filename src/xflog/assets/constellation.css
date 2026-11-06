@@ -633,3 +633,10 @@
 .star-post:hover { text-decoration: underline; }
 .star-post > span:first-child::before { content: "“"; }
 .star-post > span:first-child::after { content: "”"; }
+
+.is-selected .star-post {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  margin-top: 0;
+}

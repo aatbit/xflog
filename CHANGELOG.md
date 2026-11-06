@@ -11,6 +11,7 @@ and contributors on the [GitHub releases page](https://github.com/aatbit/xflog/r
   screen-reader labels for follows, unfollows, subscriptions and interactions.
 - Selected stars show a clickable, 140-character excerpt when saved post text is
   available. Preview rendering shares the detail panel's safe post-link logic.
+  Excerpts stay below the initials circle when identity labels move above it.
 - Open thread on X beside each conversation with a known conversation ID,
   independently of loading or expanding its saved thread.
 
