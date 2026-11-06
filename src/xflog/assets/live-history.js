@@ -1,8 +1,11 @@
+import { TIME_RANGES } from "./time-range.js";
 import { compareEvents } from "./format.js";
 
 export function groupSince(state, now = Date.now()) {
-  if (!state.lens || state.lens === "none" || !state.groupRange || state.groupRange === "all") return "";
-  const [, amount, unit] = /^(24h|7d|30d|90d)$/.test(state.groupRange)
+  if (!state.groupRange || state.groupRange === "all") return "";
+  const window = state.rangeWindow;
+  if (window?.period === state.groupRange && window.subject === state.subject && window.demo === state.demo) return window.start || "";
+  const [, amount, unit] = TIME_RANGES.includes(state.groupRange)
     ? state.groupRange.match(/^(\d+)(h|d)$/) : [];
   return amount ? new Date(Math.floor(now / 60000) * 60000 - Number(amount) * (unit === "h" ? 3600000 : 86400000)).toISOString() : "";
 }
@@ -14,7 +17,10 @@ export function historyPath(state, before = "0") {
   if (state.lens && state.lens !== "none") {
     params.set("local_only", "true");
     params.set("limit", "50");
-    if (state.since) params.set("since", state.since);
+  }
+  if (state.since) {
+    params.set("since", state.since);
+    if (before !== "0") params.set("local_only", "true");
   }
   return `/api/${state.demo ? "demo" : "timeline"}?${params}`;
 }
@@ -73,7 +79,7 @@ export function createLiveHistory({ api, read, apply, refreshInteractions }) {
           incoming.push(...page.events);
           const selectionLoaded = !state.selected || !known.has(state.selected) ||
             incoming.some(event => event.event_id === state.selected);
-          if ((!known.size && (!state.lens || state.lens === "none")) ||
+          if ((!known.size && (!state.lens || state.lens === "none") && !state.since) ||
               (selectionLoaded && page.events.some(event => known.has(event.event_id)))) break;
         }
         const profiles = new Map(incoming.filter(event => event.name && event.handle)

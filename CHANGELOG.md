@@ -3,6 +3,27 @@
 Each tagged release has an automatically generated list of merged pull requests
 and contributors on the [GitHub releases page](https://github.com/aatbit/xflog/releases).
 
+## 1.0.4 — 2026-11-06
+
+### Changed
+
+- The timeline and HUD share one time range. Both clock menus offer 1h, 6h,
+  12h, 24h, 3d, 7d, 30d, 90d and All saved, starting at 24h. The range also
+  applies to Journal and uses the HUD's server-provided cutoff.
+- All saved shows lifetime counts and growth ratio; hourly rates and previous-period
+  comparisons are left blank.
+- The space background uses blue-black tones, with brighter primary and secondary
+  text throughout the interface. Offline examples use recent dates.
+
+### Fixed
+
+- Range filtering keeps the existing opt-in name lookup available on the first
+  ungrouped page. Additional range pages and grouped reads stay local-only.
+- An empty ranged timeline receives the complete next burst of saved events,
+  including bursts larger than one page.
+
+No database migration or new environment settings are required.
+
 ## 1.0.3 — 2026-11-06
 
 ### Added

@@ -7,7 +7,14 @@ from xflog.app import create_app
 from xflog.config import Config
 from xflog.history.demo import demo_activity, demo_events
 from xflog.history.store import Store
-from xflog.history.summary import PERIODS, activity_window, compare, readings
+from xflog.history.summary import (
+    PERIODS,
+    SUMMARY_PERIODS,
+    activity_window,
+    all_readings,
+    compare,
+    readings,
+)
 from xflog.tracking.events import Event
 
 END = datetime(2026, 10, 26, 12, tzinfo=timezone.utc)
@@ -148,6 +155,13 @@ async def test_api_uses_full_log_and_demo_is_separate(tmp_path, monkeypatch):
         assert paid["metrics"]["gained"]["value"] == 0
         demo = (await client.get("/api/activity-summary?period=1h&demo=true")).json()
         assert demo == demo_activity("1h", "followers")
+        lifetime = (await client.get("/api/activity-summary?period=all")).json()
+        assert lifetime["metrics"]["gained"]["value"] == 61
+        assert lifetime["metrics"]["gain_rate"]["value"] is None
+        assert lifetime["metrics"]["gained"]["previous"] is None
+        assert (
+            await client.get("/api/activity-summary?period=all&demo=true")
+        ).json() == demo_activity("all", "followers")
         assert (await store.summary("111"))["follow.follow"] == 61
         assert len(await store.subscriptions()) == 0
 
@@ -161,9 +175,9 @@ async def test_empty_instance_and_invalid_parameters(tmp_path):
     ):
         await client.get("/")
         result = (await client.get("/api/activity-summary")).json()
-        assert result["periods"] == list(PERIODS)
+        assert result["periods"] == SUMMARY_PERIODS
         assert result["metrics"]["gained"]["value"] == 0
-        for query in ("period=all", "subject=other", "period=1H", "demo=wrong"):
+        for query in ("period=bad", "subject=other", "period=1H", "demo=wrong"):
             assert (await client.get(f"/api/activity-summary?{query}")).status_code == 422
 
 
@@ -175,3 +189,21 @@ def test_long_demo_window_contains_every_record_once(subject, prefix):
     events = [event for event in demo_events() if event["kind"].startswith(prefix)]
     assert metrics["gained"]["value"] + metrics["lost"]["value"] == len(events)
     assert metrics["gained"]["previous"] + metrics["lost"]["previous"] == 0
+
+
+@pytest.mark.parametrize(
+    "subject,kinds",
+    [
+        ("followers", ("follow.follow", "follow.unfollow")),
+        ("subscriptions", ("subscriptions.subscribe", "subscriptions.unsubscribe")),
+    ],
+)
+def test_all_saved_has_counts_and_ratio_without_rates_or_comparisons(subject, kinds):
+    result = all_readings({kinds[0]: 7, kinds[1]: 2}, subject)
+    assert result["metrics"]["gained"]["value"] == 7
+    assert result["metrics"]["lost"]["value"] == 2
+    assert result["metrics"]["ratio"]["value"] == 3.5
+    assert result["metrics"]["gain_rate"]["value"] is None
+    assert result["metrics"]["loss_rate"]["value"] is None
+    assert all(metric["change_percent"] is None for metric in result["metrics"].values())
+    assert result["start"] is None

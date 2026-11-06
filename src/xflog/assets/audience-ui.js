@@ -1,3 +1,4 @@
+import { TIME_RANGES } from "./time-range.js";
 import { bindPopover } from "./popover.js";
 
 export function resolveLens(groups, current) {
@@ -15,14 +16,13 @@ export function createAudienceControls({ root, onToggle, onLens, onRange }) {
   const rangeMenu = bindPopover(rangeTrigger, rangePicker);
   let helpPopovers = [];
   return {
-    render(groups, lens, range = "all") {
+    render(groups, lens, range = "24h") {
       const enabled = groups.filter((group) => group.enabled);
-      $("#group-range-control").hidden = lens === "none";
-      if (lens === "none" && rangePicker.matches(":popover-open")) rangeMenu.close();
+      $("#group-range-control").hidden = false;
       $("#group-range-value").textContent = range === "all" ? "All saved" : range;
       rangeTrigger.setAttribute("aria-label", `Saved history range, current: ${range === "all" ? "All saved" : range}`);
       rangePicker.replaceChildren();
-      for (const value of ["all", "24h", "7d", "30d", "90d"]) {
+      for (const value of TIME_RANGES) {
         const item = document.createElement("button");
         item.type = "button";
         item.setAttribute("role", "menuitemradio");

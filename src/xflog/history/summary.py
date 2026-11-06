@@ -15,6 +15,7 @@ PERIODS = {
     "30d": 30 * 86400,
     "90d": 90 * 86400,
 }
+SUMMARY_PERIODS = [*PERIODS, "all"]
 SUBJECT_TYPES = {"followers": FOLLOW_TYPES, "subscriptions": SUBSCRIPTION_TYPES}
 
 
@@ -78,10 +79,30 @@ def readings(counts: dict, window: ActivityWindow, subject: str) -> dict:
     current, previous = values
     return {
         "period": window.period,
-        "periods": list(PERIODS),
+        "periods": SUMMARY_PERIODS,
         "subject": subject,
         "start": window.start.isoformat(),
         "end": window.end.isoformat(),
         "previous_start": window.previous_start.isoformat(),
         "metrics": {key: compare(value, previous[key]) for key, value in current.items()},
+    }
+
+
+def all_readings(counts: dict, subject: str) -> dict:
+    gained, lost = (counts.get(kind, 0) for kind in SUBJECT_TYPES[subject])
+    values = {
+        "gained": gained,
+        "lost": lost,
+        "gain_rate": None,
+        "loss_rate": None,
+        "ratio": gained / lost if lost else None,
+    }
+    return {
+        "period": "all",
+        "periods": SUMMARY_PERIODS,
+        "subject": subject,
+        "start": None,
+        "end": None,
+        "previous_start": None,
+        "metrics": {key: compare(value, None) for key, value in values.items()},
     }

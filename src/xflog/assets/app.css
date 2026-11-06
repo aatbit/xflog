@@ -1,14 +1,14 @@
 :root {
-  --ground: #0c1012;
-  --surface: #141a1d;
-  --raised: #1b2226;
-  --active: #263137;
-  --border: #313d43;
-  --rule: #263137;
-  --control: #52636a;
-  --text: #eef1ed;
-  --muted: #acb9bd;
-  --faint: #9aa9ae;
+  --ground: #080c16;
+  --surface: #111827;
+  --raised: #192234;
+  --active: #253249;
+  --border: #37455e;
+  --rule: #253249;
+  --control: #71819c;
+  --text: #f3f6ff;
+  --muted: #c7d3e8;
+  --faint: #b1c0da;
   --accent: #e5c58f;
   --positive: #9ccfcd;
   --negative: #e2aca0;

@@ -16,7 +16,7 @@
     loading: false,
     groups: [],
     lens: "none",
-    groupRange: "all",
+    groupRange: "24h",
     groupSignature: "",
   };
   const pendingActions = new WeakSet();
@@ -99,7 +99,9 @@
   const activityHud = createActivityHud({
     root,
     api,
-    context: () => ({ demo: state.demo, subject: state.subject }),
+    context: () => ({ demo: state.demo, subject: state.subject, period: state.groupRange }),
+    onRange: setTimeRange,
+    onWindow: window => { state.rangeWindow = window; },
   });
   const { createSelectedSignal } = await import(
     "/static/xf/selected-signal.js"
@@ -323,12 +325,14 @@
       if (state.layout === "vertical") renderEvents();
       void load();
     },
-    onRange: (range) => {
-      state.groupRange = range;
-      groupControls.render(state.groups, state.lens, range);
-      void load();
-    },
+    onRange: setTimeRange,
   });
+  async function setTimeRange(range) {
+    state.groupRange = range;
+    groupControls.render(state.groups, state.lens, range);
+    await activityHud.refresh();
+    if (state.groupRange === range) await load();
+  }
   function renderAudienceGroups(groups) {
     const signature = JSON.stringify(groups);
     if (signature === state.groupSignature) return;
@@ -452,7 +456,7 @@
         if (generation !== state.generation) return;
         rows.push(...result.events);
         if (state.lens !== "none") $("#scene-people-count").textContent = `Loading saved history · ${rows.length} records`;
-        if (snapshot.lens === "none") break;
+        if (snapshot.lens === "none" && !snapshot.since) break;
       }
       if (generation !== state.generation) return;
       state.events = mergeHistory([...rows, ...(append ? state.events : [])])
@@ -497,6 +501,7 @@
     notice("");
     if (state.status) renderStatus(state.status);
     view("timeline");
+    await activityHud.refresh();
     await load();
   }
   function dialog(html) {
@@ -554,14 +559,14 @@
     }),
   );
   $$("[data-subject]").forEach((button) =>
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       state.subject = button.dataset.subject;
       $$("[data-subject]").forEach((item) =>
         item.setAttribute("aria-pressed", item === button),
       );
       state.events = [];
       state.selected = null;
-      activityHud.refresh();
+      await activityHud.refresh();
       load();
     }),
   );
@@ -681,8 +686,8 @@
     if (!document.hidden || state.status?.selection.notifications) {
       try {
         renderStatus(await api("/api/status"));
+        if (root.dataset.route === "timeline") await activityHud.refresh();
         await liveHistory.refresh();
-        if (root.dataset.route === "timeline") activityHud.refresh();
       } catch (error) {
         notices.update({ message: error.message, tone: "error" });
       }
@@ -694,7 +699,7 @@
     if (new URLSearchParams(location.search).get("demo") === "1")
       await setDemo(true);
     else {
-      activityHud.refresh();
+      await activityHud.refresh();
       await load();
     }
     const hash = location.hash.slice(1);

@@ -1,3 +1,4 @@
+import { TIME_RANGES, timeRangeLabel } from "./time-range.js";
 import { bindPopover } from "./popover.js";
 
 const labels = {
@@ -53,13 +54,13 @@ export function formatChange(key, metric) {
   };
 }
 
-export function createActivityHud({ root, api, context }) {
+export function createActivityHud({ root, api, context, onRange, onWindow }) {
   const $ = (selector) => root.querySelector(selector);
   const hud = $("#activity-hud");
   const trigger = $("#activity-period-trigger");
   const picker = $("#activity-periods");
   const menu = bindPopover(trigger, picker, "above");
-  let period = "24h",
+  let period = context().period || "24h",
     generation = 0,
     signature = "",
     destroyed = false;
@@ -101,7 +102,9 @@ export function createActivityHud({ root, api, context }) {
             : subject === "subscriptions"
               ? "New subscriptions divided by expirations. — means no expirations."
               : "Follows divided by unfollows. — means no unfollows.";
-      cell.tip.textContent = `${definition} Compared with the previous ${period}. Green means more gains or fewer losses; New means the previous value was zero.`;
+      cell.tip.textContent = period === "all"
+        ? (index === 2 || index === 3 ? "Hourly rates need a fixed period. Choose a time range to see them." : `${definition} All saved history; no previous-period comparison.`)
+        : `${definition} Compared with the previous ${period}. Green means more gains or fewer losses; New means the previous value was zero.`;
       cell.value.textContent = "—";
       cell.value.removeAttribute("title");
       cell.change.textContent = "—";
@@ -125,12 +128,12 @@ export function createActivityHud({ root, api, context }) {
       button.type = "button";
       button.setAttribute("role", "menuitemradio");
       button.dataset.period = option;
-      button.textContent = option;
+      button.textContent = timeRangeLabel(option);
       button.tabIndex = -1;
       button.addEventListener("click", () => {
         period = option;
         menu.close();
-        refresh();
+        onRange(option);
       });
       picker.append(button);
     }
@@ -138,7 +141,8 @@ export function createActivityHud({ root, api, context }) {
   async function refresh() {
     if (destroyed) return;
     const ticket = ++generation;
-    const { demo, subject } = context();
+    const { demo, subject, period: selectedPeriod } = context();
+    period = selectedPeriod || period;
     const nextSignature = `${period}/${subject}/${demo}`;
     if (signature !== nextSignature) {
       clear(subject);
@@ -146,15 +150,16 @@ export function createActivityHud({ root, api, context }) {
     }
     signature = nextSignature;
     hud.setAttribute("aria-busy", "true");
-    $("#activity-period-value").textContent = period;
-    trigger.setAttribute("aria-label", `Activity period: ${period}`);
+    $("#activity-period-value").textContent = timeRangeLabel(period);
+    trigger.setAttribute("aria-label", `Activity period: ${timeRangeLabel(period)}`);
     markPeriod();
     try {
       const result = await api(
         `/api/activity-summary?${new URLSearchParams({ period, subject, demo })}`,
       );
       if (ticket !== generation || destroyed) return;
-      renderPeriods(result.periods);
+      onWindow?.({period, subject, demo, start: result.start});
+      renderPeriods(TIME_RANGES);
       markPeriod();
       cells.forEach((cell, index) => {
         const key = keys[index],
@@ -166,7 +171,7 @@ export function createActivityHud({ root, api, context }) {
         cell.value.title = `${labels[subject][index]}: ${metric.value === null ? "no unfollows or expirations to divide by" : metric.value.toLocaleString(undefined, { maximumFractionDigits: 8 })}. Previous ${period}: ${metric.previous === null ? "—" : metric.previous.toLocaleString(undefined, { maximumFractionDigits: 8 })}.`;
         cell.change.title = `Compared with the preceding ${period}`;
       });
-      trigger.title = `${demo ? "Demo log · " : ""}${new Date(result.start).toLocaleString()} – ${new Date(result.end).toLocaleString()}`;
+      trigger.title = period === "all" ? "All saved history" : `${demo ? "Demo log · " : ""}${new Date(result.start).toLocaleString()} – ${new Date(result.end).toLocaleString()}`;
       $("#activity-error").hidden = true;
     } catch {
       if (ticket !== generation || destroyed) return;
