@@ -232,7 +232,7 @@ If saving shows a warning, follow it before assuming your change is active. If c
 
 Open timeline settings with the **sliders icon**. Choose Followers or Paid subscribers, filter All/Gained/Lost, or switch between **Constellation** (one star per person) and **Journal** (every recorded event). These viewing choices do not change what you record.
 
-In Constellation, scroll up for older history and down for newer history. The person nearest the center becomes highlighted as you move, and their details appear in the readout. You can also click any visible star or name to select that person; they stay selected until you move through history again. Click the selected person or their readout for details. The side arrows move one person at a time. Use the bottom sliders to move through history or change zoom, which starts at **80%**. Journal uses normal vertical scrolling and hides the sliders.
+In Constellation, scroll up for older history and down for newer history. The person nearest the center becomes highlighted as you move, and their details appear in the readout. You can also click any visible star or name to select and center that person; they stay selected until you move through history again. Click the selected person or their readout for details. The side arrows move one person at a time. Use the bottom sliders to move through history or change zoom, which starts at **80%**. You can also hold the middle mouse button and scroll up to zoom in, or down to zoom out. Journal uses normal vertical scrolling and hides the sliders.
 
 <details>
 <summary>Motion, statistics and connection history</summary>
