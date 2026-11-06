@@ -3,6 +3,22 @@
 Each tagged release has an automatically generated list of merged pull requests
 and contributors on the [GitHub releases page](https://github.com/aatbit/xflog/releases).
 
+## 1.0.3 — 2026-11-06
+
+### Added
+
+- Interaction event details show a compact excerpt of the saved post when text is
+  available. Excerpts are limited to 280 characters, including an ellipsis for
+  longer posts, and link directly to the corresponding post on X.
+- Post previews use the local database without extra X requests. Missing text
+  leaves the existing details layout uncluttered.
+
+### Changed
+
+- Interaction history and event details share the same validated X post-link helper.
+
+No database migration or new environment settings are required.
+
 ## 1.0.2 — 2026-11-06
 
 ### Fixed

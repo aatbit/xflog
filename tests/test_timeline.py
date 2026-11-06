@@ -55,6 +55,39 @@ async def test_disabled_interactions_are_hidden_but_retained(instance):
     assert await app.state.store.db.execute_fetchall("SELECT * FROM interactions")
 
 
+@pytest.mark.parametrize("text", [None, "A saved post", "🌟" * 500])
+async def test_timeline_exposes_only_saved_post_preview_without_x_requests(instance, text):
+    app, browser, provider = instance
+    selection = await only_interactions(app, browser)
+    await app.state.interactions.ingest(envelope(payload=post(text=text)), selection)
+    calls = len(provider.calls)
+    event = (await browser.get("/api/timeline")).json()["events"][0]
+    assert event["post_id"] == "900"
+    assert event["post_text"] == (text[:281] if text else None)
+    assert len(provider.calls) == calls
+
+
+async def test_like_preview_uses_the_liked_post_and_saved_text_updates(instance):
+    app, browser, provider = instance
+    selection = await only_interactions(app, browser)
+    selection["interactions"]["likes_received"] = True
+    await app.state.store.save_setting("selection", selection)
+    raw = envelope(
+        kind="like.create",
+        payload={"liking_user_id": "222", "liked_tweet_author_id": "111", "liked_tweet_id": "901"},
+        includes={"posts": [post("901", "111", text="The liked post")]},
+    )
+    await app.state.interactions.ingest(raw, selection)
+    calls = len(provider.calls)
+    event = (await browser.get("/api/timeline")).json()["events"][0]
+    assert (event["post_id"], event["post_text"]) == ("901", "The liked post")
+    await app.state.store.db.execute("UPDATE interaction_posts SET text='Updated saved copy'")
+    await app.state.store.db.commit()
+    event = (await browser.get("/api/timeline")).json()["events"][0]
+    assert event["post_text"] == "Updated saved copy"
+    assert len(provider.calls) == calls
+
+
 async def test_timeline_cursor_is_stable_across_new_records_and_source_ties(instance):
     app, browser, _ = instance
     selection = await only_interactions(app, browser)

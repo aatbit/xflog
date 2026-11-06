@@ -10,6 +10,8 @@ export const esc = (value) =>
         "'": "&#39;",
       })[char],
   );
+export const postLink = (id) =>
+  /^[0-9]{1,19}$/.test(id) ? `https://x.com/i/status/${id}` : "";
 export const dateFormat = new Intl.DateTimeFormat(undefined, {
   month: "short",
   day: "numeric",

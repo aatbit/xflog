@@ -58,6 +58,25 @@
   border-top: 1px solid var(--control);
   border-bottom: 1px solid var(--control);
 }
+#xf #mobile-detail .detail-post {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--control);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+#xf #mobile-detail .detail-post:hover {
+  border-left-color: currentColor;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+#mobile-detail .detail-post > span:first-child { flex: 1; min-width: 0; }
 #mobile-detail .detail-data dt {
   font-size: 12px;
   margin-bottom: 8px;

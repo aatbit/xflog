@@ -1,3 +1,5 @@
+import { postLink } from "./format.js";
+
 export const interactionMarkup = `<section data-interaction-panel><button type="button" class="interaction-launch" data-open-interactions aria-haspopup="dialog">Interaction history <span aria-hidden="true">→</span></button></section>`;
 
 export function groupInteractions(rows) {
@@ -46,8 +48,6 @@ export function createInteractionControls({ root, api, esc, onReturn = () => {} 
     destroyed = false;
   const threads = new Map();
   const date = (value) => new Date(value).toLocaleString();
-  const postLink = (id) =>
-    /^[0-9]{1,19}$/.test(id) ? `https://x.com/i/status/${id}` : "";
   const names = {
     replies: ["reply", "replies"],
     mentions: ["mention", "mentions"],

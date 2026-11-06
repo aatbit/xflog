@@ -1,5 +1,23 @@
 import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
+const { renderPersonDetail } = await import(
+  new URL("person-detail.js", pathToFileURL(process.argv[2] + "/"))
+);
+const previewPanel = { innerHTML: "", querySelector: () => ({ insertAdjacentHTML() {} }), insertAdjacentHTML() {} };
+const previewRoot = { querySelector: () => previewPanel };
+const previewEvent = { kind: "interaction.replies", actor_id: "222", name: "Maya", post_id: "900", post_text: "Hello <script>bad</script>" };
+renderPersonDetail(previewRoot, previewEvent);
+assert.ok(previewPanel.innerHTML.includes('href="https://x.com/i/status/900"'));
+assert.ok(previewPanel.innerHTML.includes("Hello &lt;script&gt;bad&lt;/script&gt;"));
+assert.ok(!previewPanel.innerHTML.includes("<script>"));
+renderPersonDetail(previewRoot, { ...previewEvent, post_text: "🌟".repeat(300) });
+const excerpt = previewPanel.innerHTML.match(/class="detail-post"[^>]*><span>(.*?)<\/span>/s)[1];
+assert.equal(Array.from(excerpt).length, 280);
+assert.ok(excerpt.endsWith("…"));
+for (const changes of [{ post_text: null }, { post_text: "  " }, { post_id: "javascript:alert(1)" }, { kind: "follow.follow" }]) {
+  renderPersonDetail(previewRoot, { ...previewEvent, ...changes });
+  assert.ok(!previewPanel.innerHTML.includes('class="detail-post"'));
+}
 const { createInteractionControls, groupInteractions, recordedPosts } =
   await import(
     new URL("interactions.js", pathToFileURL(process.argv[2] + "/"))
