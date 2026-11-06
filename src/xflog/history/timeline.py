@@ -44,8 +44,9 @@ class Timeline:
         async with self.store.db.execute(
             """SELECT (SELECT COALESCE(MAX(sequence),0) FROM events WHERE account_id=?),
             (SELECT COALESCE(MAX(sequence),0) FROM interactions WHERE account_id=?),
-            (SELECT COALESCE(MAX(observed_at),'') FROM known_profiles WHERE account_id=?)""",
-            (account, account, account),
+            (SELECT COALESCE(MAX(observed_at),'') FROM known_profiles WHERE account_id=?),
+            (SELECT COALESCE(MAX(checked_at),'') FROM thread_snapshots WHERE account_id=?)""",
+            (account, account, account, account),
         ) as cursor:
             return ":".join(map(str, await cursor.fetchone()))
 

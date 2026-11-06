@@ -13,6 +13,11 @@ and contributors on the [GitHub releases page](https://github.com/aatbit/xflog/r
 - Post previews use the local database without extra X requests. Missing text
   leaves the existing details layout uncluttered.
 
+### Fixed
+
+- Newly saved thread text appears in post previews through the local history
+  refresh, including an older selected event, without another X request.
+
 ### Changed
 
 - Interaction history and event details share the same validated X post-link helper.

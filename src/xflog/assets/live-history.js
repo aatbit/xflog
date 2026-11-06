@@ -71,7 +71,10 @@ export function createLiveHistory({ api, read, apply, refreshInteractions }) {
           if (current.generation !== generation || current.demo !== state.demo ||
               historyScope(current) !== scope) return;
           incoming.push(...page.events);
-          if ((!known.size && (!state.lens || state.lens === "none")) || page.events.some(event => known.has(event.event_id))) break;
+          const selectionLoaded = !state.selected || !known.has(state.selected) ||
+            incoming.some(event => event.event_id === state.selected);
+          if ((!known.size && (!state.lens || state.lens === "none")) ||
+              (selectionLoaded && page.events.some(event => known.has(event.event_id)))) break;
         }
         const profiles = new Map(incoming.filter(event => event.name && event.handle)
           .map(event => [event.actor_id, {name:event.name,handle:event.handle,profile_url:event.profile_url}]));

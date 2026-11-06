@@ -18,6 +18,7 @@ let fail = false;
 const pages = {
   "0": {events:[event(8),event(7),event(6)],next:"page2"},
   page2: {events:[event(5),event(4),event(3)],next:"page3"},
+  page3: {events:[event(2),event(1)],next:null},
 };
 const feed = createLiveHistory({
   read: () => ({...state}),
@@ -36,10 +37,10 @@ await feed.refresh();
 assert.deepEqual(state.events.map(e=>e.event_id),["8","7","6","5","4","3","2","1"]);
 assert.equal(state.selected,"2");
 assert.equal(state.next,"older","Keep older pages already loaded");
-assert.equal(calls.length,2,"Read through a burst larger than one page until overlap");
+assert.equal(calls.length,3,"Read through a burst and refresh the older selected record");
 assert.equal(refreshes,1);
 await feed.refresh();
-assert.equal(calls.length,2,"Unchanged revision performs no history reads");
+assert.equal(calls.length,3,"Unchanged revision performs no history reads");
 
 state.status={...state.status,timeline_revision:"0:9"};
 blocked={};blocked.promise=new Promise(resolve=>blocked.resolve=resolve);
@@ -139,6 +140,13 @@ burstCalls.length=0;
 await activityFeed.refresh();
 assert.equal(burstCalls.length,1,"Once complete, live updates stop at overlap without rereading all history");
 assert.equal(activityState.events.length,28);
+activityState.selected = "follow";
+savedPages.older.events = [{...follows, post_id:"900", post_text:"Newly saved thread text"}, unfollows];
+activityState.status = {...activityState.status, timeline_revision:"thread-saved"};
+burstCalls.length = 0;
+await activityFeed.refresh();
+assert.equal(burstCalls.length, 2, "Refresh reaches an older selected record after a thread save");
+assert.equal(activityState.events.find(row=>row.event_id === "follow").post_text, "Newly saved thread text");
 await assert.rejects(async()=>{for await(const page of historyPages(async()=>({events:[],next:"0"}),groupedState)) {}},/did not advance/);
 
 const realNow=Date.now;

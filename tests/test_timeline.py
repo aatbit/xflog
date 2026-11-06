@@ -297,3 +297,20 @@ async def test_old_interaction_schema_is_upgraded_without_rewriting_rows(tmp_pat
         assert [(row[0], json.loads(row[1])) for row in rows] == [("kept", {})]
     finally:
         await store.close()
+
+
+async def test_saved_thread_invalidates_only_its_accounts_timeline_revision(instance):
+    app, browser, provider = instance
+    selection = await only_interactions(app, browser)
+    await app.state.interactions.ingest(envelope(payload=post(text=None)), selection)
+    timeline = Timeline(app.state.store)
+    before = await timeline.revision("111")
+    other_before = await timeline.revision("333")
+    calls = len(provider.calls)
+    await app.state.interactions.records.save_thread(
+        "111", {"conversation": "800", "posts": [post(text="Now saved")], "next_token": None}
+    )
+    assert await timeline.revision("111") != before
+    assert await timeline.revision("333") == other_before
+    assert (await browser.get("/api/timeline")).json()["events"][0]["post_text"] == "Now saved"
+    assert len(provider.calls) == calls
