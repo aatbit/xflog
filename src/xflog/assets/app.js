@@ -456,7 +456,6 @@
         if (generation !== state.generation) return;
         rows.push(...result.events);
         if (state.lens !== "none") $("#scene-people-count").textContent = `Loading saved history · ${rows.length} records`;
-        if (snapshot.lens === "none" && !snapshot.since) break;
       }
       if (generation !== state.generation) return;
       state.events = mergeHistory([...rows, ...(append ? state.events : [])])
