@@ -3,6 +3,23 @@
 Each tagged release has an automatically generated list of merged pull requests
 and contributors on the [GitHub releases page](https://github.com/aatbit/xflog/releases).
 
+## 1.0.2 — 2026-11-06
+
+### Fixed
+
+- Clicking an unselected star or name smoothly centers that person. Clicking the
+  selected person again still opens their details; scrolling resumes center-based selection.
+- Smooth scrolling finishes correctly when the browser rounds the last few pixels,
+  preventing movement from stalling just short of the selected person.
+
+### Added
+
+- Hold the middle mouse button while scrolling over the constellation to zoom:
+  wheel up zooms in, wheel down zooms out. Release middle to resume normal timeline
+  scrolling. Existing zoom limits, overview behavior and browser zoom shortcuts are preserved.
+
+No database migration or new environment settings are required.
+
 ## 1.0.1 — 2026-11-06
 
 ### Fixed

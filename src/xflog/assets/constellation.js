@@ -32,6 +32,7 @@ export function createConstellation({
     lens = "none",
     geometry = null;
   let zoom = 0.8,
+    wheelZoom = null,
     frame = 0,
     last = 0,
     clock = 0,
@@ -185,11 +186,13 @@ export function createConstellation({
     if (moving())
       clock += elapsed * normalizeMotionSpeed(root.dataset.motionSpeed || 1);
     if (target !== null) {
+      const previous = element.scrollLeft;
       const next = moving()
         ? flowStep(element.scrollLeft, target, elapsed || 16)
         : target;
       element.scrollLeft = next;
-      if (Math.abs(target - element.scrollLeft) < 2) {
+      // Browsers can round away the final eased step; finish instead of stalling.
+      if (Math.abs(target - element.scrollLeft) < 2 || element.scrollLeft === previous) {
         element.scrollLeft = target;
         target = null;
         seeking = false;
@@ -293,6 +296,7 @@ export function createConstellation({
   }
   function render(nextEvents, identity) {
     stop();
+    wheelZoom = null;
     events = nextEvents;
     selected = identity;
     geometry = constellationLayout({
@@ -386,8 +390,7 @@ export function createConstellation({
     scrollPosition = element.scrollLeft;
     if (position() === person) onOpen(selected);
     else {
-      select(person.event.event_id);
-      onSelect(person.event.event_id);
+      seek(events.findIndex(event => event.event_id === person.event.event_id));
     }
   }
   function seek(index, behavior = "smooth") {
@@ -438,9 +441,18 @@ export function createConstellation({
     else if (delta > 0) onOlder();
   }
   function onWheel(event) {
-    if (!geometry || !geometry.canPan || event.ctrlKey || event.metaKey) return;
+    if (!(event.buttons & 4) || event.ctrlKey || event.metaKey) wheelZoom = null;
+    if (!active() || event.ctrlKey || event.metaKey) return;
     const delta = wheelDistance(event, element.clientWidth);
     if (!delta) return;
+    if ((event.buttons & 4) && geometry.people.length > 1) {
+      event.preventDefault();
+      const next = clamp((wheelZoom ?? zoom) - delta / 600, 0, 2);
+      if (Math.round(next * 20) / 20 !== zoom) setZoom(next);
+      wheelZoom = next;
+      return;
+    }
+    if (!geometry.canPan) return;
     if (delta < 0 && element.scrollLeft <= 2 && hasOlder()) {
       event.preventDefault();
       selectVisibleProfile();
@@ -453,6 +465,10 @@ export function createConstellation({
     seeking = false;
     element.dataset.userScrolling = "true";
     queue();
+  }
+  function middleButton(event) {
+    if (event.button === 1 && active() && !event.target.closest("a,input"))
+      event.preventDefault();
   }
   function down(event) {
     if (geometry?.canPan && event.pointerType !== "mouse") {
@@ -552,6 +568,8 @@ export function createConstellation({
   const listeners = [
     [element, "scroll", scroll, { passive: true }],
     [element, "wheel", onWheel, { passive: false }],
+    [element, "mousedown", middleButton],
+    [element, "auxclick", middleButton],
     [element, "keydown", onKey],
     [element, "focusin", focus],
     [element, "pointerdown", down],

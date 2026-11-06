@@ -92,12 +92,14 @@ let nodes = [],
   labels = [],
   paths = [];
 const handlers = {};
+let scrollLeft = 0, roundScroll = false;
 const element = {
   dataset: {},
   clientWidth: 800,
   clientHeight: 700,
   scrollWidth: 1300,
-  scrollLeft: 0,
+  get scrollLeft() { return scrollLeft; },
+  set scrollLeft(value) { scrollLeft = roundScroll ? Math.round(value) : value; },
   classList: {
     contains() {
       return true;
@@ -133,7 +135,10 @@ const element = {
         /data-(actor|event|label)="([^"]+)"/g,
       ))
         dataset[key] = v;
-      return Object.assign(button(dataset), { innerHTML: m[2] });
+      return Object.assign(button(dataset), {
+        innerHTML: m[2],
+        x: Number(m[1].match(/left:([\d.]+)px/)?.[1]),
+      });
     });
     nodes = buttons.filter((n) => n.dataset.actor);
     labels = buttons.filter((n) => n.dataset.label);
@@ -305,24 +310,31 @@ assert.equal(element.scrollLeft, oldScroll, "Local updates preserve the viewport
 assert.equal(controls.get("#scene-zoom").value, oldZoom, "Local updates preserve zoom");
 scene.render([...events, event("old-C", "C", 0, "follow.follow")], "new-A");
 const manualStart = element.scrollLeft;
+roundScroll = true;
 handlers.wheel({ deltaY: -90, deltaX: 0, deltaMode: 0, preventDefault() {} });
 nodes.find(node=>node.dataset.actor === "B").handlers.click();
 handlers.scroll(); // A queued scroll event from the previous movement arrives after the click.
+assert.equal(element.scrollLeft, manualStart, "Click travel starts without an immediate jump");
 frame(2000);
-assert.equal(element.scrollLeft, manualStart, "A manual click cancels pending travel without recentering");
+assert.ok(element.scrollLeft < manualStart, "A manual click smoothly centers the chosen star");
+for (let time = 2016; time <= 3024; time += 16) frame(time);
+assert.ok(Math.abs(nodes.find(node=>node.dataset.actor === "B").x - element.scrollLeft - element.clientWidth / 2) < 1,
+  "The clicked star lands at the viewport center");
 assert.equal(nodes.find(node=>node.dataset.actor === "B").attributes["aria-pressed"], "true",
   "A stationary off-center selection survives queued scroll events");
 const openedBeforeLabel = opened.length;
 labels.find(node=>node.dataset.label === "old-C").handlers.click();
-frame(2016);
+frame(3040);
+for (let time = 3056; time <= 4064; time += 16) frame(time);
+assert.ok(Math.abs(nodes.find(node=>node.dataset.actor === "C").x - element.scrollLeft - element.clientWidth / 2) < 1,
+  "Clicking a name also centers its star");
 assert.equal(nodes.find(node=>node.dataset.actor === "C").attributes["aria-pressed"], "true",
   "Clicking another person's label selects that person too");
 assert.equal(opened.length, openedBeforeLabel, "First click selects; a second click opens details");
 labels.find(node=>node.dataset.label === "old-C").handlers.click();
 assert.equal(opened.at(-1), "old-C");
-element.scrollLeft = manualStart - 30;
-handlers.scroll();
-frame(2032);
+handlers.wheel({ deltaY: 300, deltaX: 0, deltaMode: 0, preventDefault() {} });
+for (let time = 4080; time <= 5088; time += 16) frame(time);
 assert.notEqual(nodes.find(node=>node.dataset.actor === "C").attributes["aria-pressed"], "true",
   "Actual viewport movement resumes center-based selection");
 const activityEvents = events.map(event=>({...event,audience_groups:{activity:event.kind}}));
@@ -336,7 +348,7 @@ assert.equal(nodes.filter(node=>node.dataset.actor === "A").length, 2,
 assert.deepEqual(nodes.filter(node=>node.attributes["aria-pressed"] === "true").map(node=>node.dataset.event), ["old-A"],
   "Only the selected activity's star is highlighted");
 nodes.find(node=>node.dataset.event === "new-A").handlers.click();
-frame(2048);
+frame(5104);
 assert.deepEqual(nodes.filter(node=>node.attributes["aria-pressed"] === "true").map(node=>node.dataset.event), ["new-A"]);
 labels.find(node=>node.dataset.label === "new-A").handlers.click();
 assert.equal(opened.at(-1), "new-A", "Details use the selected group record, not another activity by the same person");
@@ -344,9 +356,56 @@ root.dataset.motion = "off";
 scene.update(activityEvents, "new-A");
 nodes.find(node=>node.dataset.event === "old-A").handlers.click();
 handlers.scroll();
-frame(2064);
+frame(5120);
 assert.deepEqual(nodes.filter(node=>node.attributes["aria-pressed"] === "true").map(node=>node.dataset.event), ["old-A"],
   "Manual grouped selection also survives refresh with ambient motion disabled");
+const groupedStar = nodes.find(node=>node.dataset.event === "old-A");
+assert.equal(element.scrollLeft, Math.round(Math.max(0, Math.min(500, groupedStar.x - element.clientWidth / 2))),
+  "With motion off, grouped click centering is immediate and stays within the scroll bounds");
+let prevented = 0;
+const zoomWheel = (deltaY, buttons = 4, extra = {}) => handlers.wheel({
+  deltaY, deltaX: 0, deltaMode: 0, buttons,
+  preventDefault() { prevented++; }, ...extra,
+});
+scene.setZoom(0);
+zoomWheel(-100);
+assert.equal(Number(controls.get("#scene-zoom").value), 0.25,
+  "Held middle wheel zooms in even from an overview that cannot pan");
+assert.equal(prevented, 1);
+zoomWheel(100);
+assert.equal(Number(controls.get("#scene-zoom").value), 0);
+zoomWheel(100);
+assert.equal(Number(controls.get("#scene-zoom").value), 0, "Zoom stays above its lower bound");
+scene.setZoom(2);
+zoomWheel(-100);
+assert.equal(Number(controls.get("#scene-zoom").value), 2, "Zoom stays below its upper bound");
+zoomWheel(100, 4, { ctrlKey: true });
+assert.equal(Number(controls.get("#scene-zoom").value), 2, "Browser zoom shortcuts are left alone");
+scene.setZoom(0.8);
+for (let i = 0; i < 100; i++) zoomWheel(-1);
+assert.ok(Number(controls.get("#scene-zoom").value) > 0.8,
+  "Fine-resolution middle-wheel deltas accumulate instead of being rounded away");
+scene.setZoom(0.8);
+scene.scrub(0.5);
+const wheelStart = element.scrollLeft;
+zoomWheel(100, 0);
+frame(5140);
+assert.ok(element.scrollLeft > wheelStart, "Ordinary wheel still travels through history");
+assert.equal(Number(controls.get("#scene-zoom").value), 0.8,
+  "Releasing middle restores ordinary timeline scrolling without sticky state");
+root.dataset.route = "profile";
+zoomWheel(-100);
+assert.equal(Number(controls.get("#scene-zoom").value), 0.8,
+  "The gesture is confined to the active constellation");
+root.dataset.route = "timeline";
+for (const type of ["mousedown", "auxclick"]) {
+  let cancelled = false;
+  handlers[type]({ button: 1, target: { closest: () => null }, preventDefault() { cancelled = true; } });
+  assert.equal(cancelled, true, "Middle zoom does not start native autoscroll");
+  cancelled = false;
+  handlers[type]({ button: 1, target: { closest: () => ({}) }, preventDefault() { cancelled = true; } });
+  assert.equal(cancelled, false, "Middle-clicking links retains normal browser behavior");
+}
 scene.destroy();
 console.log(
   JSON.stringify({
