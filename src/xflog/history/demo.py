@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from .. import audience_groups
 from ..tracking.events import FOLLOW_TYPES, Event
-from .summary import SUBJECT_TYPES, activity_window, readings
+from .summary import SUBJECT_TYPES, activity_window, all_readings, readings
 
 PEOPLE = [
     ("Maya Chen", "mayamakes"),
@@ -59,7 +59,7 @@ def profile_metadata(index: int) -> dict:
 
 
 def demo_events() -> list[dict]:
-    anchor = datetime(2026, 10, 26, 10, 42, tzinfo=timezone.utc)
+    anchor = datetime.now(timezone.utc).replace(second=0, microsecond=0) - timedelta(minutes=1)
     events = []
     for index in range(76):
         subject = "subscriptions" if index % 7 == 6 else "followers"
@@ -90,6 +90,11 @@ def demo_events() -> list[dict]:
 
 
 def demo_activity(period: str, subject: str) -> dict:
+    if period == "all":
+        return {
+            **all_readings(demo_history({"subject": subject})["counts"], subject),
+            "synthetic": True,
+        }
     events = demo_events()
     end = max(datetime.fromisoformat(event["received_at"]) for event in events)
     window = activity_window(period, end + timedelta(seconds=1))

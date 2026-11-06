@@ -67,10 +67,12 @@ const nodes = new Map(
   ].map((id) => ["#" + id, new Node()]),
 );
 const requests = [];
-let mode = { demo: false, subject: "followers" };
+let mode = { demo: false, subject: "followers", period: "24h" };
 const hud = createActivityHud({
   root: { querySelector: (selector) => nodes.get(selector) },
   context: () => mode,
+  onWindow: window => {mode.rangeWindow = window;},
+  onRange: period => {mode.period = period; void hud.refresh();},
   api: (url) =>
     new Promise((resolve, reject) => requests.push({ url, resolve, reject })),
 });
@@ -91,14 +93,15 @@ const first = hud.refresh();
 requests[0].resolve(result(2));
 await first;
 assert.equal(gains(), "2");
-assert.equal(nodes.get("#activity-periods").children.length, 8);
+assert.equal(mode.rangeWindow.start, result(2).start, "The timeline receives the server window, not a separate browser clock");
+assert.equal(nodes.get("#activity-periods").children.length, 9);
 assert.equal(
   nodes.get("#activity-periods").children[3].attributes["aria-checked"],
   "true",
 );
 
 const old = hud.refresh();
-mode = { demo: true, subject: "subscriptions" };
+mode = { demo: true, subject: "subscriptions", period: "24h" };
 const latest = hud.refresh();
 assert.equal(
   gains(),
@@ -132,7 +135,10 @@ requests[5].reject(new Error("offline"));
 await failure;
 assert.equal(gains(), "—");
 assert.equal(nodes.get("#activity-error").hidden, false);
+mode.period = "6h";
 const recovery = hud.refresh();
+assert.match(requests[6].url, /period=6h/, "A range changed outside the HUD controls the next reading");
+assert.equal(nodes.get("#activity-period-value").textContent, "6h");
 requests[6].resolve(result(10));
 await recovery;
 assert.equal(gains(), "10");
@@ -145,3 +151,11 @@ assert.equal(gains(), "10", "A detached HUD ignores its pending request.");
 console.log(
   "HUD formatting, comparison colors, stale responses, period races and retry passed.",
 );
+
+const allNodes = new Map([...nodes].map(([key])=>[key,new Node()]));
+const allHud = createActivityHud({root:{querySelector:key=>allNodes.get(key)},context:()=>({demo:false,subject:"followers",period:"all"}),onRange:()=>{},api:async()=>({...result(null),start:null,end:null})});
+await allHud.refresh();
+assert.equal(allNodes.get("#activity-period-value").textContent,"All saved");
+assert.equal(allNodes.get("#activity-period-trigger").title,"All saved history");
+assert.equal(allNodes.get("#activity-periods").children[8].attributes["aria-checked"],"true");
+allHud.destroy();

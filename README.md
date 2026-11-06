@@ -238,7 +238,7 @@ In Constellation, scroll up for older history and down for newer history. The pe
 <summary>Motion, statistics and connection history</summary>
 
 - **Ambient motion** controls light trails and shooting stars; **Motion speed** ranges from **0.25× to 2×**. Neither changes recording speed. Your device’s reduced-motion setting is respected.
-- The **clock button** selects **1h, 6h, 12h, 24h, 3d, 7d, 30d or 90d** for totals, hourly rates and **Growth ratio**. Hover or keyboard-focus a reading’s label for help. Paid-subscriber readings show new subscribers and expirations.
+- The **clock buttons** share one range: **1h, 6h, 12h, 24h, 3d, 7d, 30d, 90d or All saved**. Changing either updates the timeline, Journal and readings. They start at **24h**. Hover or keyboard-focus a reading’s label for help. Paid-subscriber readings show new subscribers and expirations.
 - **Growth ratio** is gains divided by losses: 7 follows and 2 unfollows gives **3.5**. A dash means no ratio can be calculated, such as when there are no losses.
 - Changes compare the previous equal-length period. Green means more gains or fewer losses; red means the reverse. **New** means the previous period had no activity.
 - Readings use the full saved log and the time XFlog received events, regardless of zoom, filters or groups. They are recorded changes, not your current follower total.
@@ -252,7 +252,7 @@ Open **timeline settings → Audience Groups** to enable groups, then choose one
 
 Each constellation has its own colored connections and a separate section when zoomed in. The small hint at the top names the current constellation. Groups keep their order and colors as you zoom; **Ungrouped** returns to the normal timeline.
 
-Groups use **All saved** history by default, including older records. The clock beside the spyglass narrows them to **24h, 7d, 30d or 90d**. This range applies to both Constellation and Journal; the separate clock beside the statistics controls only those readings. All saved history means records already in XFlog’s database, not older activity fetched from X.
+Use either **clock button** to change the shared time range for Constellation, Journal and readings. **All saved** includes older records already in XFlog’s database; it does not fetch past activity from X. In this view, the HUD shows lifetime totals and growth ratio; hourly rates and comparisons stay blank.
 
 **Groups make no extra X requests or charges.** Missing details stay **Unknown**; XFlog does not look up profiles to fill them in.
 

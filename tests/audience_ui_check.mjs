@@ -115,10 +115,11 @@ const groups = [
   },
 ];
 controls.render(groups, "none");
-assert.equal(elements.get("#group-range-control").hidden, true);
+assert.equal(elements.get("#group-range-control").hidden, false);
 controls.render(groups, "activity");
-assert.equal(elements.get("#group-range-value").textContent, "All saved");
-await elements.get("#group-ranges").children[2].fire("click");
+assert.deepEqual(elements.get("#group-ranges").children.map(item => item.textContent), ["1h","6h","12h","24h","3d","7d","30d","90d","All saved"]);
+assert.equal(elements.get("#group-range-value").textContent, "24h");
+await elements.get("#group-ranges").children[5].fire("click");
 assert.deepEqual(ranges,["7d"]);
 controls.render(groups, "activity", "7d");
 assert.equal(elements.get("#group-range-value").textContent, "7d");

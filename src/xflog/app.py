@@ -17,7 +17,7 @@ from .errors import SetupError
 from .history.demo import demo_activity, demo_history
 from .history.demo import encounter_context as demo_encounter_context
 from .history.filters import valid_filters
-from .history.summary import PERIODS, SUBJECT_TYPES, activity_window, readings
+from .history.summary import SUBJECT_TYPES, SUMMARY_PERIODS, activity_window, all_readings, readings
 from .history.timeline import Timeline, decode_cursor
 from .interactions import TYPES, catalog
 from .interactions.history import ThreadOptions
@@ -187,12 +187,15 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
 
     @app.get("/api/activity-summary")
     async def activity_summary(period: str = "24h", subject: str = "followers", demo: bool = False):
-        if period not in PERIODS or subject not in SUBJECT_TYPES:
+        if period not in SUMMARY_PERIODS or subject not in SUBJECT_TYPES:
             raise HTTPException(422, "Invalid activity period or audience.")
         if demo:
             return demo_activity(period, subject)
-        window = activity_window(period)
         account = await store.setting("account")
+        if period == "all":
+            counts = await store.summary(account["id"]) if account else {}
+            return {**all_readings(counts, subject), "synthetic": False}
+        window = activity_window(period)
         counts = await store.activity_counts(account["id"], window, subject) if account else {}
         return {**readings(counts, window, subject), "synthetic": False}
 

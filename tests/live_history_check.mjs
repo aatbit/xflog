@@ -121,6 +121,11 @@ assert.ok(!new URL(historyPath({...state,lens:"none"}),"http://local").searchPar
 const cutoff=groupSince({...groupedState,groupRange:"24h"},Date.parse("2026-11-06T10:00:59Z"));
 assert.equal(cutoff,"2026-11-05T10:00:00.000Z");
 assert.equal(groupSince(groupedState),"");
+for (const [range, hours] of [["1h",1],["6h",6],["12h",12],["3d",72]]) {
+  const end = Date.parse("2026-11-06T10:00:00Z");
+  assert.equal(Date.parse(groupSince({...groupedState,lens:"none",groupRange:range},end)), end-hours*3600000);
+}
+
 assert.equal(new URL(historyPath({...groupedState,since:cutoff}),"http://local").searchParams.get("since"),cutoff);
 assert.equal(mergeHistory([...all,unfollows]).length,27,"Repeated delivery does not duplicate saved records");
 let activityState={...groupedState,generation:1,events:[],next:null,status:{...state.status,timeline_revision:"activity-initial"}};
@@ -175,3 +180,18 @@ try {
 } finally {
   Date.now=realNow;
 }
+
+const lookupState = {...groupedState,lens:"none",since:cutoff};
+assert.equal(new URL(historyPath(lookupState),"http://local").searchParams.has("local_only"),false,"Initial ungrouped page keeps opt-in name resolution");
+assert.equal(new URL(historyPath(lookupState,"older"),"http://local").searchParams.get("local_only"),"true","Extra range pages stay local-only");
+let emptyRange={...lookupState,groupRange:"24h",selected:null,events:[],next:null,loading:false,status:{...state.status,timeline_revision:"new-burst"}};
+let rangeReads=0;
+const freshRows=Array.from({length:51},(_,i)=>({...event(i+1),received_at:new Date().toISOString()}));
+const emptyFeed=createLiveHistory({read:()=>({...emptyRange}),api:async path=>{rangeReads++;return new URL(path,"http://local").searchParams.get("before")==="0"?{events:freshRows.slice(0,50),next:"older"}:{events:freshRows.slice(50),next:null};},apply:(events,next)=>{emptyRange.events=events;emptyRange.next=next;},refreshInteractions:async()=>{}});
+await emptyFeed.refresh();
+await emptyFeed.refresh();
+assert.equal(emptyRange.events.length,51,"An empty ranged timeline receives the whole burst");
+assert.equal(rangeReads,2);
+
+const serverStart = "2026-11-06T09:00:59.000Z";
+assert.equal(groupSince({...groupedState,groupRange:"1h",demo:false,rangeWindow:{period:"1h",subject:"followers",demo:false,start:serverStart}},Date.parse("2026-11-06T10:00:00Z")),serverStart,"Use the same server cutoff as HUD even if the browser clock differs");
