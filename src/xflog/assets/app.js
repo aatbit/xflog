@@ -13,8 +13,10 @@
     status: null,
     csrf: "",
     generation: 0,
+    loading: false,
     groups: [],
     lens: "none",
+    groupRange: "all",
     groupSignature: "",
   };
   const pendingActions = new WeakSet();
@@ -135,7 +137,7 @@
   const { createNotice, statusNotice } = await import("/static/xf/notice.js");
   const notices = createNotice($("#notice"));
   const notice = (message, tone = "info") => notices.show(message, tone);
-  const { historyPath, createLiveHistory, updatedSelection } = await import("/static/xf/live-history.js");
+  const { historyPages, groupSince, mergeHistory, createLiveHistory, updatedSelection } = await import("/static/xf/live-history.js");
   const liveHistory = createLiveHistory({
     api,
     read: () => ({ ...state }),
@@ -316,9 +318,15 @@
       }),
     onLens: (lens) => {
       state.lens = lens;
-      groupControls.render(state.groups, lens);
+      groupControls.render(state.groups, lens, state.groupRange);
       scene.configure(state.groups, lens);
       if (state.layout === "vertical") renderEvents();
+      void load();
+    },
+    onRange: (range) => {
+      state.groupRange = range;
+      groupControls.render(state.groups, state.lens, range);
+      void load();
     },
   });
   function renderAudienceGroups(groups) {
@@ -327,7 +335,7 @@
     state.groupSignature = signature;
     state.lens = resolveLens(groups, state.lens);
     state.groups = groups;
-    groupControls.render(groups, state.lens);
+    groupControls.render(groups, state.lens, state.groupRange);
     scene.configure(groups, state.lens);
     selectedSignal.render(
       state.events.find((event) => event.event_id === state.selected),
@@ -337,7 +345,7 @@
   }
   function renderEvents(renderScene = scene.render) {
     const list = $("#history");
-    $(".scene-context").hidden = !state.events.length;
+    $(".scene-context").hidden = !state.events.length && state.lens === "none";
     $("#timeline-view").dataset.layout = state.layout;
     list.className = `history ${state.layout}`;
     list.setAttribute(
@@ -348,8 +356,8 @@
       selectedSignal.render(null);
       followControls.select(null);
       scene.clear();
-      $("#scene-people-count").textContent = "";
-      list.innerHTML = emptyHistory(state);
+      $("#scene-people-count").textContent = state.lens === "none" ? "" : "0 people in saved history";
+      list.innerHTML = state.lens === "none" ? emptyHistory(state) : '<div class="empty-state"><h2>No activity in this range.</h2></div>';
       list
         .querySelector("[data-empty-action]")
         ?.addEventListener("click", (event) => {
@@ -368,7 +376,7 @@
         lens: state.lens,
       });
       $("#scene-people-count").textContent =
-        `${state.events.length} ${state.events.length === 1 ? "event" : "events"} in loaded history`;
+        `${state.events.length} ${state.events.length === 1 ? "event" : "events"} in ${state.lens === "none" ? "loaded" : "saved"} history`;
     }
     if (state.layout === "vertical") {
       $("#memory-scrubber").max = Math.max(0, state.events.length - 1);
@@ -420,9 +428,15 @@
       return;
     load(true);
   }
+  let historyLoad = null;
   async function load(append = false) {
+    historyLoad?.abort();
+    const controller = new AbortController();
+    historyLoad = controller;
     const generation = ++state.generation;
+    state.loading = true;
     const demo = state.demo;
+    const snapshot = {...state, since: groupSince(state)};
     if (!append && !state.events.length) {
       selectedSignal.render(null);
       followControls.select(null);
@@ -431,11 +445,18 @@
     }
     $("#history").setAttribute("aria-busy", "true");
     try {
-      const result = await api(historyPath(state, append ? state.next : "0"));
+      const rows = [];
+      let result;
+      const readPage = path => api(path, undefined, controller.signal);
+      for await (result of historyPages(readPage, snapshot, append ? state.next : "0")) {
+        if (generation !== state.generation) return;
+        rows.push(...result.events);
+        if (state.lens !== "none") $("#scene-people-count").textContent = `Loading saved history · ${rows.length} records`;
+        if (snapshot.lens === "none") break;
+      }
       if (generation !== state.generation) return;
-      state.events = append
-        ? [...state.events, ...result.events]
-        : result.events;
+      state.events = mergeHistory([...rows, ...(append ? state.events : [])])
+        .filter(event => !snapshot.since || Date.parse(event.received_at) >= Date.parse(snapshot.since));
       state.next = result.next;
       if (!state.events.some((event) => event.event_id === state.selected))
         state.selected =
@@ -444,7 +465,7 @@
       if (state.selected) selectEvent(state.selected);
       if (!append) void interactionControls.refresh();
       announce(
-        `${result.events.length} ${state.subject} events ${append ? "added" : "loaded"}.`,
+        `${rows.length} ${state.subject} events ${append ? "added" : "loaded"}.`,
       );
     } catch (error) {
       if (generation !== state.generation) return;
@@ -455,8 +476,10 @@
         $("#history [data-retry]").addEventListener("click", () => load());
       }
     } finally {
-      if (generation === state.generation)
+      if (generation === state.generation) {
+        state.loading = false;
         $("#history").setAttribute("aria-busy", "false");
+      }
     }
   }
   async function setDemo(enabled) {
@@ -645,6 +668,7 @@
   });
   async function poll() {
     if (!root.isConnected) {
+      historyLoad?.abort();
       scene.destroy();
       groupControls.destroy();
       activityHud.destroy();

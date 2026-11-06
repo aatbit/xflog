@@ -84,6 +84,70 @@ async def test_timeline_cursor_is_stable_across_new_records_and_source_ties(inst
     assert second["next"] is None
 
 
+async def test_grouped_pages_include_older_audience_changes_without_x_reads(instance):
+    app, browser, provider = instance
+    selection = await only_interactions(app, browser)
+    await app.state.store.save_setting("selection", {**selection, "profile_names": True})
+    for index in range(103):
+        await app.state.interactions.ingest(
+            envelope(event_uuid=f"group-reply-{index}", payload=post(str(900 + index))), selection
+        )
+    await app.state.store.db.execute(
+        "UPDATE interactions SET received_at='2026-11-06T12:00:00+00:00'"
+    )
+    await app.state.store.db.commit()
+    for index, kind in enumerate(("follow.follow", "follow.unfollow")):
+        await app.state.store.insert(
+            Event(
+                f"older-{index}", kind, "111", "222", None, None, None, "2026-11-05T12:00:00+00:00"
+            )
+        )
+    calls = len(provider.calls)
+    rows, cursor = [], "0"
+    while cursor:
+        response = await browser.get(
+            "/api/timeline", params={"local_only": True, "limit": 50, "before": cursor}
+        )
+        assert response.status_code == 200
+        page = response.json()
+        rows.extend(page["events"])
+        cursor = page["next"]
+    assert len(rows) == len({row["event_id"] for row in rows}) == 105
+    assert {row["audience_groups"]["activity"] for row in rows} == {
+        "follow.follow",
+        "follow.unfollow",
+        "interaction.replies",
+    }
+    assert len(provider.calls) == calls
+    recent = await browser.get(
+        "/api/timeline", params={"local_only": True, "limit": 50, "since": "2026-11-06T00:00:00Z"}
+    )
+    assert {row["kind"] for row in recent.json()["events"]} == {"interaction.replies"}
+    assert (
+        await browser.get(
+            "/api/timeline", params={"local_only": True, "since": "2026-11-07T00:00:00Z"}
+        )
+    ).json() == {"events": [], "next": None}
+    assert len(provider.calls) == calls
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"since": "bad"},
+        {"since": "2026-11-06"},
+        {"since": "0001-01-01T00:00:00+01:00"},
+        {"limit": 0},
+        {"limit": 51},
+    ],
+)
+async def test_invalid_history_range_or_page_size_is_rejected(instance, params):
+    _, browser, provider = instance
+    calls = len(provider.calls)
+    assert (await browser.get("/api/timeline", params=params)).status_code == 422
+    assert len(provider.calls) == calls
+
+
 async def test_profile_capture_respects_group_opt_in_and_unknown_history(instance):
     app, browser, _ = instance
     selection = await only_interactions(app, browser)

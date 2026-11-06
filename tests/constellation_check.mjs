@@ -13,6 +13,7 @@ const {
 const { createConstellation } = await import(new URL("constellation.js", base));
 const { resolveLens } = await import(new URL("audience-ui.js", base));
 const { groupKey } = await import(new URL("constellation-colors.js", base));
+const { groupEvents } = await import(new URL("audience-groups.js", base));
 const modules = JSON.parse(process.argv[3]);
 const locations = modules.find((module) => module.key === "profile-location");
 const cityEvents = Array.from({ length: 40 }, (_, index) => ({
@@ -87,6 +88,27 @@ const events = Array.from({ length: 50 }, (_, index) => ({
   ),
 })).reverse();
 const activity = modules.find(module=>module.key==="activity");
+const mixed = [
+  ["like-new", "A", "interaction.likes_received"],
+  ["reply", "A", "interaction.replies"],
+  ["follow", "A", "follow.follow"],
+  ["unfollow", "A", "follow.unfollow"],
+  ["like-old", "A", "interaction.likes_received"],
+  ["other-unfollow", "B", "follow.unfollow"],
+].map(([event_id, actor_id, kind], index) => ({
+  event_id, actor_id, kind, sequence: 6 - index,
+  audience_groups: { activity: kind },
+}));
+for (const zoom of [0, 0.8, 1.5]) {
+  const layout = constellationLayout({events:mixed,width:1440,height:886,zoom,modules,lens:"activity"});
+  assert.deepEqual(layout.groups.map(group=>group.key), [
+    "follow.follow", "follow.unfollow", "interaction.replies", "interaction.likes_received",
+  ], "Newer likes and replies must not erase recorded follow/unfollow groups");
+  assert.equal(layout.groups.find(group=>group.key==="follow.unfollow").people.length, 2);
+  const likes = layout.groups.find(group=>group.key==="interaction.likes_received").people;
+  assert.equal(likes.length, 1, "Each group counts a person once, even with repeated events");
+  assert.equal(likes[0].event.event_id, "like-new");
+}
 const separated = constellationLayout({events,width:798,height:772,zoom:0.8,modules,lens:"activity"});
 assert.ok(separated.grouped);
 assert.equal(new Set(separated.groups.map(group=>group.color)).size,separated.groups.length,
@@ -136,11 +158,22 @@ for (const width of [320, 390, 798, 1440])
           modules,
           lens,
         });
-        assert.equal(layout.people.length, 19);
+        const rawGroups = groupEvents(events, modules, lens);
+        let expectedPeople = 0;
+        for (const group of layout.groups) {
+          const records = !rawGroups ? events : group.key === "overview-more"
+            ? rawGroups.filter(raw => !layout.groups.some(item=>item.key===raw.key)).flatMap(raw=>raw.events)
+            : rawGroups.find(raw=>raw.key===group.key).events;
+          const expected = [...new Set(records.map(event=>event.actor_id))].sort();
+          assert.deepEqual(group.people.map(person=>person.id).sort(), expected,
+            "Every group retains each person with a matching recorded event");
+          expectedPeople += expected.length;
+        }
+        assert.equal(layout.people.length, expectedPeople);
         assert.equal(
           layout.groups.reduce((sum, group) => sum + group.people.length, 0),
-          19,
-          "Counts are unique people, not events.",
+          expectedPeople,
+          "Counts are unique people within each group, not events.",
         );
         assert.ok(layout.center < height / 2);
         assert.ok(

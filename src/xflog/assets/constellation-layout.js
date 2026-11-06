@@ -1,5 +1,6 @@
 import { groupEvents } from "./audience-groups.js";
 import { colorGroups } from "./constellation-colors.js";
+import { compareEvents } from "./format.js";
 
 export const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 
@@ -49,12 +50,6 @@ export function peopleFromEvents(events) {
   return [...people.values()].sort(
     (a, b) => compareEvents(a.event, b.event),
   );
-}
-
-function compareEvents(a, b) {
-  if (a.received_at && b.received_at && a.received_at !== b.received_at)
-    return b.received_at.localeCompare(a.received_at);
-  return Math.abs(Number(b.sequence)) - Math.abs(Number(a.sequence));
 }
 
 function labelsOverlap(a, b) {
@@ -135,19 +130,14 @@ export function constellationLayout({
     Math.floor((height - upper - 80) / rowHeight),
   );
   const groupLimit = Math.max(2, Math.min(6, availableColumns * availableRows));
-  let rawBuckets = groupEvents(
-    people.map((person) => person.event),
-    modules,
-    lens,
-  );
+  let rawBuckets = groupEvents(events, modules, lens);
   const module = modules.find(module => module.key === lens && module.enabled);
   if (rawBuckets) rawBuckets = colorGroups(rawBuckets, module);
   const buckets = zoom <= 0.25 ? compactGroups(rawBuckets, groupLimit) : rawBuckets;
-  const byActor = new Map(people.map((person) => [person.id, person]));
   const groups = buckets
     ? buckets.map(({ events, ...bucket }) => ({
         ...bucket,
-        people: events.map((event) => byActor.get(event.actor_id)),
+        people: peopleFromEvents(events),
       }))
     : [{ key: "all", label: "Loaded audience", tone: "neutral", people }];
   const occupied = colorGroups(
@@ -171,7 +161,7 @@ export function constellationLayout({
   const spacing = (width < 680 ? 245 : 285) * zoom;
   const orderedPeople = buckets ? [...occupied].reverse().flatMap(group => group.people) : people;
   const groupGap = buckets ? width * 0.5 * blend : 0;
-  const worldWidth = width + Math.max(0, people.length - 1) * spacing * blend +
+  const worldWidth = width + Math.max(0, orderedPeople.length - 1) * spacing * blend +
     Math.max(0, occupied.length - 1) * groupGap;
   const points = orderedPeople.map((person, index) => {
     const group = occupied.find((item) => item.people.includes(person));
@@ -180,7 +170,7 @@ export function constellationLayout({
     const radius = Math.min(width < 600 ? 44 : 76, 14 + Math.sqrt(member) * 13);
     const fitX = clamp(group.x + Math.cos(angle) * radius, 32, width - 32);
     const fitY = clamp(group.y + Math.sin(angle) * radius * 0.6, upper, lower);
-    const timelineX = width / 2 + (people.length - 1 - index) * spacing;
+    const timelineX = width / 2 + (orderedPeople.length - 1 - index) * spacing;
     const groupOffset = occupied.indexOf(group) * groupGap;
     const timelineY = clamp(
       group.y + (seed(person.id) - 0.5) * Math.min(400, areaHeight * 0.9),

@@ -180,7 +180,7 @@ assert.equal(Number(controls.get("#scene-zoom").value), 0.8);
 controls.get("#scene-zoom").handlers.input({ target: { value: "1.2" } });
 assert.equal(controls.get("#zoom-value").textContent, "120%");
 scene.setZoom(0.8);
-const label = labels.find((n) => n.dataset.label === "A");
+const label = labels.find((n) => n.dataset.label === "new-A");
 assert.ok(label.innerHTML.includes("follow.unfollow"));
 assert.ok(!label.innerHTML.includes("recorded events"));
 assert.ok(!label.innerHTML.includes("<time>"));
@@ -303,6 +303,50 @@ const anchorIdentity = nodes.find(node => node.attributes["aria-pressed"] === "t
 scene.update([...events, event("old-C", "C", 0, "follow.follow")], anchorIdentity);
 assert.equal(element.scrollLeft, oldScroll, "Local updates preserve the viewport anchor");
 assert.equal(controls.get("#scene-zoom").value, oldZoom, "Local updates preserve zoom");
+scene.render([...events, event("old-C", "C", 0, "follow.follow")], "new-A");
+const manualStart = element.scrollLeft;
+handlers.wheel({ deltaY: -90, deltaX: 0, deltaMode: 0, preventDefault() {} });
+nodes.find(node=>node.dataset.actor === "B").handlers.click();
+handlers.scroll(); // A queued scroll event from the previous movement arrives after the click.
+frame(2000);
+assert.equal(element.scrollLeft, manualStart, "A manual click cancels pending travel without recentering");
+assert.equal(nodes.find(node=>node.dataset.actor === "B").attributes["aria-pressed"], "true",
+  "A stationary off-center selection survives queued scroll events");
+const openedBeforeLabel = opened.length;
+labels.find(node=>node.dataset.label === "old-C").handlers.click();
+frame(2016);
+assert.equal(nodes.find(node=>node.dataset.actor === "C").attributes["aria-pressed"], "true",
+  "Clicking another person's label selects that person too");
+assert.equal(opened.length, openedBeforeLabel, "First click selects; a second click opens details");
+labels.find(node=>node.dataset.label === "old-C").handlers.click();
+assert.equal(opened.at(-1), "old-C");
+element.scrollLeft = manualStart - 30;
+handlers.scroll();
+frame(2032);
+assert.notEqual(nodes.find(node=>node.dataset.actor === "C").attributes["aria-pressed"], "true",
+  "Actual viewport movement resumes center-based selection");
+const activityEvents = events.map(event=>({...event,audience_groups:{activity:event.kind}}));
+scene.render(activityEvents, "old-A");
+scene.configure([{key:"activity",enabled:true,label:"Activity",buckets:[
+  {key:"follow.follow",label:"Followed you",tone:"positive"},
+  {key:"follow.unfollow",label:"Unfollowed",tone:"negative"},
+]}], "activity");
+assert.equal(nodes.filter(node=>node.dataset.actor === "A").length, 2,
+  "The same person can have separate follow and unfollow stars");
+assert.deepEqual(nodes.filter(node=>node.attributes["aria-pressed"] === "true").map(node=>node.dataset.event), ["old-A"],
+  "Only the selected activity's star is highlighted");
+nodes.find(node=>node.dataset.event === "new-A").handlers.click();
+frame(2048);
+assert.deepEqual(nodes.filter(node=>node.attributes["aria-pressed"] === "true").map(node=>node.dataset.event), ["new-A"]);
+labels.find(node=>node.dataset.label === "new-A").handlers.click();
+assert.equal(opened.at(-1), "new-A", "Details use the selected group record, not another activity by the same person");
+root.dataset.motion = "off";
+scene.update(activityEvents, "new-A");
+nodes.find(node=>node.dataset.event === "old-A").handlers.click();
+handlers.scroll();
+frame(2064);
+assert.deepEqual(nodes.filter(node=>node.attributes["aria-pressed"] === "true").map(node=>node.dataset.event), ["old-A"],
+  "Manual grouped selection also survives refresh with ambient motion disabled");
 scene.destroy();
 console.log(
   JSON.stringify({

@@ -6,15 +6,32 @@ export function resolveLens(groups, current) {
     : "none";
 }
 
-export function createAudienceControls({ root, onToggle, onLens }) {
+export function createAudienceControls({ root, onToggle, onLens, onRange }) {
   const $ = (selector) => root.querySelector(selector);
   const trigger = $("#lens-trigger"),
     picker = $("#audience-lens");
   const menu = bindPopover(trigger, picker);
+  const rangeTrigger = $("#group-range-trigger"), rangePicker = $("#group-ranges");
+  const rangeMenu = bindPopover(rangeTrigger, rangePicker);
   let helpPopovers = [];
   return {
-    render(groups, lens) {
+    render(groups, lens, range = "all") {
       const enabled = groups.filter((group) => group.enabled);
+      $("#group-range-control").hidden = lens === "none";
+      if (lens === "none" && rangePicker.matches(":popover-open")) rangeMenu.close();
+      $("#group-range-value").textContent = range === "all" ? "All saved" : range;
+      rangeTrigger.setAttribute("aria-label", `Saved history range, current: ${range === "all" ? "All saved" : range}`);
+      rangePicker.replaceChildren();
+      for (const value of ["all", "24h", "7d", "30d", "90d"]) {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.setAttribute("role", "menuitemradio");
+        item.setAttribute("aria-checked", String(value === range));
+        item.tabIndex = -1;
+        item.textContent = value === "all" ? "All saved" : value;
+        item.addEventListener("click", () => { onRange(value); rangeMenu.close(); });
+        rangePicker.append(item);
+      }
       $("#lens-control").hidden = !enabled.length;
       $("#scene-lens-label").textContent =
         enabled.find((group) => group.key === lens)?.label || "Ungrouped";
@@ -91,6 +108,7 @@ export function createAudienceControls({ root, onToggle, onLens }) {
     },
     destroy() {
       menu.destroy();
+      rangeMenu.destroy();
       for (const help of helpPopovers) help.destroy();
     },
   };
