@@ -44,9 +44,6 @@ export async function* historyPages(api, state, before = "0") {
 }
 
 export function updatedSelection(previous, selected, events) {
-  const old = previous.find(event => event.event_id === selected);
-  if (old && previous.find(event => event.actor_id === old.actor_id)?.event_id === selected)
-    return events.find(event => event.actor_id === old.actor_id)?.event_id || events[0]?.event_id || null;
   return events.some(event => event.event_id === selected) ? selected : events[0]?.event_id || null;
 }
 

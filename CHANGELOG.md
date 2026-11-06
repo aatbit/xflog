@@ -3,6 +3,18 @@
 Each tagged release has an automatically generated list of merged pull requests
 and contributors on the [GitHub releases page](https://github.com/aatbit/xflog/releases).
 
+## 1.0.6 — 2026-11-06
+
+### Fixed
+
+- Each recorded action has its own constellation star, including repeated actions
+  from the same person. New actions no longer replace earlier timeline entries.
+- Live updates retain the exact selected action. Duplicate event deliveries do not
+  create extra entries. Group overview counts continue to represent unique people.
+- Navigation, HUD timestamps and documentation describe action-based history.
+
+No database migration or new environment settings are required.
+
 ## 1.0.5 — 2026-11-06
 
 ### Fixed

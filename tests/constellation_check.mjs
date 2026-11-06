@@ -5,6 +5,7 @@ const base = pathToFileURL(process.argv[2] + "/");
 const {
   constellationLayout,
   peopleFromEvents,
+  entriesFromEvents,
   visibleLabels,
   flowStep,
   wheelDistance,
@@ -101,7 +102,8 @@ for (const zoom of [0, 0.8, 1.5]) {
   ], "Newer likes and replies must not erase recorded follow/unfollow groups");
   assert.equal(layout.groups.find(group=>group.key==="follow.unfollow").people.length, 2);
   const likes = layout.groups.find(group=>group.key==="interaction.likes_received").people;
-  assert.equal(likes.length, 1, "Each group counts a person once, even with repeated events");
+  assert.equal(likes.length, 2, "Repeated actions are distinct entries within a group");
+  assert.equal(layout.groups.find(group=>group.key==="interaction.likes_received").personCount,1);
   assert.equal(likes[0].event.event_id, "like-new");
 }
 const separated = constellationLayout({events,width:798,height:772,zoom:0.8,modules,lens:"activity"});
@@ -132,7 +134,7 @@ for(const a of overview.groups.filter(group=>group.key!=="overview-more"))
   }
 const ungrouped=constellationLayout({events,width:798,height:772,zoom:0.8,modules,lens:"none"});
 assert.equal(ungrouped.grouped,false);
-assert.deepEqual(ungrouped.people.map(person=>person.id),peopleFromEvents(events).map(person=>person.id));
+assert.deepEqual(ungrouped.people.map(person=>person.id),entriesFromEvents(events).map(person=>person.id));
 assert.ok(ungrouped.people.every(person=>person.color===undefined),"Ungrouped keeps its original neutral timeline");
 assert.ok(groupKey(separated.groups,String).includes('role="listitem"'),"Colors have named, counted key entries");
 assert.equal(peopleFromEvents(events).length, 19);
@@ -159,16 +161,16 @@ for (const width of [320, 390, 798, 1440])
           const records = !rawGroups ? events : group.key === "overview-more"
             ? rawGroups.filter(raw => !layout.groups.some(item=>item.key===raw.key)).flatMap(raw=>raw.events)
             : rawGroups.find(raw=>raw.key===group.key).events;
-          const expected = [...new Set(records.map(event=>event.actor_id))].sort();
+          const expected = [...new Set(records.map(event=>event.event_id))].sort();
           assert.deepEqual(group.people.map(person=>person.id).sort(), expected,
-            "Every group retains each person with a matching recorded event");
+            "Every group retains each distinct matching recorded event");
           expectedPeople += expected.length;
         }
         assert.equal(layout.people.length, expectedPeople);
         assert.equal(
           layout.groups.reduce((sum, group) => sum + group.people.length, 0),
           expectedPeople,
-          "Counts are unique people within each group, not events.",
+          "Every recorded event has its own timeline node.",
         );
         assert.ok(layout.center < height / 2);
         assert.ok(
@@ -278,7 +280,7 @@ assert.equal(
     modules: [extension],
     lens: "future",
   }).groups[0].people.length,
-  19,
+  events.length,
   "New registered module needs no renderer branch.",
 );
 assert.ok(
@@ -431,3 +433,10 @@ assert.ok(Math.abs(exercise(60) - exercise(120)) < 1e-10);
 assert.ok(Math.abs(exercise(60) - exercise(144)) < 1e-10);
 assert.ok(Math.abs(exercise(60, 2) - exercise(60, 1, 2000)) < 1e-10);
 await import("./audience_ui_check.mjs");
+
+const repeated = mixed.filter(event=>event.kind==="interaction.likes_received");
+const entryLayout = constellationLayout({events:repeated,width:798,height:772,zoom:0.8,modules,lens:"none"});
+assert.equal(entryLayout.people.length,2);
+assert.notEqual(entryLayout.people[0].x,entryLayout.people[1].x);
+assert.notEqual(entryLayout.people[0].id,entryLayout.people[1].id);
+assert.equal(entriesFromEvents([...repeated,repeated[0]]).length,2,"Duplicate delivery of the same event does not add another entry");

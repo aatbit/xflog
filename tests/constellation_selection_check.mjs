@@ -185,22 +185,24 @@ assert.equal(Number(controls.get("#scene-zoom").value), 0.8);
 controls.get("#scene-zoom").handlers.input({ target: { value: "1.2" } });
 assert.equal(controls.get("#zoom-value").textContent, "120%");
 scene.setZoom(0.8);
-const label = labels.find((n) => n.dataset.label === "new-A");
+assert.ok(labels.find(n=>n.dataset.label==="new-A").innerHTML.includes("follow.follow"));
+const label = labels.find((n) => n.dataset.label === "old-A");
 assert.ok(label.innerHTML.includes("follow.unfollow"));
 assert.ok(!label.innerHTML.includes("recorded events"));
 assert.ok(!label.innerHTML.includes("<time>"));
 label.handlers.click();
-nodes.find((n) => n.dataset.actor === "A").handlers.click();
+nodes.find((n) => n.dataset.event === "old-A").handlers.click();
 assert.deepEqual(opened, ["old-A", "old-A"]);
 assert.ok(
   nodes
-    .find((node) => node.dataset.actor === "A")
+    .find((node) => node.dataset.event === "old-A")
     .attributes["aria-label"].includes("follow.unfollow"),
 );
 assert.ok(
   paths.every((path) => Number(path[1]) < Number(path[2])),
   "Light paths run from older to newer, left to right.",
 );
+scene.seek(0, "instant");
 const start = element.scrollLeft;
 scene.seek(1);
 frame(1000);
@@ -208,7 +210,7 @@ assert.ok(
   element.scrollLeft > 0 && element.scrollLeft < start,
   "Manual seek uses eased travel, not an immediate jump.",
 );
-element.scrollLeft = 200;
+element.scrollLeft = 0;
 handlers.pointerdown({
   pointerType: "mouse",
   button: 0,
@@ -216,14 +218,14 @@ handlers.pointerdown({
   clientX: 300,
   target: { closest: () => null },
 });
-handlers.pointermove({ pointerId: 1, clientX: 200 });
+handlers.pointermove({ pointerId: 1, clientX: 0 });
 frame(1016);
 assert.ok(
-  element.scrollLeft > 200 && element.scrollLeft < 300,
+  element.scrollLeft > 0 && element.scrollLeft < 300,
   "Dragging follows the same eased target as wheel input.",
 );
-assert.equal(previewSteps.at(-1), "new-A", "The centered person highlights before dragging ends");
-assert.equal(nodes.find(n=>n.dataset.actor === "A").attributes["aria-pressed"], "true");
+assert.equal(previewSteps.at(-1), "old-A", "The centered person highlights before dragging ends");
+assert.equal(nodes.find(n=>n.dataset.event === "old-A").attributes["aria-pressed"], "true");
 assert.equal(selectedSteps.at(-1), "other-B", "Paid selection work waits until travel settles");
 handlers.pointerup({ pointerId: 1 });
 frame(1032);
@@ -262,9 +264,9 @@ handlers.keydown({
   preventDefault() {},
 });
 assert.equal(
-  nodes.find((node) => node.dataset.actor === "B").attributes["aria-pressed"],
+  nodes.find((node) => node.dataset.event === "old-A").attributes["aria-pressed"],
   "true",
-  "Home selects the oldest displayed person, not a later repeated actor.",
+  "Home selects the oldest displayed action, including repeated actors.",
 );
 scene.render([...events, event("old-C", "C", 0, "follow.follow")], "new-A");
 selectedSteps.length = 0;
@@ -274,7 +276,7 @@ scene.travel(-1);
 scene.travel(-1);
 assert.deepEqual(
   selectedSteps,
-  ["other-B", "old-C", "other-B", "new-A"],
+  ["other-B", "old-A", "other-B", "new-A"],
   "Rapid Older/Newer clicks step exactly one selected profile before any animation frame.",
 );
 scene.seek(0);

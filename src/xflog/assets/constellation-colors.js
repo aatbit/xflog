@@ -33,5 +33,5 @@ export function colorGroups(groups, module) {
 }
 
 export function groupKey(groups, escape) {
-  return groups.map(group => `<span class="constellation-key-item" role="listitem" title="${escape(group.label)} · ${group.people.length}"><svg viewBox="0 0 22 12" aria-hidden="true" style="color:${group.color}"><path d="M1 6H21" stroke-dasharray="${group.dash}"/></svg><span class="constellation-key-label">${escape(group.label)}</span><span class="constellation-key-count">${group.people.length}</span></span>`).join("");
+  return groups.map(group => `<span class="constellation-key-item" role="listitem" title="${escape(group.label)} · ${group.personCount}"><svg viewBox="0 0 22 12" aria-hidden="true" style="color:${group.color}"><path d="M1 6H21" stroke-dasharray="${group.dash}"/></svg><span class="constellation-key-label">${escape(group.label)}</span><span class="constellation-key-count">${group.personCount}</span></span>`).join("");
 }

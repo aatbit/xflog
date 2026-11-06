@@ -98,7 +98,7 @@ const people=peopleFromEvents([
   {event_id:"new-reply",actor_id:"222",sequence:-1,received_at:"2026-11-04T11:00:00+00:00"},
 ]);
 assert.equal(people[0].event.event_id,"new-reply","Mixed sources select the latest receipt, not the largest table ID");
-assert.equal(updatedSelection([event(4),event(3)],"4",[event(5),event(4),event(3)]),"5");
+assert.equal(updatedSelection([event(4),event(3)],"4",[event(5),event(4),event(3)]),"4");
 assert.equal(updatedSelection([event(4),event(3)],"3",[event(5),event(4),event(3)]),"3","Explicit older records stay selected");
 
 const follows = {event_id:"follow",actor_id:"222",kind:"follow.follow",sequence:1,received_at:"2026-11-04T10:00:00Z"};
