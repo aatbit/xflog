@@ -128,7 +128,7 @@ const element = {
   set innerHTML(value) {
     paths = [...value.matchAll(/<path d="M([\d.]+),[\d.]+L([\d.]+),[\d.]+"/g)];
     const buttons = [
-      ...value.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g),
+      ...value.matchAll(/<(?:button|div(?= class="star-label"))\b([^>]*)>([\s\S]*?)<\/(?:button|div)>/g),
     ].map((m) => {
       const dataset = {};
       for (const [, key, v] of m[1].matchAll(
@@ -185,9 +185,9 @@ assert.equal(Number(controls.get("#scene-zoom").value), 0.8);
 controls.get("#scene-zoom").handlers.input({ target: { value: "1.2" } });
 assert.equal(controls.get("#zoom-value").textContent, "120%");
 scene.setZoom(0.8);
-assert.ok(labels.find(n=>n.dataset.label==="new-A").innerHTML.includes("follow.follow"));
+assert.ok(labels.find(n=>n.dataset.label==="new-A").innerHTML.includes("Followed you"));
 const label = labels.find((n) => n.dataset.label === "old-A");
-assert.ok(label.innerHTML.includes("follow.unfollow"));
+assert.ok(label.innerHTML.includes("Unfollowed"));
 assert.ok(!label.innerHTML.includes("recorded events"));
 assert.ok(!label.innerHTML.includes("<time>"));
 label.handlers.click();

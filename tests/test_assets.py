@@ -187,3 +187,12 @@ def test_interaction_controls_guard_paid_loads_and_refresh_saved_history():
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_star_icons_and_bounded_safe_post_previews():
+    result = subprocess.run(
+        ["node", str(Path(__file__).with_name("star_preview_check.mjs")), str(ASSETS)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr

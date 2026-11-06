@@ -373,3 +373,25 @@
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
+
+.conversation-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.conversation-header .conversation-toggle {
+  flex: 1;
+  min-width: 0;
+}
+.conversation-external {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: none;
+  padding: 10px 0;
+}
+.conversation-external:hover { color: var(--text); text-decoration: underline; }
+@media (max-width: 480px) {
+  .conversation-header { flex-wrap: wrap; gap: 0 12px; }
+  .conversation-external { margin-left: auto; padding-top: 0; }
+}
