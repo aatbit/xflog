@@ -232,7 +232,7 @@ If saving shows a warning, follow it before assuming your change is active. If c
 
 Open timeline settings with the **sliders icon**. Choose Followers or Paid subscribers, filter All/Gained/Lost, or switch between **Constellation** (one star per person) and **Journal** (every recorded event). These viewing choices do not change what you record.
 
-In Constellation, scroll up for older history and down for newer history. The person nearest the center becomes highlighted as you move, and their details appear in the readout. The side arrows move one person at a time. Use the bottom sliders to move through history or change zoom, which starts at **80%**. Select a person’s name or readout for details. Journal uses normal vertical scrolling and hides the sliders.
+In Constellation, scroll up for older history and down for newer history. The person nearest the center becomes highlighted as you move, and their details appear in the readout. You can also click any visible star or name to select that person; they stay selected until you move through history again. Click the selected person or their readout for details. The side arrows move one person at a time. Use the bottom sliders to move through history or change zoom, which starts at **80%**. Journal uses normal vertical scrolling and hides the sliders.
 
 <details>
 <summary>Motion, statistics and connection history</summary>
@@ -252,6 +252,8 @@ Open **timeline settings → Audience Groups** to enable groups, then choose one
 
 Each constellation has its own colored connections and a separate section when zoomed in. The small hint at the top names the current constellation. Groups keep their order and colors as you zoom; **Ungrouped** returns to the normal timeline.
 
+Groups use **All saved** history by default, including older records. The clock beside the spyglass narrows them to **24h, 7d, 30d or 90d**. This range applies to both Constellation and Journal; the separate clock beside the statistics controls only those readings. All saved history means records already in XFlog’s database, not older activity fetched from X.
+
 **Groups make no extra X requests or charges.** Missing details stay **Unknown**; XFlog does not look up profiles to fill them in.
 
 <details>
@@ -259,14 +261,14 @@ Each constellation has its own colored connections and a separate section when z
 
 | Group | What it shows |
 | --- | --- |
-| **Activity** | Follows, unfollows, new subscriptions or expirations. |
+| **Activity** | Follows, unfollows, new subscriptions or expirations, plus enabled interactions such as replies and likes. |
 | **Previous encounters** | First appearance in this log, seen before, or followed again after a recorded unfollow. Uses the full saved history, including older records. |
 | **Account size** | Under 100, 100–999, 1K–9,999 or 10K+ followers, when supplied. |
 | **Account age** | Under 1 year, 1–3 years or 3+ years old when the event was recorded. |
 | **Verification** | Verified/unverified and blue, business or government badge types when supplied. |
 | **Profile location** | Similar location text, tidied for spacing, capitalization and clear aliases such as NYC → New York City and Bangalore → Bengaluru. |
 
-Zoom out to see groups in Constellation. Journal uses collapsible sections; one person can appear in multiple sections. Groups cover the history you have loaded, so older records can add people or change what you see.
+Zoom out to see groups in Constellation. Journal uses collapsible sections. A person can appear in several groups: a later like or reply does not hide their earlier follow or unfollow. Each group counts that person once, using matching records within the selected range.
 
 Account size, age, verification and location use only details delivered with new events while enabled. Old missing details stay Unknown; turning a group off keeps saved history. Profile facts describe the recorded event, not a live profile check. When space allows, enabled Verification, Account size and Account age add facts to the selected-person readout. Known verified accounts get a checkmark beside their name in Constellation and the readout when Verification is enabled.
 
@@ -478,9 +480,9 @@ Pull requests to `main` and updates on `main` run lint, formatting and the mock-
 <details>
 <summary>How maintainers publish a release</summary>
 
-1. Update the version in `pyproject.toml` and run `uv lock`. Merge the passing release PR into `main`.
-2. Tag that commit, for example `git tag v1.0.0`, then `git push origin v1.0.0`.
-3. Actions repeats the checks and verifies the tag matches the package version and belongs to `main`. It builds and checks the Python packages, publishes them to PyPI, then creates a GitHub release with package downloads and automatically generated change notes. Docker users build locally with Compose; releases do not publish a container image.
+1. Update the version in `pyproject.toml`, add its entry to `CHANGELOG.md` and run `uv lock`. Merge the passing release PR into `main`.
+2. Tag that commit, for example `git tag v1.0.1`, then `git push origin v1.0.1`.
+3. Actions repeats the checks and verifies the tag matches the package version and belongs to `main`. It builds and checks the Python packages, publishes them to PyPI, then creates a GitHub release with package downloads, the version’s changelog and automatically generated change notes. Docker users build locally with Compose; releases do not publish a container image.
 
 PyPI uses Trusted Publishing from this repository’s `release.yml` workflow and `pypi` environment; no long-lived PyPI token is stored in GitHub. Actions are pinned to full commit hashes, with Dependabot checking for updates. If a job fails, inspect it and rerun the failed jobs; do not reuse a published version for different files. Changing a version tag does not replace files already published to PyPI.
 

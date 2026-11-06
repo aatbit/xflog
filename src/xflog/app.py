@@ -24,6 +24,7 @@ from .interactions.history import ThreadOptions
 from .profile_names import ProfileNames
 from .runtime import Runtime
 from .tracking.collector import DEFAULT_SELECTION
+from .tracking.events import timestamp
 from .tracking.transport import ProviderError
 from .web.models import (
     AudiencePreferences,
@@ -196,23 +197,39 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
         return {**readings(counts, window, subject), "synthetic": False}
 
     @app.get("/api/timeline")
-    async def timeline_history(kind: str = "all", subject: str = "followers", before: str = "0"):
+    async def timeline_history(
+        kind: str = "all",
+        subject: str = "followers",
+        before: str = "0",
+        since: str = "",
+        local_only: bool = False,
+        limit: int = 25,
+    ):
         try:
             decode_cursor(before)
         except ValueError:
             raise HTTPException(422, "Invalid timeline cursor.") from None
         if not valid_filters(kind, subject, 0):
             raise HTTPException(422, "Invalid timeline filter.")
+        try:
+            since = timestamp(since) if since else ""
+        except (ValueError, OverflowError):
+            raise HTTPException(422, "Invalid history range.") from None
+        if not 1 <= limit <= 50:
+            raise HTTPException(422, "History page size must be between 1 and 50.")
         account = await store.setting("account")
         if not account:
             return {"events": [], "next": None}
-        result = await timeline.history(
-            account["id"], {"kind": kind, "subject": subject, "before": before}
-        )
-        if await profile_names.ensure(result["events"]):
-            result = await timeline.history(
-                account["id"], {"kind": kind, "subject": subject, "before": before}
-            )
+        query = {
+            "kind": kind,
+            "subject": subject,
+            "before": before,
+            "since": since,
+            "limit": limit,
+        }
+        result = await timeline.history(account["id"], query)
+        if not local_only and await profile_names.ensure(result["events"]):
+            result = await timeline.history(account["id"], query)
         groups = await store.setting("audience_groups", {})
         result["events"] = await audience_groups.decorate_history(
             result["events"], groups, timeline.encounter_context

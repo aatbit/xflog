@@ -87,6 +87,35 @@
   pointer-events: auto;
   flex-shrink: 0;
 }
+.scene-tools {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: auto;
+}
+#group-range-control[hidden] { display: none; }
+#group-range-trigger {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+}
+#group-range-trigger:hover,
+#group-range-trigger[aria-expanded="true"] {
+  color: var(--accent);
+  border-color: var(--control);
+  background: var(--surface);
+}
+#group-range-trigger svg { width: 16px; height: 16px; }
+#group-range-trigger svg:last-child { width: 10px; height: 10px; }
 #lens-trigger {
   width: 56px;
   min-height: 44px;

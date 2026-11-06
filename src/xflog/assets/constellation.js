@@ -37,7 +37,8 @@ export function createConstellation({
     clock = 0,
     target = null,
     seeking = false,
-    drag = null;
+    drag = null,
+    scrollPosition = 0;
   let stars = [],
     labels = [],
     sparks = [],
@@ -53,9 +54,9 @@ export function createConstellation({
   const current = () => events.find((event) => event.event_id === selected);
   const maximum = () => Math.max(0, element.scrollWidth - element.clientWidth);
   const position = () =>
-    geometry?.people.find((person) => person.id === current()?.actor_id);
+    geometry?.people.find((person) => person.events.some(event => event.event_id === selected));
   const selectedProfileIndex = () =>
-    geometry?.people.findIndex((person) => person.id === current()?.actor_id) ??
+    geometry?.people.indexOf(position()) ??
     -1;
   function personLabel(person, event = person.event) {
     return `<strong>${esc(event.name || event.handle || "X account")}${verificationBadge(event, modules)}</strong><span class="star-handle">${esc(event.handle ? "@" + event.handle : "ID " + person.id)}</span><span class="star-kind ${eventTone(event)}">${esc(label(event))}</span>`;
@@ -92,8 +93,9 @@ export function createConstellation({
     history.value = maximum()
       ? Math.round((1 - element.scrollLeft / maximum()) * 1000)
       : 500;
+    const count = new Set(geometry.people.map(person => person.id)).size;
     $("#scene-people-count").textContent =
-      `${geometry.people.length} ${geometry.people.length === 1 ? "person" : "people"} in loaded history`;
+      `${count} ${count === 1 ? "person" : "people"} in ${geometry.grouped ? "saved" : "loaded"} history`;
   }
   function groupHint() {
     const key = $("#constellation-key");
@@ -116,7 +118,7 @@ export function createConstellation({
         Math.abs(person.x - center) < Math.abs(best.x - center) ? person : best,
       geometry.people[0],
     );
-    if (closest && closest.id !== current()?.actor_id) {
+    if (closest && closest !== position()) {
       select(closest.event.event_id);
       notify(closest.event.event_id);
     }
@@ -142,11 +144,11 @@ export function createConstellation({
   }
   function select(identity) {
     selected = identity;
-    const actor = current()?.actor_id;
+    const chosenPerson = position();
     element.querySelectorAll("[data-actor]").forEach((button) => {
-      const chosen = button.dataset.actor === actor;
+      const chosen = button.dataset.event === chosenPerson?.event.event_id;
       const person = geometry.people.find(
-        (item) => item.id === button.dataset.actor,
+        (item) => item.event.event_id === button.dataset.event,
       );
       const event = chosen ? current() : person.event;
       button.setAttribute("aria-pressed", String(chosen));
@@ -159,7 +161,8 @@ export function createConstellation({
         .classList.toggle("is-selected", chosen);
     });
     for (const item of labels) {
-      const event = item.person.id === actor ? current() : item.person.event;
+      const event = item.person === chosenPerson ? current() : item.person.event;
+      item.label.setAttribute("aria-label", `${item.person === chosenPerson ? "Open recorded event for" : "Select"} ${event.name || event.handle || "X account"}`);
       if (item.identity !== event.event_id) {
         item.label.innerHTML = personLabel(item.person, event);
         item.identity = event.event_id;
@@ -195,7 +198,7 @@ export function createConstellation({
     const browsing = geometry.canPan && !seeking && element.dataset.userScrolling === "true";
     if (browsing) selectVisibleProfile(onPreview);
     const left = element.scrollLeft,
-      actor = current()?.actor_id;
+      chosenPerson = position();
     element.querySelector(".constellation-sky").style.transform =
       `translateX(${left}px)`;
     const meteor = element.querySelector(".shooting-star");
@@ -212,7 +215,7 @@ export function createConstellation({
       }
     const candidates = [];
     for (const item of labels) {
-      const chosen = item.person.id === actor;
+      const chosen = item.person === chosenPerson;
       const x = item.person.x - left;
       const width = item.width,
         height = item.height;
@@ -232,7 +235,7 @@ export function createConstellation({
         center + width / 2 <= element.clientWidth - 12
       ) {
         const candidate = {
-          id: item.person.id,
+          id: item.person.event.event_id,
           left: center - width / 2,
           right: center + width / 2,
           top,
@@ -253,9 +256,9 @@ export function createConstellation({
         candidates.push(candidate);
       }
     }
-    const shown = visibleLabels(candidates, actor);
+    const shown = visibleLabels(candidates, chosenPerson?.event.event_id);
     labels.forEach((item) => {
-      const placement = shown.get(item.person.id);
+      const placement = shown.get(item.person.event.event_id);
       const visible = Boolean(placement);
       if (placement) item.label.style.top = `${placement.top}px`;
       item.label.style.visibility = visible ? "visible" : "hidden";
@@ -318,7 +321,7 @@ export function createConstellation({
         .slice(1)
         .map((person, index) => ({ a: person, b: people[index], color: group.color, dash: group.dash }));
     });
-    element.innerHTML = `<svg class="constellation-sky" viewBox="0 0 ${element.clientWidth} ${element.clientHeight}" aria-hidden="true">${background}<defs><linearGradient id="xf-shooting-tail" class="shooting-tail" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="currentColor" stop-opacity="0"/><stop offset="1" stop-color="currentColor"/></linearGradient></defs><line class="shooting-star" data-active="false" stroke="url(#xf-shooting-tail)" opacity="0"/></svg><div class="constellation-canvas" style="width:${geometry.width}px"><svg class="constellation-links${geometry.grouped ? " is-grouped" : ""}" viewBox="0 0 ${geometry.width} ${element.clientHeight}" aria-hidden="true">${geometry.overview ? "" : links.map(({ a, b, color, dash }) => `<g data-link-group="${esc(a.group)}" style="${color ? `color:${color}` : ""}"><path d="M${a.x},${a.y}L${b.x},${b.y}" stroke-dasharray="${dash || ""}"/><line class="sequence-trail"/><circle class="sequence-spark" r="2"/></g>`).join("")}</svg>${geometry.people.map((person) => `<article class="constellation-person" data-person="${esc(person.id)}" style="--group-color:${person.color || "var(--muted)"}"><button class="constellation-star ${esc(person.tone)}" type="button" style="left:${person.x}px;top:${person.y}px" data-actor="${esc(person.id)}" data-event="${esc(person.event.event_id)}" aria-label="${esc(person.event.name || person.event.handle || "X account")}, ${esc(label(person.event))}, ${person.events.length} recorded events"><span class="star-core" aria-hidden="true"></span><span class="star-initials" aria-hidden="true">${esc(initials(person.event))}</span></button><button type="button" class="star-label" data-label="${esc(person.id)}" aria-label="Open recorded event for ${esc(person.event.name || person.event.handle || "X account")}">${personLabel(person)}</button></article>`).join("")}${geometry.overview ? geometry.groups.map((group) => `<button type="button" class="constellation-group ${esc(group.tone)}" style="--group-color:${group.color};left:${group.x}px;top:${group.y}px" data-group="${esc(group.key)}" aria-label="Explore ${esc(group.label)}, ${group.people.length} ${group.people.length === 1 ? "person" : "people"}"><span class="cluster-count">${group.people.length}</span><strong title="${esc(group.label)}">${esc(group.label)}</strong></button>`).join("") : ""}</div>`;
+    element.innerHTML = `<svg class="constellation-sky" viewBox="0 0 ${element.clientWidth} ${element.clientHeight}" aria-hidden="true">${background}<defs><linearGradient id="xf-shooting-tail" class="shooting-tail" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="currentColor" stop-opacity="0"/><stop offset="1" stop-color="currentColor"/></linearGradient></defs><line class="shooting-star" data-active="false" stroke="url(#xf-shooting-tail)" opacity="0"/></svg><div class="constellation-canvas" style="width:${geometry.width}px"><svg class="constellation-links${geometry.grouped ? " is-grouped" : ""}" viewBox="0 0 ${geometry.width} ${element.clientHeight}" aria-hidden="true">${geometry.overview ? "" : links.map(({ a, b, color, dash }) => `<g data-link-group="${esc(a.group)}" style="${color ? `color:${color}` : ""}"><path d="M${a.x},${a.y}L${b.x},${b.y}" stroke-dasharray="${dash || ""}"/><line class="sequence-trail"/><circle class="sequence-spark" r="2"/></g>`).join("")}</svg>${geometry.people.map((person) => `<article class="constellation-person" data-person="${esc(person.id)}" style="--group-color:${person.color || "var(--muted)"}"><button class="constellation-star ${esc(person.tone)}" type="button" style="left:${person.x}px;top:${person.y}px" data-actor="${esc(person.id)}" data-event="${esc(person.event.event_id)}" aria-label="${esc(person.event.name || person.event.handle || "X account")}, ${esc(label(person.event))}, ${person.events.length} recorded events"><span class="star-core" aria-hidden="true"></span><span class="star-initials" aria-hidden="true">${esc(initials(person.event))}</span></button><button type="button" class="star-label" data-label="${esc(person.event.event_id)}" aria-label="Open recorded event for ${esc(person.event.name || person.event.handle || "X account")}">${personLabel(person)}</button></article>`).join("")}${geometry.overview ? geometry.groups.map((group) => `<button type="button" class="constellation-group ${esc(group.tone)}" style="--group-color:${group.color};left:${group.x}px;top:${group.y}px" data-group="${esc(group.key)}" aria-label="Explore ${esc(group.label)}, ${group.people.length} ${group.people.length === 1 ? "person" : "people"}"><span class="cluster-count">${group.people.length}</span><strong title="${esc(group.label)}">${esc(group.label)}</strong></button>`).join("") : ""}</div>`;
     stars = [...element.querySelectorAll(".sky-star")];
     const labelNodes = new Map(
       [...element.querySelectorAll("[data-label]")].map((item) => [
@@ -328,7 +331,7 @@ export function createConstellation({
     );
     labels = geometry.people.map((person) => ({
       person,
-      label: labelNodes.get(person.id),
+      label: labelNodes.get(person.event.event_id),
     }));
     sparks = [...element.querySelectorAll(".sequence-spark")].map(
       (spark, index) => ({
@@ -339,12 +342,7 @@ export function createConstellation({
     );
     element.querySelectorAll("[data-actor]").forEach((button) =>
       button.addEventListener("click", () => {
-        const identity = button.dataset.event;
-        if (current()?.actor_id === button.dataset.actor) onOpen(selected);
-        else {
-          select(identity);
-          onSelect(identity);
-        }
+        clickPerson(geometry.people.find(person => person.event.event_id === button.dataset.event));
       }),
     );
     element.querySelectorAll("[data-actor]").forEach((button) => {
@@ -352,11 +350,7 @@ export function createConstellation({
       button.setAttribute("aria-hidden", String(geometry.overview));
     });
     labels.forEach(({ person, label: button }) =>
-      button.addEventListener("click", () =>
-        onOpen(
-          current()?.actor_id === person.id ? selected : person.event.event_id,
-        ),
-      ),
+      button.addEventListener("click", () => clickPerson(person)),
     );
     element.querySelectorAll("[data-group]").forEach((button) =>
       button.addEventListener("click", () => {
@@ -380,9 +374,21 @@ export function createConstellation({
         : 0;
     target = null;
     seeking = false;
+    scrollPosition = element.scrollLeft;
     delete element.dataset.userScrolling;
     select(identity);
     queue();
+  }
+  function clickPerson(person) {
+    target = null;
+    seeking = false;
+    delete element.dataset.userScrolling;
+    scrollPosition = element.scrollLeft;
+    if (position() === person) onOpen(selected);
+    else {
+      select(person.event.event_id);
+      onSelect(person.event.event_id);
+    }
   }
   function seek(index, behavior = "smooth") {
     if (!events.length || !geometry) return;
@@ -533,7 +539,9 @@ export function createConstellation({
   });
   resize.observe(element);
   const scroll = () => {
-    if (!seeking && target === null) element.dataset.userScrolling = "true";
+    if (!seeking && target === null && element.scrollLeft !== scrollPosition)
+      element.dataset.userScrolling = "true";
+    scrollPosition = element.scrollLeft;
     queue();
   };
   const focus = (event) => {
@@ -576,6 +584,7 @@ export function createConstellation({
       render(nextEvents, identity);
       if (offset !== null && position())
         element.scrollLeft = clamp(position().x - offset, 0, maximum());
+      scrollPosition = element.scrollLeft;
     },
     select,
     seek,

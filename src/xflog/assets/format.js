@@ -48,6 +48,12 @@ export const eventLabel = (event) =>
       : "Unfollowed";
 export const displayDate = (event) =>
   new Date(event.provider_at || event.received_at);
+export function compareEvents(a, b) {
+  if (a.received_at && b.received_at && a.received_at !== b.received_at)
+    return b.received_at.localeCompare(a.received_at);
+  return Number(b.sequence > 0) - Number(a.sequence > 0) ||
+    Math.abs(Number(b.sequence)) - Math.abs(Number(a.sequence));
+}
 export const initials = (event) =>
   (event.name || event.handle || "?")
     .split(/\s+/)

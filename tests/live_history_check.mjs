@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
 
 const base = pathToFileURL(process.argv[2] + "/");
-const { createLiveHistory, historyPath, updatedSelection } = await import(new URL("live-history.js", base));
+const { createLiveHistory, historyPath, updatedSelection, historyPages, groupSince, mergeHistory } = await import(new URL("live-history.js", base));
 const { eventLabel, eventTone } = await import(new URL("format.js", base));
 const { peopleFromEvents } = await import(new URL("constellation-layout.js", base));
 const event = id => ({ event_id: String(id), kind: "interaction.replies", actor_id: "222", sequence: -id });
@@ -99,3 +99,71 @@ const people=peopleFromEvents([
 assert.equal(people[0].event.event_id,"new-reply","Mixed sources select the latest receipt, not the largest table ID");
 assert.equal(updatedSelection([event(4),event(3)],"4",[event(5),event(4),event(3)]),"5");
 assert.equal(updatedSelection([event(4),event(3)],"3",[event(5),event(4),event(3)]),"3","Explicit older records stay selected");
+
+const follows = {event_id:"follow",actor_id:"222",kind:"follow.follow",sequence:1,received_at:"2026-11-04T10:00:00Z"};
+const unfollows = {...follows,event_id:"unfollow",actor_id:"333",kind:"follow.unfollow",sequence:2};
+const newest = Array.from({length:25},(_,i)=>({...event(30-i),received_at:"2026-11-05T10:00:00Z"}));
+const groupedState = {...state,lens:"activity",groupRange:"all",filter:"all",subject:"followers"};
+const burstCalls=[];
+const savedPages={"0":{events:newest,next:"older"},older:{events:[follows,unfollows],next:null}};
+const savedApi=async path=>{
+  const params=new URL(path,"http://local").searchParams;
+  burstCalls.push(Object.fromEntries(params));
+  return savedPages[params.get("before")];
+};
+const all=[];
+for await(const page of historyPages(savedApi,groupedState)) all.push(...page.events);
+assert.equal(all.length,27,"Grouped reads include all saved pages, not just the latest interaction page");
+assert.deepEqual(all.slice(-2).map(row=>row.kind),["follow.follow","follow.unfollow"]);
+assert.ok(burstCalls.every(call=>call.local_only==="true" && call.limit==="50"),"Grouped history reads never trigger profile requests");
+assert.ok(!new URL(historyPath({...state,lens:"none"}),"http://local").searchParams.has("local_only"),"Ungrouped keeps its usual request");
+const cutoff=groupSince({...groupedState,groupRange:"24h"},Date.parse("2026-11-06T10:00:59Z"));
+assert.equal(cutoff,"2026-11-05T10:00:00.000Z");
+assert.equal(groupSince(groupedState),"");
+assert.equal(new URL(historyPath({...groupedState,since:cutoff}),"http://local").searchParams.get("since"),cutoff);
+assert.equal(mergeHistory([...all,unfollows]).length,27,"Repeated delivery does not duplicate saved records");
+let activityState={...groupedState,generation:1,events:[],next:null,status:{...state.status,timeline_revision:"activity-initial"}};
+const activityFeed=createLiveHistory({read:()=>({...activityState}),api:savedApi,
+  apply:(events,next)=>{activityState.events=events;activityState.next=next;},refreshInteractions:async()=>{}});
+activityState.loading=true;
+const callsDuringLoad=burstCalls.length;
+await activityFeed.refresh();
+assert.equal(burstCalls.length,callsDuringLoad,"A background refresh waits for the active history load instead of replacing it with a partial snapshot");
+activityState.loading=false;
+await activityFeed.refresh();
+assert.equal(activityState.events.length,27,"Live grouped initialization also completes all saved pages");
+assert.equal(activityState.next,null);
+savedPages["0"]={events:[{...event(40),received_at:"2026-11-06T10:00:00Z"},...newest],next:"older"};
+activityState.status={...activityState.status,timeline_revision:"activity-new"};
+burstCalls.length=0;
+await activityFeed.refresh();
+assert.equal(burstCalls.length,1,"Once complete, live updates stop at overlap without rereading all history");
+assert.equal(activityState.events.length,28);
+await assert.rejects(async()=>{for await(const page of historyPages(async()=>({events:[],next:"0"}),groupedState)) {}},/did not advance/);
+
+const realNow=Date.now;
+let now=Date.parse("2026-11-06T10:00:00Z");
+Date.now=()=>now;
+try {
+  const recent={...event(60),received_at:"2026-11-05T10:01:00Z"};
+  const older={...follows,received_at:"2026-11-03T10:00:00Z"};
+  let ranged={...groupedState,generation:1,events:[],next:null};
+  const rangeRequests=[];
+  const rangeFeed=createLiveHistory({read:()=>({...ranged}),
+    api:async path=>{rangeRequests.push(path);return {events:[recent,older],next:null};},
+    apply:(events,next)=>{ranged.events=events;ranged.next=next;},refreshInteractions:async()=>{}});
+  await rangeFeed.refresh();
+  assert.equal(ranged.events.length,2);
+  ranged.groupRange="24h";
+  await rangeFeed.refresh();
+  assert.deepEqual(ranged.events.map(row=>row.event_id),["60"],"Narrowing a range removes older saved records");
+  now+=2*60000;
+  await rangeFeed.refresh();
+  assert.equal(ranged.events.length,0,"A rolling range expires old activity even without a new event revision");
+  ranged.groupRange="all";
+  await rangeFeed.refresh();
+  assert.equal(ranged.events.length,2,"Returning to All saved restores records outside the former range");
+  assert.ok(rangeRequests.every(path=>new URL(path,"http://local").searchParams.get("local_only")==="true"));
+} finally {
+  Date.now=realNow;
+}

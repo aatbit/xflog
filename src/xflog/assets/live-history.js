@@ -1,7 +1,40 @@
+import { compareEvents } from "./format.js";
+
+export function groupSince(state, now = Date.now()) {
+  if (!state.lens || state.lens === "none" || !state.groupRange || state.groupRange === "all") return "";
+  const [, amount, unit] = /^(24h|7d|30d|90d)$/.test(state.groupRange)
+    ? state.groupRange.match(/^(\d+)(h|d)$/) : [];
+  return amount ? new Date(Math.floor(now / 60000) * 60000 - Number(amount) * (unit === "h" ? 3600000 : 86400000)).toISOString() : "";
+}
+
 export function historyPath(state, before = "0") {
-  return `/api/${state.demo ? "demo" : "timeline"}?${new URLSearchParams({
+  const params = new URLSearchParams({
     kind: state.filter, subject: state.subject, before: String(before || "0"),
-  })}`;
+  });
+  if (state.lens && state.lens !== "none") {
+    params.set("local_only", "true");
+    params.set("limit", "50");
+    if (state.since) params.set("since", state.since);
+  }
+  return `/api/${state.demo ? "demo" : "timeline"}?${params}`;
+}
+
+export function mergeHistory(events) {
+  const unique = new Map();
+  for (const event of events)
+    if (!unique.has(event.event_id)) unique.set(event.event_id, event);
+  return [...unique.values()].sort(compareEvents);
+}
+
+export async function* historyPages(api, state, before = "0") {
+  const seen = new Set([String(before)]);
+  while (before) {
+    const page = await api(historyPath(state, before));
+    yield page;
+    before = page.next;
+    if (before && seen.has(String(before))) throw new Error("Saved history pagination did not advance.");
+    seen.add(String(before));
+  }
 }
 
 export function updatedSelection(previous, selected, events) {
@@ -12,7 +45,7 @@ export function updatedSelection(previous, selected, events) {
 }
 
 const historyScope = state => JSON.stringify([state.status?.account?.id,
-  state.status?.selection.interactions, state.status?.selection.profile_names, state.subject, state.filter]);
+  state.status?.selection.interactions, state.status?.selection.profile_names, state.subject, state.filter, state.lens, state.groupRange]);
 
 export function createLiveHistory({ api, read, apply, refreshInteractions }) {
   let busy = false;
@@ -21,34 +54,30 @@ export function createLiveHistory({ api, read, apply, refreshInteractions }) {
   return {
     async refresh() {
       const state = read();
-      if (busy || state.demo || !state.status) return;
+      state.since = groupSince(state);
+      if (busy || state.loading || state.demo || !state.status) return;
       const scope = historyScope(state);
-      const version = `${scope}/${state.status.timeline_revision}`;
+      const version = `${scope}/${state.status.timeline_revision}/${state.since}`;
       if (version === applied) return;
       const generation = state.generation;
       const existing = appliedScope && appliedScope !== scope ? [] : state.events;
       const known = new Set(existing.map(event => event.event_id));
       const incoming = [];
-      let before = "0";
       busy = true;
       try {
         let page;
-        do {
-          page = await api(historyPath(state, before));
+        for await (page of historyPages(api, state)) {
           const current = read();
           if (current.generation !== generation || current.demo !== state.demo ||
               historyScope(current) !== scope) return;
           incoming.push(...page.events);
-          if (!known.size || page.events.some(event => known.has(event.event_id))) break;
-          before = page.next;
-        } while (before);
-        const unique = new Map();
-        for (const event of [...incoming, ...existing])
-          if (!unique.has(event.event_id)) unique.set(event.event_id, event);
+          if ((!known.size && (!state.lens || state.lens === "none")) || page.events.some(event => known.has(event.event_id))) break;
+        }
         const profiles = new Map(incoming.filter(event => event.name && event.handle)
           .map(event => [event.actor_id, {name:event.name,handle:event.handle,profile_url:event.profile_url}]));
-        const events = [...unique.values()].map(event => profiles.has(event.actor_id)
-          ? {...event,...profiles.get(event.actor_id)} : event);
+        const events = mergeHistory([...incoming, ...existing])
+          .filter(event => !state.since || Date.parse(event.received_at) >= Date.parse(state.since))
+          .map(event => profiles.has(event.actor_id) ? {...event,...profiles.get(event.actor_id)} : event);
         apply(events, existing.length ? state.next : page.next);
         await refreshInteractions();
         applied = version;

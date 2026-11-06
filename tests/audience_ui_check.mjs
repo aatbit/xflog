@@ -64,6 +64,10 @@ const elements = new Map(
     "lens-control",
     "scene-lens-label",
     "audience-group-options",
+    "group-range-control",
+    "group-range-trigger",
+    "group-range-value",
+    "group-ranges",
   ].map((id) => [`#${id}`, new Element()]),
 );
 globalThis.document = {
@@ -75,6 +79,7 @@ globalThis.innerWidth = 390;
 globalThis.innerHeight = 844;
 globalThis.getComputedStyle = () => ({ width: "280px" });
 const changes = [];
+const ranges = [];
 let moveFocusDuringSave = false;
 const controls = createAudienceControls({
   root: {
@@ -93,6 +98,7 @@ const controls = createAudienceControls({
     controls.render(groups, "activity");
   },
   onLens: () => {},
+  onRange: range => ranges.push(range),
 });
 const groups = [
   {
@@ -109,6 +115,13 @@ const groups = [
   },
 ];
 controls.render(groups, "none");
+assert.equal(elements.get("#group-range-control").hidden, true);
+controls.render(groups, "activity");
+assert.equal(elements.get("#group-range-value").textContent, "All saved");
+await elements.get("#group-ranges").children[2].fire("click");
+assert.deepEqual(ranges,["7d"]);
+controls.render(groups, "activity", "7d");
+assert.equal(elements.get("#group-range-value").textContent, "7d");
 const settings = elements.get("#audience-group-options");
 assert.equal(settings.children.length, 2);
 for (const [index, row] of settings.children.entries()) {

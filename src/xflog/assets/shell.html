@@ -59,6 +59,17 @@
             ><span id="scene-people-count"></span
             ><span id="constellation-key" class="constellation-key" role="list" aria-label="Constellation groups" hidden></span
           ></span>
+          <div class="scene-tools">
+          <div id="group-range-control" hidden>
+            <button type="button" id="group-range-trigger" popovertarget="group-ranges"
+              aria-label="Saved history range" aria-haspopup="menu" aria-expanded="false"
+              aria-controls="group-ranges" title="Saved history range">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+              <span id="group-range-value">All saved</span>
+              <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 4 3 3 3-3"/></svg>
+            </button>
+            <div id="group-ranges" class="choice-popover" popover="auto" role="menu" aria-label="Saved history range"></div>
+          </div>
           <div id="lens-control" hidden>
             <button
               type="button"
@@ -86,6 +97,7 @@
               role="menu"
               aria-label="Audience lens"
             ></div>
+          </div>
           </div>
         </div>
         <div

@@ -84,6 +84,9 @@ class Timeline:
         if before:
             sql += " WHERE (received_at,source,position)<(?,?,?)"
             params += before
+        if since := query.get("since"):
+            sql += (" AND" if before else " WHERE") + " received_at>=?"
+            params += (since,)
         limit = min(50, max(1, int(query.get("limit", 25))))
         sql += " ORDER BY received_at DESC,source DESC,position DESC LIMIT ?"
         async with self.store.db.execute(sql, (*params, limit + 1)) as cursor:
