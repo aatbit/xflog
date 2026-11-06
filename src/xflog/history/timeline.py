@@ -44,8 +44,9 @@ class Timeline:
         async with self.store.db.execute(
             """SELECT (SELECT COALESCE(MAX(sequence),0) FROM events WHERE account_id=?),
             (SELECT COALESCE(MAX(sequence),0) FROM interactions WHERE account_id=?),
-            (SELECT COALESCE(MAX(observed_at),'') FROM known_profiles WHERE account_id=?)""",
-            (account, account, account),
+            (SELECT COALESCE(MAX(observed_at),'') FROM known_profiles WHERE account_id=?),
+            (SELECT COALESCE(MAX(checked_at),'') FROM thread_snapshots WHERE account_id=?)""",
+            (account, account, account, account),
         ) as cursor:
             return ":".join(map(str, await cursor.fetchone()))
 
@@ -65,7 +66,7 @@ class Timeline:
         interaction_slots = ",".join("?" for _ in interactions) or "NULL"
         sql = f"""WITH activity AS (
           SELECT sequence AS position, 1 AS source, event_id, kind, account_id, actor_id,
-          handle,name,provider_at,received_at,group_data FROM events
+          handle,name,provider_at,received_at,group_data,NULL AS post_id,NULL AS post_text FROM events
           WHERE account_id=? AND kind IN ({event_slots})
           UNION ALL
           SELECT i.sequence, 0, 'interaction:'||i.sequence, 'interaction.'||i.kind,
@@ -76,8 +77,11 @@ class Timeline:
           COALESCE(json_extract(i.profile_data,'$.name'),
             (SELECT e.name FROM events e WHERE e.account_id=i.account_id AND e.actor_id=i.person_id
              AND e.name IS NOT NULL ORDER BY e.sequence DESC LIMIT 1)),
-          i.provider_at,i.received_at,COALESCE(json_extract(i.profile_data,'$.group_data'),'{{}}')
-          FROM interactions i WHERE i.account_id=? AND i.kind IN ({interaction_slots})
+          i.provider_at,i.received_at,COALESCE(json_extract(i.profile_data,'$.group_data'),'{{}}'),
+          i.post_id,substr(post.text,1,281)
+          FROM interactions i LEFT JOIN interaction_posts post
+            ON post.account_id=i.account_id AND post.id=i.post_id
+          WHERE i.account_id=? AND i.kind IN ({interaction_slots})
         ) SELECT activity.*,p.name AS cached_name,p.handle AS cached_handle FROM activity
           LEFT JOIN known_profiles p ON p.account_id=activity.account_id AND p.actor_id=activity.actor_id"""
         params = (account, *types, account, *interactions)
@@ -95,6 +99,7 @@ class Timeline:
         for row in rows[:limit]:
             values = dict(row)
             source, position = values.pop("source"), values.pop("position")
+            post_id, post_text = values.pop("post_id"), values.pop("post_text")
             values["name"] = values.pop("cached_name") or values["name"]
             values["handle"] = values.pop("cached_handle") or values["handle"]
             values["event_id"] = f"timeline:{'event' if source else 'interaction'}:{position}"
@@ -102,7 +107,11 @@ class Timeline:
             if not values["name"] and not values["handle"]:
                 values["name"] = f"Account {values['actor_id']}"
             events.append(
-                {**Event(**values).public(), "sequence": position if source else -position}
+                {
+                    **Event(**values).public(),
+                    "sequence": position if source else -position,
+                    **({"post_id": post_id, "post_text": post_text} if not source else {}),
+                }
             )
         return {
             "events": events,
