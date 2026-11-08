@@ -3,6 +3,13 @@
 Each tagged release has an automatically generated list of merged pull requests
 and contributors on the [GitHub releases page](https://github.com/aatbit/xflog/releases).
 
+## 1.0.10 — 2026-11-08
+
+### Fixed
+
+- Center the selected star’s activity icon beneath the account handle in the
+  constellation timeline.
+
 ## 1.0.9 — 2026-11-07
 
 ### Added
