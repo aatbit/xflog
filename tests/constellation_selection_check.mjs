@@ -410,36 +410,38 @@ for (const type of ["mousedown", "auxclick"]) {
   handlers[type]({ button: 1, target: { closest: () => ({}) }, preventDefault() { cancelled = true; } });
   assert.equal(cancelled, false, "Middle-clicking links retains normal browser behavior");
 }
-// Count only Set allocations made directly by the renderer's actor-count scan.
+// The fixture prefix identifies actor-count inputs without relying on stack frames.
 const NativeSet = globalThis.Set;
 let actorScans = 0;
 globalThis.Set = class extends NativeSet {
   constructor(values) {
     super(values);
-    if (Array.isArray(values) && /at (?:navigator|render) \(/.test(new Error().stack.split("\n")[2]))
-      actorScans++;
+    if (Array.isArray(values) && values.length && values.every(value =>
+      typeof value === "string" && value.startsWith("count-actor-"))) actorScans++;
   }
 };
+const record = (id, actor, sequence, kind) => event(id, `count-actor-${actor}`, sequence, kind);
 const expectCount = (text) => assert.equal(controls.get("#scene-people-count").textContent, text);
 try {
   root.dataset.motion = "on";
   scene.configure([], "none");
-  assert.ok(actorScans > 0, "The scan spy detects a real count calculation");
-  const records = [event("a1", "A", 4, "follow.follow"), event("a2", "A", 3, "follow.unfollow"), event("b1", "B", 2, "follow.follow")];
+  const records = [record("a1", "A", 4, "follow.follow"), record("a2", "A", 3, "follow.unfollow"), record("b1", "B", 2, "follow.follow")];
   const beforeRender = actorScans;
   scene.render(records, "a1");
   assert.equal(actorScans, beforeRender + 1, "New history recalculates the actor count once");
   expectCount("2 people in loaded history");
-  records.push(event("a3", "A", 1, "follow.follow"));
+  records.push(record("a3", "A", 1, "follow.follow"));
+  const beforeUpdate = actorScans;
   scene.update(records, "a1");
+  assert.equal(actorScans, beforeUpdate + 1, "Data updates recalculate even for an existing actor");
   expectCount("2 people in loaded history");
-  records.push(event("c1", "C", 0, "follow.follow"));
+  records.push(record("c1", "C", 0, "follow.follow"));
   scene.update(records, "a1");
   expectCount("3 people in loaded history");
-  records[0].actor_id = "D";
+  records[0].actor_id = "count-actor-D";
   scene.render(records, "a1");
   expectCount("4 people in loaded history");
-  records[0].actor_id = "B";
+  records[0].actor_id = "count-actor-B";
   scene.update(records, "a1");
   expectCount("3 people in loaded history");
   const beforeLayout = actorScans;
@@ -452,38 +454,49 @@ try {
   resizeScene();
   assert.equal(actorScans, beforeLayout, "Frames, selection, scrubbing, zoom and resize reuse the actor count");
 
-  const groupModules = [{key:"activity",enabled:true,label:"Activity",buckets:[
-    {key:"follow.follow",label:"Followed you",tone:"positive"},
-    {key:"follow.unfollow",label:"Unfollowed",tone:"negative"},
-    {key:"unknown",label:"Unknown",tone:"neutral"},
-  ]}];
-  const duplicates = [
-    {...event("duplicate", "A", 3, "follow.follow"), audience_groups:{activity:"follow.follow"}},
-    {...event("duplicate", "B", 2, "follow.unfollow"), audience_groups:{activity:"follow.unfollow"}},
+  const groupModules = [
+    {key:"activity",enabled:true,label:"Activity",buckets:[
+      {key:"follow.follow",label:"Followed you",tone:"positive"},
+      {key:"follow.unfollow",label:"Unfollowed",tone:"negative"},
+      {key:"unknown",label:"Unknown",tone:"neutral"},
+    ]},
+    {key:"region",enabled:true,label:"Region",buckets:[
+      {key:"known",label:"Known",tone:"neutral"},
+      {key:"unknown",label:"Unknown",tone:"neutral"},
+    ]},
   ];
-  scene.render(duplicates, "duplicate");
-  expectCount("1 person in loaded history");
+  const groupedRecords = [
+    {...record("follow-A", "A", 3, "follow.follow"), audience_groups:{activity:"follow.follow",region:"known"}},
+    {...record("unfollow-A", "A", 2, "follow.unfollow"), audience_groups:{activity:"follow.unfollow"}},
+    {...record("follow-B", "B", 1, "follow.follow"), audience_groups:{activity:"follow.follow",region:"unknown"}},
+  ];
+  scene.render(groupedRecords, "follow-A");
+  expectCount("2 people in loaded history");
   const beforeConfigure = actorScans;
   scene.configure(groupModules, "activity");
-  assert.equal(actorScans, beforeConfigure + 1, "Changing groups recalculates the actor count once");
   expectCount("2 people in saved history");
+  scene.configure(groupModules, "region");
+  expectCount("2 people in saved history");
+  scene.configure(groupModules, "none");
+  expectCount("2 people in loaded history");
+  assert.equal(actorScans, beforeConfigure, "Changing grouping lenses reuses the actor count");
+  scene.configure(groupModules, "activity");
   scene.setZoom(0);
   const beforeSeek = actorScans;
   scene.seek(0, "instant");
   assert.equal(actorScans, beforeSeek, "Leaving the grouped overview reuses the actor count");
   expectCount("2 people in saved history");
   scene.configure(groupModules, "none");
-  expectCount("1 person in loaded history");
   scene.clear();
-  scene.render([event("solo", "Z", 0, "follow.follow")], "solo");
+  scene.render([record("solo", "Z", 0, "follow.follow")], "solo");
   expectCount("1 person in loaded history");
-  scene.update([event("z1", "Z", 1, "follow.follow"), event("z2", "Z", 0, "follow.follow")], "z1");
+  scene.update([record("z1", "Z", 1, "follow.follow"), record("z2", "Z", 0, "follow.follow")], "z1");
   expectCount("1 person in loaded history");
   const otherScene = createConstellation({
     element, root, escape: String, label: (e) => e.kind, initials: (e) => e.actor_id,
     onSelect() {}, onOpen() {},
   });
-  otherScene.render([event("x", "X", 1, "follow.follow"), event("y", "Y", 0, "follow.follow")], "x");
+  otherScene.render([record("x", "X", 1, "follow.follow"), record("y", "Y", 0, "follow.follow")], "x");
   expectCount("2 people in loaded history");
   scene.setZoom(0.8);
   expectCount("1 person in loaded history");

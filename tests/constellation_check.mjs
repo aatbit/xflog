@@ -84,6 +84,17 @@ const events = Array.from({ length: 50 }, (_, index) => ({
   ),
 })).reverse();
 const activity = modules.find(module=>module.key==="activity");
+for (const fixture of [events, cityEvents]) {
+  const expectedEvents = new Set(fixture.map(event => event.event_id));
+  const expectedActors = new Set(fixture.map(event => event.actor_id));
+  for (const module of modules) {
+    const layout = constellationLayout({events:fixture,width:798,height:772,zoom:0.8,modules,lens:module.key});
+    assert.deepEqual(new Set(layout.people.map(person => person.event.event_id)), expectedEvents,
+      `${module.key} preserves all event identities`);
+    assert.deepEqual(new Set(layout.people.map(person => person.event.actor_id)), expectedActors,
+      `${module.key} preserves all actors`);
+  }
+}
 const mixed = [
   ["like-new", "A", "interaction.likes_received"],
   ["reply", "A", "interaction.replies"],

@@ -32,7 +32,7 @@ export function createConstellation({
     modules = [],
     lens = "none",
     geometry = null;
-  // Layout-only redraws preserve membership; data and grouping changes invalidate the count.
+  // History is deduplicated by event ID before grouping, so only data changes alter membership.
   let personCount = 0, countDirty = true;
   let zoom = 0.8,
     wheelZoom = null,
@@ -630,7 +630,6 @@ export function createConstellation({
     configure: (nextModules, nextLens) => {
       modules = nextModules;
       lens = nextLens;
-      countDirty = true;
       if (geometry) render(events, selected);
     },
     clear: () => {
