@@ -863,6 +863,13 @@ try {
   assert.equal(lookupOpened.length, opensBeforeDuplicateClick + 1,
     "Either duplicate button acts on the first matching geometry person");
   assert.equal(lookupOpened.at(-1), "duplicate");
+  const duplicateLabels = labels.filter(node => node.dataset.label === "duplicate");
+  lookupScene.setZoom(1.5);
+  assert.notEqual(duplicates[0].style.left, duplicates[1].style.left, "Duplicate entries keep separate coordinates");
+  const opensBeforeLabels = lookupOpened.length;
+  duplicateLabels.forEach(node => node.handlers.click());
+  assert.deepEqual(lookupOpened.slice(opensBeforeLabels), ["duplicate", "duplicate"],
+    "Either retained label opens the selected duplicate event using first-match identity");
   const destroyedParent = duplicates[0].parent, destroyedWrites = destroyedParent.writes;
   lookupScene.destroy();
   assert.doesNotThrow(() => duplicates[0].handlers.click(), "A destroyed scene rejects old clicks");

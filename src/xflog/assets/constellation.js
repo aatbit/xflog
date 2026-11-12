@@ -380,12 +380,13 @@ export function createConstellation({
         clickPerson(person);
       }),
     );
-    labels.forEach(({person, label: button}) =>
+    labels.forEach(({person, label: button}) => {
+      const first = peopleByEvent.get(person.event.event_id);
       button.addEventListener("click", event => {
         if (ownsScene(renderedVersion, button) && !geometry.overview &&
-            !event?.target?.closest?.("a")) clickPerson(person);
-      }),
-    );
+            !event?.target?.closest?.("a")) clickPerson(first);
+      });
+    });
     updateMode();
     anchor();
     select(identity);
