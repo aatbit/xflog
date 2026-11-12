@@ -72,6 +72,7 @@ function button(dataset) {
     },
     classList: { toggle() {} },
     setAttribute(k, v) {
+      this.attributeWrites = (this.attributeWrites || 0) + 1;
       this.attributes[k] = v;
     },
     addEventListener(k, v) {
@@ -113,6 +114,7 @@ let nodes = [],
   labels = [],
   paths = [];
 let captureLinks = false, renderedLinks = [], renderedTrails = [], renderedSparks = [];
+let capturePreparation = false;
 let sceneParts = {};
 const handlers = {};
 let scrollLeft = 0, roundScroll = false, capturedPointers = 0, releasedPointers = 0;
@@ -155,6 +157,7 @@ const element = {
   },
   contains(node) { return nodes.includes(node); },
   set innerHTML(value) {
+    capturePreparation = false;
     sceneParts = Object.fromEntries([".constellation-sky", ".shooting-star", ".shooting-tail"].map(key => [key, { style: {}, dataset: {}, attributes: {}, setAttribute(k, v) { this.attributes[k] = v; } }]));
     paths = [...value.matchAll(/<path d="M([\d.]+),[\d.]+L([\d.]+),[\d.]+"/g)];
     renderedLinks = captureLinks ? [...value.matchAll(/<g data-link-group="([^"]*)" style="([^"]*)"><path d="([^"]*)" stroke-dasharray="([^"]*)"\/>/g)]
@@ -874,6 +877,11 @@ const crossGroupDuplicate = {...connectionEvents[0],
 const skewedConnections = connectionEvents.map((item, index) => ({...item,
   audience_groups:{...item.audience_groups, activity:index < 15 ? "follow.follow" :
     ["follow.unfollow", "interaction.replies", "missing"][index - 15]}}));
+const oneGroup = connectionEvents.map(item => ({...item,
+  audience_groups:{...item.audience_groups, activity:"follow.follow"}}));
+const largeGroup = Array.from({length: 1000}, (_, index) => ({
+  ...oneGroup[index % oneGroup.length], event_id:`large-${index}`,
+}));
 function expectedConnections(records, modules, lens, zoom) {
   const layout = constellationLayout({events:records,width:element.clientWidth,height:element.clientHeight,zoom,modules,lens});
   const links = layout.groups.flatMap(group => {
@@ -901,6 +909,7 @@ try {
   for (const [records, modules, lens] of [
     [[], [], "none"], [[connectionEvents[0]], [], "none"],
     [connectionEvents, [], "none"], [connectionEvents.slice(0, 1), [activity], "activity"],
+    [oneGroup, [activity], "activity"], [largeGroup, [activity], "activity"],
     [connectionEvents, [activity], "activity"],
     [skewedConnections, [activity], "activity"],
     [[...connectionEvents, crossGroupDuplicate], [activity], "activity"],
@@ -909,6 +918,11 @@ try {
   const invalidRecords = connectionEvents.slice(0, 2).map(item => ({...item, audience_groups:{invalid:NaN}}));
   verifyConnections(invalidRecords, [invalid], "invalid", 0.8);
   assert.equal(renderedLinks.length, 0, "NaN group keys do not match under the old strict comparison");
+  const mixedInvalid = [...invalidRecords, ...connectionEvents.slice(2, 4).map(item => ({
+    ...item, audience_groups:{invalid:"unknown"},
+  }))];
+  verifyConnections(mixedInvalid, [invalid], "invalid", 0.8);
+  assert.equal(renderedLinks.length, 1, "The indexed path excludes NaN while connecting valid groups");
 
   const {links: animatedLinks} = verifyConnections(connectionEvents, [activity], "activity", 1);
   assert.ok(animatedLinks.length > 2, "The animation fixture has multiple indexed links");
@@ -923,16 +937,30 @@ try {
     assert.equal(renderedTrails[index].attributes.y2, (a.y + (b.y - a.y) * part).toFixed(2));
   });
   const oldTrails = renderedTrails, oldTrailAttributes = oldTrails.map(trail => ({...trail.attributes}));
+  const oldSparks = renderedSparks, oldSparkAttributes = oldSparks.map(spark => ({...spark.attributes}));
+  const oldTrailWrites = oldTrails.map(trail => trail.attributeWrites);
+  const oldSparkWrites = oldSparks.map(spark => spark.attributeWrites);
   connectionScene.setZoom(0);
   assert.equal(renderedLinks.length, 0, "Overview renders no links, trails or sparks");
   assert.equal(renderedSparks.length, 0);
+  assert.equal(renderedTrails.length, 0);
   frame(30016);
   assert.deepEqual(oldTrails.map(trail => trail.attributes), oldTrailAttributes, "Overview cannot update old trails");
+  assert.deepEqual(oldSparks.map(spark => spark.attributes), oldSparkAttributes, "Overview cannot update old sparks");
+  assert.deepEqual(oldTrails.map(trail => trail.attributeWrites), oldTrailWrites, "Overview never writes to old trails");
+  assert.deepEqual(oldSparks.map(spark => spark.attributeWrites), oldSparkWrites, "Overview never writes to old sparks");
   connectionScene.setZoom(1);
   const expanded = expectedConnections(connectionEvents, [activity], "activity", 1);
-  assert.equal(renderedLinks.length, expanded.links.length, "Leaving overview restores all connections");
+  assert.deepEqual(renderedLinks, expanded.links.map(({a,b,color,dash}) => ({
+    group:a.group, style:color ? `color:${color}` : "", d:`M${a.x},${a.y}L${b.x},${b.y}`, dash:dash || "",
+  })), "Leaving overview restores the exact ordered connections and styles");
   frame(30032);
   assert.ok(renderedTrails.every(trail => trail.attributes.x1 !== undefined), "Recreated trails animate");
+  expanded.links.forEach(({a,b}, index) => {
+    const part = seed(index) % 1;
+    assert.equal(renderedSparks[index].attributes.cx, (a.x + (b.x - a.x) * part).toFixed(2));
+    assert.equal(renderedSparks[index].attributes.cy, (a.y + (b.y - a.y) * part).toFixed(2));
+  });
   const priorTrails = renderedTrails, priorAttributes = priorTrails.map(trail => ({...trail.attributes}));
   connectionScene.update(connectionEvents.slice(0, 9), connectionEvents[0].event_id);
   frame(30048);
@@ -946,6 +974,73 @@ try {
 } finally {
   connectionScene.destroy();
   captureLinks = false;
+}
+
+// Observe actual renders before the DOM replacement, without production hooks.
+function measurePreparation(action) {
+  const NativeMap = globalThis.Map, nativePush = Array.prototype.push;
+  const nativeIterator = Array.prototype[Symbol.iterator];
+  const counts = {indexes:0, traversals:0, links:0};
+  globalThis.Map = class extends NativeMap {
+    constructor(entries) {
+      super(entries);
+      if (capturePreparation && Array.isArray(entries) && entries.length &&
+          entries.every(entry => Array.isArray(entry) && Array.isArray(entry[1]) && !entry[1].length))
+        counts.indexes++;
+    }
+  };
+  Array.prototype[Symbol.iterator] = function() {
+    if (capturePreparation && this.length && this[0]?.event && Array.isArray(this[0]?.events) &&
+        "group" in this[0] && "x" in this[0]) counts.traversals++;
+    return nativeIterator.call(this);
+  };
+  Array.prototype.push = function(...items) {
+    if (capturePreparation)
+      counts.links += items.filter(item => item && typeof item === "object" &&
+        "a" in item && "b" in item && "color" in item && "dash" in item).length;
+    return nativePush.apply(this, items);
+  };
+  try {
+    capturePreparation = true;
+    action();
+    return counts;
+  } finally {
+    capturePreparation = false;
+    globalThis.Map = NativeMap;
+    Array.prototype.push = nativePush;
+    Array.prototype[Symbol.iterator] = nativeIterator;
+  }
+}
+const point = {event:{},events:[],group:"all",x:0};
+assert.deepEqual(measurePreparation(() => {
+  new Map([["all", []]]);
+  for (const person of [point]) { void person; }
+  [].push({a:point,b:point,color:"red",dash:""});
+}), {indexes:1,traversals:1,links:1}, "Structural counters have positive controls");
+const preparationScene = createConstellation({
+  element, root, escape:String, label:item => item.kind, initials:item => item.actor_id,
+  onSelect() {}, onOpen() {},
+});
+try {
+  preparationScene.configure([activity], "activity");
+  preparationScene.render(connectionEvents, connectionEvents[0].event_id);
+  assert.deepEqual(measurePreparation(() => preparationScene.setZoom(0)),
+    {indexes:0,traversals:0,links:0}, "Overview skips indexing, traversal and link allocation");
+  assert.deepEqual(measurePreparation(() => preparationScene.setZoom(1)),
+    {indexes:1,traversals:1,links:14}, "Multiple groups rebuild their indexed links");
+  preparationScene.update(oneGroup, oneGroup[0].event_id);
+  assert.deepEqual(measurePreparation(() => preparationScene.setZoom(0.8)),
+    {indexes:0,traversals:1,links:17}, "One group streams connections without an index");
+  preparationScene.configure([], "none");
+  assert.deepEqual(measurePreparation(() => preparationScene.setZoom(0.8)),
+    {indexes:0,traversals:1,links:17}, "Ungrouped connections also stream without an index");
+  preparationScene.update([oneGroup[0]], oneGroup[0].event_id);
+  assert.deepEqual(measurePreparation(() => preparationScene.setZoom(0.8)),
+    {indexes:0,traversals:1,links:0}, "A singleton produces no link or index");
+  assert.deepEqual(measurePreparation(() => preparationScene.render([], null)),
+    {indexes:0,traversals:0,links:0}, "Empty history produces no connection work");
+} finally {
+  preparationScene.destroy();
 }
 
 // Count only full-array scans of positioned points, with a positive control.
