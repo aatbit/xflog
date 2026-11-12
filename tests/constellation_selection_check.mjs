@@ -48,11 +48,14 @@ const controls = new Map(),
   opened = [];
 let olderLoads = 0;
 let shellQueries = 0, sceneQueries = 0, actorQueries = 0, descendantQueries = 0;
+let parentQueries = 0;
 const selectedSteps = [];
 const previewSteps = [];
 function button(dataset) {
+  const parent = { writes: 0, classList: { toggle() { parent.writes++; } } };
   return {
     dataset,
+    parent,
     style: {},
     attributes: {},
     handlers: {},
@@ -72,8 +75,9 @@ function button(dataset) {
       this.handlers[k] = v;
     },
     removeEventListener() {},
-    closest() {
-      return { classList: { toggle() {} } };
+    closest(selector) {
+      if (selector === ".constellation-person") parentQueries++;
+      return parent;
     },
     getBoundingClientRect() {
       return { width: 190, height: 140 };
@@ -83,6 +87,7 @@ function button(dataset) {
   };
 }
 const root = {
+  isConnected: true,
   dataset: { route: "timeline", motion: "on" },
   querySelector(key) {
     shellQueries++;
@@ -106,8 +111,9 @@ let nodes = [],
   paths = [];
 let sceneParts = {};
 const handlers = {};
-let scrollLeft = 0, roundScroll = false;
+let scrollLeft = 0, roundScroll = false, capturedPointers = 0, releasedPointers = 0;
 const element = {
+  isConnected: true,
   dataset: {},
   clientWidth: 800,
   clientHeight: 700,
@@ -124,11 +130,11 @@ const element = {
     handlers[type] = handler;
   },
   removeEventListener() {},
-  setPointerCapture() {},
+  setPointerCapture() { capturedPointers++; },
   hasPointerCapture() {
     return true;
   },
-  releasePointerCapture() {},
+  releasePointerCapture() { releasedPointers++; },
   querySelector(key) {
     sceneQueries++;
     return sceneParts[key];
@@ -189,6 +195,7 @@ const scene = createConstellation({
   onOlder: () => olderLoads++,
 });
 const resizeFirstScene = resizeScene;
+const firstSceneHandlers = {...handlers};
 scene.render(events, "old-A");
 assert.equal(
   Number(controls.get("#scene-zoom").value),
@@ -375,7 +382,7 @@ assert.equal(opened.at(-1), "new-A", "Details use the selected group record, not
 root.dataset.motion = "off";
 scene.update(activityEvents, "new-A");
 nodes.find(node=>node.dataset.event === "old-A").handlers.click();
-handlers.scroll();
+firstSceneHandlers.scroll();
 frame(5120);
 assert.deepEqual(nodes.filter(node=>node.attributes["aria-pressed"] === "true").map(node=>node.dataset.event), ["old-A"],
   "Manual grouped selection also survives refresh with ambient motion disabled");
@@ -520,7 +527,19 @@ try {
 } finally {
   globalThis.Set = NativeSet;
 }
+const beforeParentRender = parentQueries;
 scene.render(events, "old-A");
+const initialParents = parentQueries;
+assert.equal(initialParents - beforeParentRender, events.length, "Each actor resolves its parent once on render");
+const previousParent = nodes[0].parent;
+scene.select("other-B");
+assert.equal(parentQueries, initialParents, "Selection reuses actor parent references");
+const beforePreview = previewSteps.length;
+element.scrollLeft = 1;
+firstSceneHandlers.scroll();
+frame(6992);
+assert.ok(previewSteps.length > beforePreview, "Scrolling actually changes selection during paint");
+assert.equal(parentQueries, initialParents, "Animation-driven selection reuses actor parents");
 const previousSky = sceneParts[".constellation-sky"];
 const beforeQueries = {shellQueries, sceneQueries, actorQueries, descendantQueries};
 scene.select("other-B");
@@ -530,10 +549,15 @@ assert.equal(shellQueries, beforeQueries.shellQueries, "Shell controls are reuse
 assert.equal(sceneQueries, beforeQueries.sceneQueries, "Frames reuse scene-specific elements");
 assert.equal(actorQueries, beforeQueries.actorQueries, "Selection reuses the current actor buttons");
 assert.equal(descendantQueries, beforeQueries.descendantQueries, "Unchanged label markup reuses its descendants");
+const beforeRedrawParents = parentQueries;
 scene.setZoom(1);
+assert.equal(parentQueries - beforeRedrawParents, events.length, "Redraw resolves one fresh parent per actor");
+const oldParentWrites = previousParent.writes;
+assert.notEqual(nodes[0].parent, previousParent, "A redraw creates fresh actor parents");
 assert.notEqual(sceneParts[".constellation-sky"], previousSky, "A redraw creates new sky nodes");
 previousSky.style.transform = "old scene";
 frame(7032);
+assert.equal(previousParent.writes, oldParentWrites, "Detached actor parents are not updated");
 assert.equal(previousSky.style.transform, "old scene", "Frames never update the detached sky after redraw");
 assert.notEqual(sceneParts[".constellation-sky"].style.transform, undefined, "Frames update the new sky");
 const beforeResizeSky = sceneParts[".constellation-sky"];
@@ -543,10 +567,38 @@ frame(7040);
 assert.equal(beforeResizeSky.style.transform, "detached after resize", "Resize never paints the previous sky");
 assert.notEqual(sceneParts[".constellation-sky"].style.transform, undefined, "Resize uses the new sky");
 scene.clear();
+scene.clear();
 assert.equal(pending.size, 0, "Clear cancels the active frame");
 scene.render(events, "new-A");
 frame(7048);
 assert.notEqual(sceneParts[".constellation-sky"].style.transform, undefined, "A new scene works after clear");
+firstSceneHandlers.pointerdown({pointerType:"mouse",button:0,pointerId:88,clientX:300,target:{closest:()=>null}});
+assert.equal(element.dataset.panning, "true", "A real drag starts before clearing");
+const beforeClearRelease = releasedPointers;
+scene.clear();
+assert.equal(releasedPointers, beforeClearRelease + 1, "Clear releases the pointer capture");
+assert.equal(element.dataset.panning, undefined, "Clear releases drag state");
+scene.render(events, "new-A");
+const afterRecreate = element.scrollLeft;
+firstSceneHandlers.pointermove({pointerId:88,clientX:0});
+frame(7056);
+assert.equal(element.scrollLeft, afterRecreate, "A drag from the cleared scene cannot move its replacement");
+const detachedSky = sceneParts[".constellation-sky"];
+detachedSky.style.transform = "unmounted";
+const detachedParent = nodes[0].parent;
+const detachedWrites = detachedParent.writes;
+root.isConnected = false;
+scene.select("other-B");
+frame(7060);
+assert.equal(detachedSky.style.transform, "unmounted", "Unmounted scene is not repainted");
+assert.equal(detachedParent.writes, detachedWrites, "Unmounted scene is not selected");
+assert.equal(pending.size, 0, "Unmounted scene does not queue another frame");
+root.isConnected = true;
+element.isConnected = false;
+scene.select("other-B");
+assert.equal(detachedParent.writes, detachedWrites, "Detached history is not selected");
+assert.equal(pending.size, 0, "Detached history does not queue another frame");
+element.isConnected = true;
 const withPreview = {...event("preview", "P", 1, "interaction.replies"), post_id:"123", post_text:"First post"};
 scene.render([withPreview], "preview");
 const oldLabel = labels[0], oldPreview = oldLabel.previewControl;
@@ -564,7 +616,13 @@ frame(7080);
 assert.equal(oldPreview.style.top, "detached", "A detached preview is not updated");
 assert.ok(newPreview.style.top, "Updated preview receives positioning");
 assert.equal(newPreview.tabIndex, 0, "Visible preview remains keyboard accessible");
+scene.render(events, "old-A");
+const beforeDestroyCapture = capturedPointers, beforeDestroyRelease = releasedPointers;
+firstSceneHandlers.pointerdown({pointerType:"mouse",button:0,pointerId:77,clientX:300,target:{closest:()=>null}});
+assert.equal(capturedPointers, beforeDestroyCapture + 1, "Destroy test starts with a captured drag");
 scene.destroy();
+assert.equal(releasedPointers, beforeDestroyRelease + 1, "Destroy releases the pointer capture");
+assert.equal(element.dataset.panning, undefined, "Destroy clears the active drag state");
 assert.equal(pending.size, 0, "Destroy cancels the active frame");
 scene.select("preview");
 assert.equal(pending.size, 0, "Selecting after destroy cannot queue work on released nodes");

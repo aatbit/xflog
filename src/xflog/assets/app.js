@@ -444,6 +444,7 @@
     if (!append && !state.events.length) {
       selectedSignal.render(null);
       followControls.select(null);
+      scene.clear();
       $("#history").innerHTML =
         '<div class="loading-state"><span class="loading-dot" aria-hidden="true"></span>Loading local history…</div>';
     }
@@ -474,6 +475,7 @@
       if (generation !== state.generation) return;
       notice(error.message, "error");
       if (!state.events.length) {
+        scene.clear();
         $("#history").innerHTML =
           '<div class="empty-state"><h2>History couldn’t be loaded.</h2><p>Check your local database and connection, then refresh to retry.</p><button class="button" type="button" data-retry>Retry</button></div>';
         $("#history [data-retry]").addEventListener("click", () => load());

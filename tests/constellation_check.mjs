@@ -364,6 +364,7 @@ function exercise(refreshRate, speed = 1, duration = 1000) {
     disconnect() {}
   };
   const root = {
+    isConnected: true,
     dataset: { route: "timeline", motion: "on", motionSpeed: String(speed) },
     querySelector(selector) {
       if (!controls.has(selector)) controls.set(selector, control());
@@ -371,6 +372,7 @@ function exercise(refreshRate, speed = 1, duration = 1000) {
     },
   };
   const element = {
+    isConnected: true,
     dataset: {},
     clientWidth: 800,
     clientHeight: 700,

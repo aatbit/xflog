@@ -58,6 +58,7 @@ export function createConstellation({
   const reduced = matchMedia("(prefers-reduced-motion: reduce)");
   const active = () =>
     geometry &&
+    root.isConnected && element.isConnected &&
     element.classList.contains("horizontal") &&
     root.dataset.route === "timeline" &&
     !document.hidden;
@@ -80,6 +81,12 @@ export function createConstellation({
     root.dataset.animating = "false";
   }
   function releaseScene() {
+    if (drag && element.hasPointerCapture(drag.id)) element.releasePointerCapture(drag.id);
+    drag = null;
+    target = null;
+    seeking = false;
+    delete element.dataset.panning;
+    delete element.dataset.userScrolling;
     stars = [];
     labels = [];
     sparks = [];
@@ -157,9 +164,10 @@ export function createConstellation({
     }
   }
   function select(identity) {
+    if (!root.isConnected || !element.isConnected) return;
     selected = identity;
     const chosenPerson = position();
-    actorButtons.forEach((button) => {
+    actorButtons.forEach(({button, personElement}) => {
       const chosen = button.dataset.event === chosenPerson?.event.event_id;
       const person = geometry.people.find(
         (item) => item.event.event_id === button.dataset.event,
@@ -170,9 +178,7 @@ export function createConstellation({
         "aria-label",
         `${event.name || event.handle || "X account"}, ${label(event)}, recorded event`,
       );
-      button
-        .closest(".constellation-person")
-        .classList.toggle("is-selected", chosen);
+      personElement.classList.toggle("is-selected", chosen);
     });
     for (const item of labels) {
       const event = item.person === chosenPerson ? current() : item.person.event;
@@ -351,7 +357,9 @@ export function createConstellation({
     sky = element.querySelector(".constellation-sky");
     meteor = element.querySelector(".shooting-star");
     meteorTail = element.querySelector(".shooting-tail");
-    actorButtons = [...element.querySelectorAll("[data-actor]")];
+    actorButtons = [...element.querySelectorAll("[data-actor]")].map(button => ({
+      button, personElement: button.closest(".constellation-person"),
+    }));
     stars = [...element.querySelectorAll(".sky-star")];
     const labelNodes = new Map(
       [...element.querySelectorAll("[data-label]")].map((item) => [
@@ -371,12 +379,12 @@ export function createConstellation({
         ...links[index],
       }),
     );
-    actorButtons.forEach((button) =>
+    actorButtons.forEach(({button}) =>
       button.addEventListener("click", () => {
         clickPerson(geometry.people.find(person => person.event.event_id === button.dataset.event));
       }),
     );
-    actorButtons.forEach((button) => {
+    actorButtons.forEach(({button}) => {
       button.tabIndex = geometry.overview ? -1 : 0;
       button.setAttribute("aria-hidden", String(geometry.overview));
     });
