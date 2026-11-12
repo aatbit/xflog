@@ -3,6 +3,23 @@
 Each tagged release has an automatically generated list of merged pull requests
 and contributors on the [GitHub releases page](https://github.com/aatbit/xflog/releases).
 
+## 1.0.11 — 2026-11-12
+
+### Changed
+
+- Improve constellation responsiveness by reusing scene controls, actor counts,
+  event lookups and group layout data during navigation and animation.
+- Prepare grouped connections in a single pass, skip unused overview connections,
+  and avoid an unnecessary group index for a single constellation.
+
+### Fixed
+
+- Stop and release constellation animation work before the history view is
+  replaced by loading, error or journal content, and safely rebuild it afterward.
+- Keep selection and interaction behavior intact when scenes are redrawn or cleared.
+
+No database migration or new environment settings are required.
+
 ## 1.0.10 — 2026-11-08
 
 ### Fixed
