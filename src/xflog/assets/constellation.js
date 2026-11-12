@@ -98,6 +98,7 @@ export function createConstellation({
     actorButtons = [];
     sky = meteor = meteorTail = canvas = linkLayer = groupLayer = null;
     groupButtons = connections = layoutAtZoom = null;
+    keyScope = null;
   }
   function queue() {
     if (!frame && active()) frame = requestAnimationFrame(paint);
