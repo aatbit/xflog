@@ -648,6 +648,109 @@ try {
 } finally {
   Math.random = originalRandom;
 }
+
+// Count searches of positioned geometry entries, while leaving normal event searches alone.
+const nativeFind = Array.prototype.find;
+let geometryFinds = 0;
+Array.prototype.find = function(predicate, ...args) {
+  if (this.length && this[0]?.event && Array.isArray(this[0]?.events) && "x" in this[0])
+    geometryFinds++;
+  return nativeFind.call(this, predicate, ...args);
+};
+try {
+  const control = [{event: {}, events: [], x: 0}];
+  control.find(() => true);
+  assert.equal(geometryFinds, 1, "The geometry-search counter has a positive control");
+  const many = Array.from({length: 24}, (_, index) => ({
+    ...event(`lookup-${index}`, "same-actor", 24 - index, "follow.follow"),
+    name: `Person ${index}`,
+  }));
+  const previews = [];
+  const lookupScene = createConstellation({
+    element, root, escape: String, label: (item) => item.kind, initials: (item) => item.actor_id,
+    onSelect() {}, onPreview: (identity) => previews.push(identity), onOpen() {},
+  });
+  const lookupHandlers = {...handlers};
+  root.dataset.motion = "on";
+  lookupScene.render(many, "lookup-0");
+  assert.equal(nodes.length, many.length, "Every action by one actor has its own button");
+  geometryFinds = 0;
+  for (const identity of ["lookup-4", "lookup-17", "lookup-0"]) {
+    const before = geometryFinds;
+    lookupScene.select(identity);
+    assert.ok(geometryFinds - before < 10, "Selection avoids one geometry find per actor button");
+    const selectedNodes = nodes.filter(node => node.attributes["aria-pressed"] === "true");
+    assert.deepEqual(selectedNodes.map(node => node.dataset.event), [identity]);
+    assert.ok(selectedNodes[0].attributes["aria-label"].includes(`Person ${identity.slice(7)}`));
+  }
+  const beforePreview = previews.length;
+  const beforeFrameSearches = geometryFinds;
+  element.scrollLeft = 1;
+  lookupHandlers.scroll();
+  frame(20000);
+  assert.ok(previews.length > beforePreview, "The frame actually changes the highlighted event");
+  assert.ok(geometryFinds - beforeFrameSearches < 14, "Animation selection avoids per-button geometry searches");
+
+  const oldParent = nodes[0].parent;
+  const oldWrites = oldParent.writes;
+  const next = [{...many[1], name: "Updated person"}, ...many.slice(2), event("new-event", "same-actor", 0, "follow.follow")];
+  lookupScene.update(next, "lookup-1");
+  assert.ok(nodes.find(node => node.dataset.event === "lookup-1").attributes["aria-label"].includes("Updated person"));
+  lookupScene.select("new-event");
+  assert.ok(nodes.find(node => node.dataset.event === "lookup-1").attributes["aria-label"].includes("Updated person"),
+    "An unselected event uses the updated representative, not the previous scene's reference");
+  assert.equal(oldParent.writes, oldWrites, "An update does not touch detached parents");
+  lookupScene.select("lookup-0");
+  assert.equal(nodes.filter(node => node.attributes["aria-pressed"] === "true").length, 0,
+    "A removed event cannot select a current button");
+  lookupScene.render(many.slice(0, 2), "lookup-0");
+  assert.equal(nodes.find(node => node.dataset.event === "lookup-0").attributes["aria-pressed"], "true",
+    "A fresh render reacquires an event removed by the prior update");
+  assert.ok(nodes.find(node => node.dataset.event === "lookup-1").attributes["aria-label"].includes("Person 1"),
+    "A fresh render replaces the unselected representative for a reused ID");
+  lookupScene.clear();
+  const clearedParent = nodes[0].parent, clearedWrites = clearedParent.writes;
+  lookupScene.select("lookup-0");
+  assert.equal(clearedParent.writes, clearedWrites, "Clear releases scene-owned button references");
+  lookupScene.render([], null);
+  lookupScene.select("lookup-0");
+  assert.equal(nodes.length, 0, "An empty scene cannot select an old event");
+  lookupScene.render(many.slice(0, 2), "lookup-1");
+  assert.equal(nodes.find(node => node.dataset.event === "lookup-1").attributes["aria-pressed"], "true");
+
+  const activity = {key:"activity",enabled:true,label:"Activity",buckets:[
+    {key:"follow.follow",label:"Followed",tone:"positive"},
+    {key:"follow.unfollow",label:"Unfollowed",tone:"negative"},
+    {key:"unknown",label:"Unknown",tone:"neutral"},
+  ]};
+  const firstRecord = {...event("duplicate", "A", 3, "follow.follow"), name:"Current record", audience_groups:{activity:"follow.follow"}};
+  const otherGroupRecord = {...event("duplicate", "B", 2, "follow.unfollow"), name:"First geometry record", audience_groups:{activity:"follow.unfollow"}};
+  const otherRecord = {...event("other", "C", 1, "follow.follow"), name:"Other record", audience_groups:{activity:"follow.follow"}};
+  lookupScene.configure([activity], "activity");
+  lookupScene.render([firstRecord, otherGroupRecord, otherRecord], "other");
+  const duplicates = nodes.filter(node => node.dataset.event === "duplicate");
+  assert.equal(duplicates.length, 2, "A duplicate ID in separate groups keeps both stars");
+  assert.ok(duplicates.every(node => node.attributes["aria-label"].includes("First geometry record")),
+    "Unselected duplicate IDs retain the first geometry match");
+  lookupScene.select("duplicate");
+  assert.ok(duplicates.every(node => node.attributes["aria-pressed"] === "true" &&
+    node.attributes["aria-label"].includes("Current record")),
+    "Selected duplicate IDs retain the first current event");
+  const destroyedParent = duplicates[0].parent, destroyedWrites = destroyedParent.writes;
+  lookupScene.destroy();
+  lookupScene.select("other");
+  assert.equal(destroyedParent.writes, destroyedWrites, "Destroy releases scene-owned button references");
+  assert.equal(pending.size, 0, "Selection after destroy cannot schedule a frame");
+  const recreated = createConstellation({
+    element, root, escape: String, label: (item) => item.kind, initials: (item) => item.actor_id,
+    onSelect() {}, onOpen() {},
+  });
+  recreated.render([otherRecord], "other");
+  assert.equal(nodes[0].attributes["aria-pressed"], "true", "A new scene selects normally after destroy");
+  recreated.destroy();
+} finally {
+  Array.prototype.find = nativeFind;
+}
 console.log(
   JSON.stringify({
     script: new URL(import.meta.url).pathname,

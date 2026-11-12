@@ -167,11 +167,8 @@ export function createConstellation({
     if (!root.isConnected || !element.isConnected) return;
     selected = identity;
     const chosenPerson = position();
-    actorButtons.forEach(({button, personElement}) => {
+    actorButtons.forEach(({button, personElement, person}) => {
       const chosen = button.dataset.event === chosenPerson?.event.event_id;
-      const person = geometry.people.find(
-        (item) => item.event.event_id === button.dataset.event,
-      );
       const event = chosen ? current() : person.event;
       button.setAttribute("aria-pressed", String(chosen));
       button.setAttribute(
@@ -357,8 +354,13 @@ export function createConstellation({
     sky = element.querySelector(".constellation-sky");
     meteor = element.querySelector(".shooting-star");
     meteorTail = element.querySelector(".shooting-tail");
+    const peopleByEvent = new Map();
+    for (const person of geometry.people)
+      if (!peopleByEvent.has(person.event.event_id))
+        peopleByEvent.set(person.event.event_id, person);
     actorButtons = [...element.querySelectorAll("[data-actor]")].map(button => ({
       button, personElement: button.closest(".constellation-person"),
+      person: peopleByEvent.get(button.dataset.event),
     }));
     stars = [...element.querySelectorAll(".sky-star")];
     const labelNodes = new Map(
