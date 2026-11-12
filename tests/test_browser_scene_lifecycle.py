@@ -222,3 +222,32 @@ def test_error_fallback_clears_scene_when_initial_load_kept_existing_history(off
     page.wait_for_function(
         "document.querySelector('#history').getAttribute('aria-busy') === 'false'", polling=50
     )
+
+
+def test_detached_actor_click_cannot_act_on_a_reconstructed_scene(offline_page):
+    result = offline_page.evaluate("""() => {
+      const oldButton = document.querySelector('.constellation-star[aria-pressed="true"]');
+      const id = oldButton.dataset.event;
+      const zoom = document.querySelector('#scene-zoom');
+      zoom.value = '1.25'; zoom.dispatchEvent(new Event('input', {bubbles:true}));
+      const current = [...document.querySelectorAll('.constellation-star')]
+        .find(button => button.dataset.event === id);
+      const history = document.querySelector('#history');
+      const before = history.scrollLeft;
+      oldButton.dispatchEvent(new MouseEvent('click', {bubbles:true}));
+      const stale = {detached: !oldButton.isConnected, sameId: current.dataset.event === id,
+        selected: current.getAttribute('aria-pressed'), dialog: document.querySelector('#detail-dialog').open,
+        scroll: history.scrollLeft === before};
+      current.dispatchEvent(new MouseEvent('click', {bubbles:true}));
+      return {stale, liveDialog:document.querySelector('#detail-dialog').open};
+    }""")
+    assert result == {
+        "stale": {
+            "detached": True,
+            "sameId": True,
+            "selected": "true",
+            "dialog": False,
+            "scroll": True,
+        },
+        "liveDialog": True,
+    }

@@ -147,6 +147,7 @@ const element = {
         ? labels
         : [];
   },
+  contains(node) { return nodes.includes(node); },
   set innerHTML(value) {
     sceneParts = Object.fromEntries([".constellation-sky", ".shooting-star", ".shooting-tail"].map(key => [key, { style: {}, dataset: {}, attributes: {}, setAttribute(k, v) { this.attributes[k] = v; } }]));
     paths = [...value.matchAll(/<path d="M([\d.]+),[\d.]+L([\d.]+),[\d.]+"/g)];
@@ -665,10 +666,11 @@ try {
     ...event(`lookup-${index}`, "same-actor", 24 - index, "follow.follow"),
     name: `Person ${index}`,
   }));
-  const previews = [];
+  const previews = [], lookupSelected = [], lookupOpened = [];
   const lookupScene = createConstellation({
     element, root, escape: String, label: (item) => item.kind, initials: (item) => item.actor_id,
-    onSelect() {}, onPreview: (identity) => previews.push(identity), onOpen() {},
+    onSelect: (identity) => lookupSelected.push(identity),
+    onPreview: (identity) => previews.push(identity), onOpen: (identity) => lookupOpened.push(identity),
   });
   const lookupHandlers = {...handlers};
   root.dataset.motion = "on";
@@ -678,7 +680,7 @@ try {
   for (const identity of ["lookup-4", "lookup-17", "lookup-0"]) {
     const before = geometryFinds;
     lookupScene.select(identity);
-    assert.ok(geometryFinds - before < 10, "Selection avoids one geometry find per actor button");
+    assert.equal(geometryFinds - before, 3, "Only position and navigation search geometry during selection");
     const selectedNodes = nodes.filter(node => node.attributes["aria-pressed"] === "true");
     assert.deepEqual(selectedNodes.map(node => node.dataset.event), [identity]);
     assert.ok(selectedNodes[0].attributes["aria-label"].includes(`Person ${identity.slice(7)}`));
@@ -689,13 +691,72 @@ try {
   lookupHandlers.scroll();
   frame(20000);
   assert.ok(previews.length > beforePreview, "The frame actually changes the highlighted event");
-  assert.ok(geometryFinds - beforeFrameSearches < 14, "Animation selection avoids per-button geometry searches");
+  assert.equal(geometryFinds - beforeFrameSearches, 7, "Animation uses only its existing geometry searches");
 
+  const large = Array.from({length: 500}, (_, index) => ({
+    ...event(`lookup-${index}`, "same-actor", 500 - index, "follow.follow"), name: `Person ${index}`,
+  }));
+  lookupScene.render(large, "lookup-0");
+  geometryFinds = 0;
+  lookupScene.select("lookup-4");
+  assert.equal(geometryFinds, 3, "Manual search count stays constant for 500 actor buttons");
+  lookupScene.select("lookup-0");
+  const beforeLargePreview = previews.length;
+  geometryFinds = 0;
+  element.scrollLeft = 1;
+  lookupHandlers.scroll();
+  frame(20016);
+  assert.ok(previews.length > beforeLargePreview, "The large-scene frame changes the highlighted event");
+  assert.equal(geometryFinds, 7, "Animation search count stays constant for 500 actor buttons");
+
+  lookupScene.render(many, "lookup-0");
+  lookupScene.select("lookup-0");
+  const currentButton = nodes.find(node => node.dataset.event === "lookup-0");
+  geometryFinds = 0;
+  currentButton.handlers.click();
+  assert.equal(geometryFinds, 1, "A selected actor click only searches for the selected position");
+  assert.equal(lookupOpened.at(-1), "lookup-0", "A current selected actor still opens");
+  const nonselectedButton = nodes.find(node => node.dataset.event === "lookup-4");
+  nonselectedButton.handlers.click();
+  assert.equal(lookupSelected.at(-1), "lookup-4", "A current unselected actor still selects");
+  const beforeInvalidClicks = [lookupSelected.length, lookupOpened.length, element.scrollLeft];
+  const index = nodes.indexOf(nonselectedButton);
+  nodes.splice(index, 1);
+  nonselectedButton.handlers.click();
+  nodes.splice(index, 0, nonselectedButton);
+  root.isConnected = false;
+  nonselectedButton.handlers.click();
+  root.isConnected = true;
+  element.isConnected = false;
+  nonselectedButton.handlers.click();
+  element.isConnected = true;
+  nonselectedButton.dataset.event = "changed-id";
+  nonselectedButton.handlers.click();
+  nonselectedButton.dataset.event = "lookup-4";
+  assert.deepEqual([lookupSelected.length, lookupOpened.length, element.scrollLeft], beforeInvalidClicks,
+    "Detached or mismatched current buttons cannot act");
+
+  const oldButton = nodes.find(node => node.dataset.event === "lookup-1");
+  const removedButton = currentButton;
   const oldParent = nodes[0].parent;
   const oldWrites = oldParent.writes;
   const next = [{...many[1], name: "Updated person"}, ...many.slice(2), event("new-event", "same-actor", 0, "follow.follow")];
   lookupScene.update(next, "lookup-1");
   assert.ok(nodes.find(node => node.dataset.event === "lookup-1").attributes["aria-label"].includes("Updated person"));
+  const actionsAfterUpdate = [lookupSelected.length, lookupOpened.length, element.scrollLeft];
+  assert.doesNotThrow(() => { oldButton.handlers.click(); removedButton.handlers.click(); });
+  assert.deepEqual([lookupSelected.length, lookupOpened.length, element.scrollLeft], actionsAfterUpdate,
+    "Detached buttons cannot open, select, or navigate after update, even when an ID is reused");
+  nodes.push(oldButton);
+  oldButton.handlers.click();
+  nodes.pop();
+  assert.deepEqual([lookupSelected.length, lookupOpened.length, element.scrollLeft], actionsAfterUpdate,
+    "Reattaching a prior button does not make its old handler valid");
+  element.scrollLeft = 500;
+  lookupScene.seek(next.length - 1);
+  oldButton.handlers.click();
+  frame(20032);
+  assert.ok(element.scrollLeft < 500, "An old click cannot cancel an in-progress navigation");
   lookupScene.select("new-event");
   assert.ok(nodes.find(node => node.dataset.event === "lookup-1").attributes["aria-label"].includes("Updated person"),
     "An unselected event uses the updated representative, not the previous scene's reference");
@@ -703,13 +764,20 @@ try {
   lookupScene.select("lookup-0");
   assert.equal(nodes.filter(node => node.attributes["aria-pressed"] === "true").length, 0,
     "A removed event cannot select a current button");
+  const beforeRenderButton = nodes.find(node => node.dataset.event === "lookup-1");
   lookupScene.render(many.slice(0, 2), "lookup-0");
+  const actionsAfterRender = [lookupSelected.length, lookupOpened.length, element.scrollLeft];
+  beforeRenderButton.handlers.click();
+  assert.deepEqual([lookupSelected.length, lookupOpened.length, element.scrollLeft], actionsAfterRender,
+    "A prior button with a reused ID cannot act on a freshly rendered scene");
   assert.equal(nodes.find(node => node.dataset.event === "lookup-0").attributes["aria-pressed"], "true",
     "A fresh render reacquires an event removed by the prior update");
   assert.ok(nodes.find(node => node.dataset.event === "lookup-1").attributes["aria-label"].includes("Person 1"),
     "A fresh render replaces the unselected representative for a reused ID");
+  const beforeClearButton = nodes[0];
   lookupScene.clear();
   const clearedParent = nodes[0].parent, clearedWrites = clearedParent.writes;
+  assert.doesNotThrow(() => beforeClearButton.handlers.click(), "A cleared scene rejects old clicks");
   lookupScene.select("lookup-0");
   assert.equal(clearedParent.writes, clearedWrites, "Clear releases scene-owned button references");
   lookupScene.render([], null);
@@ -732,12 +800,20 @@ try {
   assert.equal(duplicates.length, 2, "A duplicate ID in separate groups keeps both stars");
   assert.ok(duplicates.every(node => node.attributes["aria-label"].includes("First geometry record")),
     "Unselected duplicate IDs retain the first geometry match");
+  duplicates[1].handlers.click();
+  assert.equal(lookupSelected.at(-1), "duplicate", "A duplicate click selects the first matching event");
   lookupScene.select("duplicate");
   assert.ok(duplicates.every(node => node.attributes["aria-pressed"] === "true" &&
     node.attributes["aria-label"].includes("Current record")),
     "Selected duplicate IDs retain the first current event");
+  const opensBeforeDuplicateClick = lookupOpened.length;
+  duplicates[1].handlers.click();
+  assert.equal(lookupOpened.length, opensBeforeDuplicateClick + 1,
+    "Either duplicate button acts on the first matching geometry person");
+  assert.equal(lookupOpened.at(-1), "duplicate");
   const destroyedParent = duplicates[0].parent, destroyedWrites = destroyedParent.writes;
   lookupScene.destroy();
+  assert.doesNotThrow(() => duplicates[0].handlers.click(), "A destroyed scene rejects old clicks");
   lookupScene.select("other");
   assert.equal(destroyedParent.writes, destroyedWrites, "Destroy releases scene-owned button references");
   assert.equal(pending.size, 0, "Selection after destroy cannot schedule a frame");
@@ -747,6 +823,10 @@ try {
   });
   recreated.render([otherRecord], "other");
   assert.equal(nodes[0].attributes["aria-pressed"], "true", "A new scene selects normally after destroy");
+  const recreatedActions = [lookupSelected.length, lookupOpened.length, element.scrollLeft];
+  duplicates[0].handlers.click();
+  assert.deepEqual([lookupSelected.length, lookupOpened.length, element.scrollLeft], recreatedActions,
+    "A destroyed scene's button cannot act on a recreated scene");
   recreated.destroy();
 } finally {
   Array.prototype.find = nativeFind;

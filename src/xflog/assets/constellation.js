@@ -37,6 +37,7 @@ export function createConstellation({
     modules = [],
     lens = "none",
     geometry = null;
+  let sceneVersion = 0;
   // History is deduplicated by event ID before grouping, so only data changes alter membership.
   let personCount = 0, countDirty = true;
   let zoom = 0.8,
@@ -316,6 +317,7 @@ export function createConstellation({
     else last = 0;
   }
   function render(nextEvents, identity) {
+    const renderedVersion = ++sceneVersion;
     stop();
     wheelZoom = null;
     events = nextEvents;
@@ -381,9 +383,12 @@ export function createConstellation({
         ...links[index],
       }),
     );
-    actorButtons.forEach(({button}) =>
+    actorButtons.forEach(({button, person}) =>
       button.addEventListener("click", () => {
-        clickPerson(geometry.people.find(person => person.event.event_id === button.dataset.event));
+        if (renderedVersion !== sceneVersion || !geometry || !root.isConnected ||
+            !element.isConnected || !element.contains(button) ||
+            !person || person.event.event_id !== button.dataset.event) return;
+        clickPerson(person);
       }),
     );
     actorButtons.forEach(({button}) => {
