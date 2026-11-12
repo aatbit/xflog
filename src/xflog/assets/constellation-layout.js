@@ -103,11 +103,14 @@ export function visibleLabels(candidates, selected) {
   return visible;
 }
 
-export function constellationLayout({
+export function constellationLayout({zoom, ...options}) {
+  return prepareConstellation(options)(zoom);
+}
+
+export function prepareConstellation({
   events,
   width,
   height,
-  zoom,
   modules,
   lens,
 }) {
@@ -134,65 +137,79 @@ export function constellationLayout({
     groups.filter((group) => group.people.length),
     module,
   );
-  const columns = zoom <= 0.25 && buckets
-    ? Math.min(occupied.length, Math.max(availableColumns, Math.ceil(occupied.length / availableRows)))
-    : Math.min(occupied.length, availableColumns);
-  const overviewWidth = buckets ? Math.max(width, columns * 160) : width;
-  const rows = zoom <= 0.25 ? Math.ceil(occupied.length / Math.max(1, columns)) : 1;
-  const lower = Math.max(
-    upper + rows * rowHeight,
-    height - Math.min(255, height * 0.36),
-  );
-  const areaHeight = lower - upper;
-  occupied.forEach((group, index) => {
-    const row = Math.floor(index / Math.max(1, columns));
-    const inRow = Math.min(columns, occupied.length - row * columns);
-    group.x = (zoom <= 0.25 ? overviewWidth : width) * (((index % columns) + 0.5) / inRow);
-    group.y = zoom <= 0.25 ? upper + areaHeight * ((row + 0.5) / rows) : upper + areaHeight / 2;
-  });
   const positions = new Map();
   occupied.forEach((group, groupIndex) => {
-    group.people.forEach((person, memberIndex) => {
-      positions.set(person, { group, memberIndex, groupIndex });
+    group.people.forEach((person, member) => {
+      positions.set(person, { group, member, groupIndex });
     });
   });
-  const blend = clamp((zoom - 0.25) / 0.75, 0, 1);
-  const spacing = (width < 680 ? 245 : 285) * zoom;
-  const orderedPeople = buckets ? [...occupied].reverse().flatMap(group => group.people) : people;
-  const groupGap = buckets ? width * 0.5 * blend : 0;
-  const worldWidth = zoom <= 0.25 ? overviewWidth : width + Math.max(0, orderedPeople.length - 1) * spacing * blend +
-    Math.max(0, occupied.length - 1) * groupGap;
-  const points = orderedPeople.map((person, index) => {
-    const { group, memberIndex: member, groupIndex } = positions.get(person);
+  const ordered = buckets ? [...occupied].reverse().flatMap(group => group.people) : people;
+  const placements = ordered.map(person => {
+    const { group, member, groupIndex } = positions.get(person);
     const angle = member * 2.399963229728653;
     const radius = Math.min(width < 600 ? 44 : 76, 14 + Math.sqrt(member) * 13);
-    const fitX = clamp(group.x + Math.cos(angle) * radius, 32, (zoom <= 0.25 ? overviewWidth : width) - 32);
-    const fitY = clamp(group.y + Math.sin(angle) * radius * 0.6, upper, lower);
-    const timelineX = width / 2 + (orderedPeople.length - 1 - index) * spacing;
-    const groupOffset = groupIndex * groupGap;
-    const timelineY = clamp(
-      group.y + (seed(person.id) - 0.5) * Math.min(400, areaHeight * 0.9),
-      upper + 20,
-      lower - 20,
-    );
     return {
-      ...person,
-      group: group.key,
-      tone: group.tone,
-      color: group.color,
-      x: zoom <= 0.25 ? fitX : width / 2 + (timelineX - width / 2) * blend + groupOffset,
-      y: fitY * (1 - Math.sqrt(blend)) + timelineY * Math.sqrt(blend),
+      group, groupIndex,
+      dx: Math.cos(angle) * radius,
+      dy: Math.sin(angle) * radius * 0.6,
+      drift: seed(person.id) - 0.5,
     };
   });
-  return {
-    people: points,
+  // Scene bindings keep these point identities while zoom changes their coordinates.
+  const geometry = {
+    people: ordered.map((person, index) => {
+      const {group} = placements[index];
+      return {...person, group: group.key, tone: group.tone, color: group.color};
+    }),
     groups: occupied,
     grouped: buckets !== null,
-    width: worldWidth,
     upper,
-    lower,
-    overview: buckets !== null && zoom <= 0.25,
-    canPan: worldWidth > width + 0.5,
-    center: (upper + lower) / 2,
+  };
+  const grouped = geometry.grouped;
+  const count = geometry.people.length;
+  return (zoom) => {
+    const columns = zoom <= 0.25 && grouped
+      ? Math.min(occupied.length, Math.max(availableColumns, Math.ceil(occupied.length / availableRows)))
+      : Math.min(occupied.length, availableColumns);
+    const overviewWidth = grouped ? Math.max(width, columns * 160) : width;
+    const rows = zoom <= 0.25 ? Math.ceil(occupied.length / Math.max(1, columns)) : 1;
+    const lower = Math.max(
+      upper + rows * rowHeight,
+      height - Math.min(255, height * 0.36),
+    );
+    const areaHeight = lower - upper;
+    occupied.forEach((group, index) => {
+      const row = Math.floor(index / Math.max(1, columns));
+      const inRow = Math.min(columns, occupied.length - row * columns);
+      group.x = (zoom <= 0.25 ? overviewWidth : width) * (((index % columns) + 0.5) / inRow);
+      group.y = zoom <= 0.25 ? upper + areaHeight * ((row + 0.5) / rows) : upper + areaHeight / 2;
+    });
+    const blend = clamp((zoom - 0.25) / 0.75, 0, 1);
+    const spacing = (width < 680 ? 245 : 285) * zoom;
+    const groupGap = grouped ? width * 0.5 * blend : 0;
+    const worldWidth = zoom <= 0.25 ? overviewWidth : width + Math.max(0, count - 1) * spacing * blend +
+      Math.max(0, occupied.length - 1) * groupGap;
+    const blendY = Math.sqrt(blend);
+    geometry.people.forEach((point, index) => {
+      const { group, groupIndex, dx, dy, drift } = placements[index];
+      const fitX = clamp(group.x + dx, 32, (zoom <= 0.25 ? overviewWidth : width) - 32);
+      const fitY = clamp(group.y + dy, upper, lower);
+      const timelineX = width / 2 + (count - 1 - index) * spacing;
+      const groupOffset = groupIndex * groupGap;
+      const timelineY = clamp(
+        group.y + drift * Math.min(400, areaHeight * 0.9),
+        upper + 20,
+        lower - 20,
+      );
+      point.x = zoom <= 0.25 ? fitX : width / 2 + (timelineX - width / 2) * blend + groupOffset;
+      point.y = fitY * (1 - blendY) + timelineY * blendY;
+    });
+    return Object.assign(geometry, {
+      width: worldWidth,
+      lower,
+      overview: grouped && zoom <= 0.25,
+      canPan: worldWidth > width + 0.5,
+      center: (upper + lower) / 2,
+    });
   };
 }

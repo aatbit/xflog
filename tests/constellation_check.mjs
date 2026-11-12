@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 const base = pathToFileURL(process.argv[2] + "/");
 const {
   constellationLayout,
+  prepareConstellation,
   peopleFromEvents,
   entriesFromEvents,
   visibleLabels,
@@ -372,6 +373,7 @@ function exercise(refreshRate, speed = 1, duration = 1000) {
       return controls.get(selector);
     },
   };
+  const linkLayer = {style: {}, querySelectorAll: () => []};
   const element = {
     isConnected: true,
     dataset: {},
@@ -380,7 +382,8 @@ function exercise(refreshRate, speed = 1, duration = 1000) {
     scrollWidth: 800,
     scrollLeft: 0,
     classList: { contains: () => true, toggle() {} },
-    querySelector: (selector) => (selector === ".shooting-star" ? meteor : sky),
+    querySelector: (selector) => selector === ".shooting-star" ? meteor
+      : selector === ".constellation-links" ? linkLayer : sky,
     querySelectorAll: (selector) => (selector === ".sky-star" ? [star] : []),
     addEventListener() {},
     removeEventListener() {},
@@ -545,6 +548,21 @@ function seedReference(value) {
 const geometryDigest = createHash("sha256").update(JSON.stringify(baselineGeometry)).digest("hex");
 assert.equal(geometryDigest, "140fd1844b9614ca831c59b28ff1912b55f2789983d6c3638827166f71041ebb",
   "Group ordering, colors and geometry match the original layout at e283194");
+for (const records of lookupFixtures)
+  for (const lens of ["none", "activity", "profile-location"])
+    for (const width of [390, 1024]) {
+      const options = {events: records, width, height: 772, modules, lens};
+      const atZoom = prepareConstellation(options);
+      const original = atZoom(0.8), points = [...original.people], groups = [...original.groups];
+      for (const zoom of [0, 0.05, 0.2, 0.25, 0.250001, 0.3, 0.55, 0.8, 1, 1.5, 2, 0]) {
+        const layout = atZoom(zoom);
+        assert.equal(layout, original, "Zoom keeps the geometry bindings live");
+        assert.ok(layout.people.every((point, i) => point === points[i]));
+        assert.ok(layout.groups.every((group, i) => group === groups[i]));
+        assert.deepEqual(layout, constellationLayout({...options, zoom}),
+          "Repeated in-place layout matches a fresh calculation");
+      }
+    }
 
 // Count only searches involving layout entries/groups; unrelated color lookups remain untouched.
 const originalFind = Array.prototype.find;

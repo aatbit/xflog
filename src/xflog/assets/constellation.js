@@ -5,7 +5,7 @@ import {
   flowStep,
   wheelDistance,
   normalizeMotionSpeed,
-  constellationLayout,
+  prepareConstellation,
   visibleLabels,
   seed,
 } from "./constellation-layout.js";
@@ -36,7 +36,8 @@ export function createConstellation({
     selected = null,
     modules = [],
     lens = "none",
-    geometry = null;
+    geometry = null,
+    layoutAtZoom = null;
   let sceneVersion = 0;
   // History is deduplicated by event ID before grouping, so only data changes alter membership.
   let personCount = 0, countDirty = true;
@@ -54,6 +55,9 @@ export function createConstellation({
     sparks = [],
     actorButtons = [],
     sky = null, meteor = null, meteorTail = null,
+    canvas = null, linkLayer = null, groupLayer = null,
+    groupButtons = null, connections = null,
+    sceneWidth = 0, sceneHeight = 0,
     labelInset = 16,
     keyScope = null;
   const reduced = matchMedia("(prefers-reduced-motion: reduce)");
@@ -92,7 +96,8 @@ export function createConstellation({
     labels = [];
     sparks = [];
     actorButtons = [];
-    sky = meteor = meteorTail = null;
+    sky = meteor = meteorTail = canvas = linkLayer = groupLayer = null;
+    groupButtons = connections = layoutAtZoom = null;
   }
   function queue() {
     if (!frame && active()) frame = requestAnimationFrame(paint);
@@ -123,8 +128,9 @@ export function createConstellation({
   }
   function groupHint() {
     key.hidden = !geometry.grouped;
-    const group = geometry.groups.find(item => item.key === position()?.group);
-    const scope = geometry.overview ? "overview" : group?.key;
+    const groupId = position()?.group;
+    const group = geometry.groups.find(item => item.key === groupId);
+    const scope = geometry.overview ? "overview" : group;
     if (keyScope === scope) return;
     keyScope = scope;
     key.innerHTML = geometry.grouped
@@ -194,6 +200,12 @@ export function createConstellation({
     navigator();
     queue();
   }
+  function showLabel(item, visible) {
+    item.label.style.visibility = visible ? "visible" : "hidden";
+    item.label.setAttribute("aria-hidden", String(!visible));
+    item.label.tabIndex = -1;
+    item.controls?.forEach(control => { control.tabIndex = visible ? 0 : -1; });
+  }
   function paint(now) {
     frame = 0;
     if (!active()) {
@@ -259,7 +271,7 @@ export function createConstellation({
         center + width / 2 <= element.clientWidth - 12
       ) {
         const candidate = {
-          id: item.person.event.event_id,
+          id: item.person,
           left: center - width / 2,
           right: center + width / 2,
           top,
@@ -280,15 +292,11 @@ export function createConstellation({
         candidates.push(candidate);
       }
     }
-    const shown = visibleLabels(candidates, chosenPerson?.event.event_id);
+    const shown = visibleLabels(candidates, chosenPerson);
     labels.forEach((item) => {
-      const placement = shown.get(item.person.event.event_id);
-      const visible = Boolean(placement);
+      const placement = shown.get(item.person);
       if (placement) item.label.style.top = `${placement.top}px`;
-      item.label.style.visibility = visible ? "visible" : "hidden";
-      item.label.setAttribute("aria-hidden", String(!visible));
-      item.label.tabIndex = -1;
-      item.controls.forEach(control => { control.tabIndex = visible ? 0 : -1; });
+      showLabel(item, Boolean(placement));
     });
     stars.forEach((star, index) => {
       star.style.opacity = String(
@@ -297,7 +305,7 @@ export function createConstellation({
           : 0.22,
       );
     });
-    sparks.forEach(({ element: spark, trail, a, b }, index) => {
+    if (!geometry.overview) sparks.forEach(({ element: spark, trail, a, b }, index) => {
       const part = (clock / 10000 + seed(index)) % 1;
       const tail = Math.max(0, part - 0.06);
       spark.setAttribute("cx", (a.x + (b.x - a.x) * part).toFixed(2));
@@ -322,20 +330,21 @@ export function createConstellation({
     wheelZoom = null;
     events = nextEvents;
     selected = identity;
-    geometry = constellationLayout({
+    sceneWidth = element.clientWidth;
+    sceneHeight = element.clientHeight;
+    layoutAtZoom = prepareConstellation({
       events,
-      width: element.clientWidth,
-      height: element.clientHeight,
-      zoom,
+      width: sceneWidth,
+      height: sceneHeight,
       modules,
       lens,
     });
+    geometry = layoutAtZoom(zoom);
     if (countDirty) {
       personCount = new Set(geometry.people.map(person => person.event.actor_id)).size;
       countDirty = false;
     }
     element.dataset.canPan = String(geometry.canPan);
-    element.classList.toggle("is-group-overview", geometry.overview);
     element.classList.toggle("is-grouped", geometry.grouped);
     keyScope = null;
     groupHint();
@@ -344,29 +353,7 @@ export function createConstellation({
       (_, index) =>
         `<circle class="sky-star" cx="${seed("x" + index) * element.clientWidth}" cy="${seed("y" + index) * element.clientHeight * 0.74}" r="${index % 9 ? 0.8 : 1.5}"/>`,
     ).join("");
-    const links = [];
-    if (!geometry.overview) {
-      if (geometry.groups.length === 1) {
-        const group = geometry.groups[0];
-        let previous = null;
-        for (const person of geometry.people) {
-          if (person.group !== group.key) continue;
-          if (previous) links.push({ a: person, b: previous, color: group.color, dash: group.dash });
-          previous = person;
-        }
-      } else if (geometry.groups.length > 1) {
-        const peopleByGroup = new Map(geometry.groups.map(group => [group.key, []]));
-        // Map matches NaN keys, but the previous strict group comparison did not.
-        for (const person of geometry.people)
-          if (!Number.isNaN(person.group)) peopleByGroup.get(person.group)?.push(person);
-        for (const group of geometry.groups) {
-          const people = peopleByGroup.get(group.key);
-          for (let index = 1; index < people.length; index++)
-            links.push({ a: people[index], b: people[index - 1], color: group.color, dash: group.dash });
-        }
-      }
-    }
-    element.innerHTML = `<svg class="constellation-sky" viewBox="0 0 ${element.clientWidth} ${element.clientHeight}" aria-hidden="true">${background}<defs><linearGradient id="xf-shooting-tail" class="shooting-tail" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="currentColor" stop-opacity="0"/><stop offset="1" stop-color="currentColor"/></linearGradient></defs><line class="shooting-star" data-active="false" stroke="url(#xf-shooting-tail)" opacity="0"/></svg><div class="constellation-canvas" style="width:${geometry.width}px"><svg class="constellation-links${geometry.grouped ? " is-grouped" : ""}" viewBox="0 0 ${geometry.width} ${element.clientHeight}" aria-hidden="true">${geometry.overview ? "" : links.map(({ a, b, color, dash }) => `<g data-link-group="${esc(a.group)}" style="${color ? `color:${color}` : ""}"><path d="M${a.x},${a.y}L${b.x},${b.y}" stroke-dasharray="${dash || ""}"/><line class="sequence-trail"/><circle class="sequence-spark" r="2"/></g>`).join("")}</svg>${geometry.people.map((person) => `<article class="constellation-person" data-person="${esc(person.id)}" style="--group-color:${person.color || "var(--muted)"}"><button class="constellation-star ${esc(person.tone)}" type="button" style="left:${person.x}px;top:${person.y}px" data-actor="${esc(person.event.actor_id)}" data-event="${esc(person.event.event_id)}" aria-label="${esc(person.event.name || person.event.handle || "X account")}, ${esc(label(person.event))}, recorded event"><span class="star-core" aria-hidden="true"></span><span class="star-initials" aria-hidden="true">${esc(initials(person.event))}</span></button><div class="star-label" data-label="${esc(person.event.event_id)}" aria-label="Open recorded event for ${esc(person.event.name || person.event.handle || "X account")}">${personLabel(person)}</div></article>`).join("")}${geometry.overview ? geometry.groups.map((group) => `<button type="button" class="constellation-group ${esc(group.tone)}" style="--group-color:${group.color};left:${group.x}px;top:${group.y}px" data-group="${esc(group.key)}" title="${esc(groupDescription(group))}" aria-label="Explore ${esc(group.label)}, ${esc(groupDescription(group))}"><span class="cluster-count">${group.people.length}</span><strong title="${esc(group.label)}">${esc(group.label)}</strong></button>`).join("") : ""}</div>`;
+    element.innerHTML = `<svg class="constellation-sky" viewBox="0 0 ${element.clientWidth} ${element.clientHeight}" aria-hidden="true">${background}<defs><linearGradient id="xf-shooting-tail" class="shooting-tail" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="currentColor" stop-opacity="0"/><stop offset="1" stop-color="currentColor"/></linearGradient></defs><line class="shooting-star" data-active="false" stroke="url(#xf-shooting-tail)" opacity="0"/></svg><div class="constellation-canvas" style="width:${geometry.width}px"><svg class="constellation-links${geometry.grouped ? " is-grouped" : ""}" viewBox="0 0 ${geometry.width} ${element.clientHeight}" aria-hidden="true"></svg>${geometry.people.map((person) => `<article class="constellation-person" data-person="${esc(person.id)}" style="--group-color:${person.color || "var(--muted)"}"><button class="constellation-star ${esc(person.tone)}" type="button" style="left:${person.x}px;top:${person.y}px" data-actor="${esc(person.event.actor_id)}" data-event="${esc(person.event.event_id)}" aria-label="${esc(person.event.name || person.event.handle || "X account")}, ${esc(label(person.event))}, recorded event"><span class="star-core" aria-hidden="true"></span><span class="star-initials" aria-hidden="true">${esc(initials(person.event))}</span></button><div class="star-label" data-label="${esc(person.event.event_id)}" aria-label="Open recorded event for ${esc(person.event.name || person.event.handle || "X account")}">${personLabel(person)}</div></article>`).join("")}<div class="constellation-groups" hidden></div></div>`;
     sky = element.querySelector(".constellation-sky");
     meteor = element.querySelector(".shooting-star");
     meteorTail = element.querySelector(".shooting-tail");
@@ -379,65 +366,109 @@ export function createConstellation({
       person: peopleByEvent.get(button.dataset.event),
     }));
     stars = [...element.querySelectorAll(".sky-star")];
-    const labelNodes = new Map(
-      [...element.querySelectorAll("[data-label]")].map((item) => [
-        item.dataset.label,
-        item,
-      ]),
-    );
-    labels = geometry.people.map((person) => ({
-      person,
-      label: labelNodes.get(person.event.event_id),
-    }));
-    const trails = element.querySelectorAll(".sequence-trail");
-    sparks = [...element.querySelectorAll(".sequence-spark")].map(
-      (spark, index) => ({
-        element: spark,
-        trail: trails[index],
-        ...links[index],
-      }),
-    );
+    const labelNodes = element.querySelectorAll("[data-label]");
+    labels = geometry.people.map((person, index) => ({person, label: labelNodes[index]}));
+    canvas = element.querySelector(".constellation-canvas");
+    linkLayer = element.querySelector(".constellation-links");
+    groupLayer = element.querySelector(".constellation-groups");
+    groupButtons = connections = null;
+    sparks = [];
     actorButtons.forEach(({button, person}) =>
       button.addEventListener("click", () => {
-        if (renderedVersion !== sceneVersion || !geometry || !root.isConnected ||
-            !element.isConnected || !element.contains(button) ||
+        if (!ownsScene(renderedVersion, button) || geometry.overview ||
             !person || person.event.event_id !== button.dataset.event) return;
         clickPerson(person);
       }),
     );
-    actorButtons.forEach(({button}) => {
-      button.tabIndex = geometry.overview ? -1 : 0;
-      button.setAttribute("aria-hidden", String(geometry.overview));
-    });
-    labels.forEach(({ person, label: button }) =>
-      button.addEventListener("click", (event) => { if (!event?.target?.closest?.("a")) clickPerson(person); }),
-    );
-    element.querySelectorAll("[data-group]").forEach((button) =>
-      button.addEventListener("click", () => {
-        const group = geometry.groups.find(
-          (item) => item.key === button.dataset.group,
-        );
-        zoom = 1;
-        render(events, group.people[0].event.event_id);
-        seek(
-          events.findIndex(
-            (item) => item.event_id === group.people[0].event.event_id,
-          ),
-          "instant",
-        );
+    labels.forEach(({person, label: button}) =>
+      button.addEventListener("click", event => {
+        if (ownsScene(renderedVersion, button) && !geometry.overview &&
+            !event?.target?.closest?.("a")) clickPerson(person);
       }),
     );
+    updateMode();
+    anchor();
+    select(identity);
+  }
+  function ownsScene(version, node) {
+    return version === sceneVersion && geometry && root.isConnected &&
+      element.isConnected && element.contains(node);
+  }
+  function prepareConnections() {
+    const links = [];
+    if (geometry.groups.length === 1) {
+      const group = geometry.groups[0];
+      let previous = null;
+      for (const person of geometry.people) {
+        if (person.group !== group.key) continue;
+        if (previous) links.push({ a: person, b: previous, color: group.color, dash: group.dash });
+        previous = person;
+      }
+    } else if (geometry.groups.length > 1) {
+      const peopleByGroup = new Map(geometry.groups.map(group => [group.key, []]));
+      // Map matches NaN keys, but the previous strict group comparison did not.
+      for (const person of geometry.people)
+        if (!Number.isNaN(person.group)) peopleByGroup.get(person.group)?.push(person);
+      for (const group of geometry.groups) {
+        const people = peopleByGroup.get(group.key);
+        for (let index = 1; index < people.length; index++)
+          links.push({ a: people[index], b: people[index - 1], color: group.color, dash: group.dash });
+      }
+    }
+    linkLayer.innerHTML = links.map(({ a, b, color, dash }) => `<g data-link-group="${esc(a.group)}" style="${color ? `color:${color}` : ""}"><path d="M${a.x},${a.y}L${b.x},${b.y}" stroke-dasharray="${dash || ""}"/><line class="sequence-trail"/><circle class="sequence-spark" r="2"/></g>`).join("");
+    connections = linkLayer.querySelectorAll("path");
+    const trails = linkLayer.querySelectorAll(".sequence-trail");
+    sparks = [...linkLayer.querySelectorAll(".sequence-spark")].map(
+      (spark, index) => ({element: spark, trail: trails[index], ...links[index]}),
+    );
+  }
+  function prepareGroupButtons() {
+    const renderedVersion = sceneVersion;
+    groupLayer.innerHTML = geometry.groups.map((group) => `<button type="button" class="constellation-group ${esc(group.tone)}" style="--group-color:${group.color};left:${group.x}px;top:${group.y}px" data-group="${esc(group.key)}" title="${esc(groupDescription(group))}" aria-label="Explore ${esc(group.label)}, ${esc(groupDescription(group))}"><span class="cluster-count">${group.people.length}</span><strong title="${esc(group.label)}">${esc(group.label)}</strong></button>`).join("");
+    groupButtons = [...groupLayer.querySelectorAll("[data-group]")];
+    groupButtons.forEach((button, index) => {
+      button.addEventListener("click", () => {
+        if (!ownsScene(renderedVersion, button) || !geometry.overview) return;
+        const group = geometry.groups[index];
+        const identity = group.people[0].event.event_id;
+        selected = identity;
+        setZoom(1);
+        seek(events.findIndex(item => item.event_id === identity), "instant");
+      });
+    });
+  }
+  function updateMode() {
+    const overview = geometry.overview;
+    const focused = document.activeElement;
+    if (focused && (overview
+      ? element.contains(focused) && focused.closest(".constellation-person")
+      : groupLayer.contains(focused))) {
+      (zoomControl.disabled ? element : zoomControl).focus({preventScroll: true});
+    }
+    element.classList.toggle("is-group-overview", overview);
+    groupLayer.hidden = !overview;
+    linkLayer.style.visibility = overview ? "hidden" : "";
+    if (overview && !groupButtons) prepareGroupButtons();
+    if (!overview && !connections) prepareConnections();
+    for (const {button} of actorButtons) {
+      button.tabIndex = overview ? -1 : 0;
+      button.setAttribute("aria-hidden", String(overview));
+    }
+    if (overview) for (const item of labels) showLabel(item, false);
+  }
+  function anchor() {
     const point = position();
-    element.scrollLeft =
-      geometry.canPan && point
-        ? clamp(point.x - element.clientWidth / 2, 0, maximum())
-        : 0;
+    element.scrollLeft = geometry.canPan && point
+      ? clamp(point.x - element.clientWidth / 2, 0, maximum())
+      : 0;
     target = null;
     seeking = false;
     scrollPosition = element.scrollLeft;
     delete element.dataset.userScrolling;
-    select(identity);
-    queue();
+    if (drag) {
+      drag.x = drag.lastX;
+      drag.scroll = scrollPosition;
+    }
   }
   function clickPerson(person) {
     target = null;
@@ -454,10 +485,7 @@ export function createConstellation({
     delete element.dataset.userScrolling;
     const event = events[clamp(index, 0, events.length - 1)];
     selected = event.event_id;
-    if (geometry.overview) {
-      zoom = 0.8;
-      render(events, selected);
-    }
+    if (geometry.overview) setZoom(0.8);
     const destination = position();
     if (destination && geometry.canPan) {
       target = clamp(destination.x - element.clientWidth / 2, 0, maximum());
@@ -473,9 +501,36 @@ export function createConstellation({
     queue();
   }
   function setZoom(value) {
-    if (!geometry || !events.length) return;
-    zoom = clamp(Math.round(value * 20) / 20, 0, 2);
-    render(events, selected);
+    if (!layoutAtZoom || !events.length || !ownsScene(sceneVersion, canvas)) return;
+    wheelZoom = null;
+    const nextZoom = clamp(Math.round(value * 20) / 20, 0, 2);
+    if (nextZoom === zoom || !Number.isFinite(nextZoom)) return;
+    const wasOverview = geometry.overview;
+    zoom = nextZoom;
+    layoutAtZoom(zoom);
+    element.dataset.canPan = String(geometry.canPan);
+    canvas.style.width = `${geometry.width}px`;
+    linkLayer.setAttribute("viewBox", `0 0 ${geometry.width} ${sceneHeight}`);
+    geometry.people.forEach((point, index) => {
+      const {button} = actorButtons[index];
+      button.style.left = `${point.x}px`;
+      button.style.top = `${point.y}px`;
+    });
+    if (wasOverview !== geometry.overview) updateMode();
+    if (geometry.overview) {
+      geometry.groups.forEach((group, index) => {
+        groupButtons[index].style.left = `${group.x}px`;
+        groupButtons[index].style.top = `${group.y}px`;
+      });
+    } else {
+      connections.forEach((path, index) => {
+        const {a, b} = sparks[index];
+        path.setAttribute("d", `M${a.x},${a.y}L${b.x},${b.y}`);
+      });
+    }
+    anchor();
+    navigator();
+    queue();
   }
   function scrub(progress) {
     if (!geometry?.canPan) return;
@@ -543,6 +598,7 @@ export function createConstellation({
     drag = {
       id: event.pointerId,
       x: event.clientX,
+      lastX: event.clientX,
       scroll: element.scrollLeft,
     };
     element.setPointerCapture(event.pointerId);
@@ -550,6 +606,7 @@ export function createConstellation({
   }
   function move(event) {
     if (!drag || drag.id !== event.pointerId) return;
+    drag.lastX = event.clientX;
     target = clamp(drag.scroll + drag.x - event.clientX, 0, maximum());
     element.dataset.userScrolling = "true";
     queue();
@@ -606,7 +663,8 @@ export function createConstellation({
     attributeFilter: ["data-route", "data-motion", "data-motion-speed"],
   });
   const resize = new ResizeObserver(() => {
-    if (geometry && element.clientWidth && element.clientHeight)
+    if (geometry && element.clientWidth && element.clientHeight &&
+        (element.clientWidth !== sceneWidth || element.clientHeight !== sceneHeight))
       render(events, selected);
   });
   resize.observe(element);
@@ -690,6 +748,7 @@ export function createConstellation({
     destroy: () => {
       stop();
       geometry = null;
+      events = [];
       releaseScene();
       observer.disconnect();
       resize.disconnect();

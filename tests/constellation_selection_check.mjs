@@ -76,6 +76,7 @@ function button(dataset) {
       this.attributes[k] = v;
     },
     addEventListener(k, v) {
+      listenerWrites++;
       this.handlers[k] = v;
     },
     removeEventListener() {},
@@ -113,7 +114,8 @@ const root = {
 let nodes = [],
   labels = [],
   paths = [];
-let captureLinks = false, renderedLinks = [], renderedTrails = [], renderedSparks = [];
+let renderedLinks = [], renderedTrails = [], renderedSparks = [], groupNodes = [];
+let historyWrites = 0, linkWrites = 0, groupWrites = 0, listenerWrites = 0;
 let beforeMarkup = false, measureRenderWork = false;
 let sceneParts = {};
 const handlers = {};
@@ -155,15 +157,45 @@ const element = {
         : key === ".sequence-spark" ? renderedSparks
         : [];
   },
-  contains(node) { return nodes.includes(node); },
+  contains(node) { return nodes.includes(node) || labels.includes(node) || groupNodes.includes(node) || Object.values(sceneParts).includes(node); },
   set innerHTML(value) {
+    historyWrites++;
     beforeMarkup = false;
-    sceneParts = Object.fromEntries([".constellation-sky", ".shooting-star", ".shooting-tail"].map(key => [key, { style: {}, dataset: {}, attributes: {}, setAttribute(k, v) { this.attributes[k] = v; } }]));
-    paths = [...value.matchAll(/<path d="M([\d.]+),[\d.]+L([\d.]+),[\d.]+"/g)];
-    renderedLinks = captureLinks ? [...value.matchAll(/<g data-link-group="([^"]*)" style="([^"]*)"><path d="([^"]*)" stroke-dasharray="([^"]*)"\/>/g)]
-      .map(([, group, style, d, dash]) => ({group, style, d, dash})) : [];
-    renderedTrails = renderedLinks.map(() => button({}));
-    renderedSparks = renderedLinks.map(() => button({}));
+    sceneParts = Object.fromEntries([".constellation-sky", ".shooting-star", ".shooting-tail", ".constellation-canvas"]
+      .map(key => [key, button({})]));
+    sceneParts[".shooting-star"].dataset = {};
+    groupNodes = [];
+    renderedLinks = [];
+    renderedSparks = [];
+    renderedTrails = [];
+    paths = [];
+    sceneParts[".constellation-links"] = {
+      ...button({}),
+      set innerHTML(markup) {
+        linkWrites++;
+        renderedLinks = [...markup.matchAll(/<g data-link-group="([^"]*)" style="([^"]*)"><path d="([^"]*)" stroke-dasharray="([^"]*)"\/>/g)]
+          .map(([, group, style, d, dash]) => ({group, style, d, dash}));
+        paths = [...markup.matchAll(/<path d="M([\d.]+),[\d.]+L([\d.]+),[\d.]+"/g)];
+        renderedTrails = renderedLinks.map(() => button({}));
+        renderedSparks = renderedLinks.map(() => button({}));
+        this.pathNodes = renderedLinks.map(link => ({
+          setAttribute(key, value) { if (key === "d") link.d = value; },
+        }));
+      },
+      querySelectorAll(key) {
+        if (key === "path") return this.pathNodes;
+        return key === ".sequence-trail" ? renderedTrails : renderedSparks;
+      },
+    };
+    sceneParts[".constellation-groups"] = {
+      hidden: true,
+      contains(node) { return groupNodes.includes(node); },
+      set innerHTML(markup) {
+        groupWrites++;
+        groupNodes = [...markup.matchAll(/data-group="([^"]*)"/g)].map(([, group]) => button({group}));
+      },
+      querySelectorAll() { return groupNodes; },
+    };
     const buttons = [
       ...value.matchAll(/<(?:button|div(?= class="star-label"))\b([^>]*)>([\s\S]*?)<\/(?:button|div)>/g),
     ].map((m) => {
@@ -174,7 +206,7 @@ const element = {
         dataset[key] = v;
       return Object.assign(button(dataset), {
         innerHTML: m[2],
-        x: Number(m[1].match(/left:([\d.]+)px/)?.[1]),
+        style: {left: m[1].match(/left:([\d.]+px)/)?.[1]},
       });
     });
     nodes = buttons.filter((n) => n.dataset.actor);
@@ -359,7 +391,7 @@ assert.equal(element.scrollLeft, manualStart, "Click travel starts without an im
 frame(2000);
 assert.ok(element.scrollLeft < manualStart, "A manual click smoothly centers the chosen star");
 for (let time = 2016; time <= 3024; time += 16) frame(time);
-assert.ok(Math.abs(nodes.find(node=>node.dataset.actor === "B").x - element.scrollLeft - element.clientWidth / 2) < 1,
+assert.ok(Math.abs(parseFloat(nodes.find(node=>node.dataset.actor === "B").style.left) - element.scrollLeft - element.clientWidth / 2) < 1,
   "The clicked star lands at the viewport center");
 assert.equal(nodes.find(node=>node.dataset.actor === "B").attributes["aria-pressed"], "true",
   "A stationary off-center selection survives queued scroll events");
@@ -367,7 +399,7 @@ const openedBeforeLabel = opened.length;
 labels.find(node=>node.dataset.label === "old-C").handlers.click();
 frame(3040);
 for (let time = 3056; time <= 4064; time += 16) frame(time);
-assert.ok(Math.abs(nodes.find(node=>node.dataset.actor === "C").x - element.scrollLeft - element.clientWidth / 2) < 1,
+assert.ok(Math.abs(parseFloat(nodes.find(node=>node.dataset.actor === "C").style.left) - element.scrollLeft - element.clientWidth / 2) < 1,
   "Clicking a name also centers its star");
 assert.equal(nodes.find(node=>node.dataset.actor === "C").attributes["aria-pressed"], "true",
   "Clicking another person's label selects that person too");
@@ -401,7 +433,7 @@ frame(5120);
 assert.deepEqual(nodes.filter(node=>node.attributes["aria-pressed"] === "true").map(node=>node.dataset.event), ["old-A"],
   "Manual grouped selection also survives refresh with ambient motion disabled");
 const groupedStar = nodes.find(node=>node.dataset.event === "old-A");
-assert.equal(element.scrollLeft, Math.round(Math.max(0, Math.min(500, groupedStar.x - element.clientWidth / 2))),
+assert.equal(element.scrollLeft, Math.round(Math.max(0, Math.min(500, parseFloat(groupedStar.style.left) - element.clientWidth / 2))),
   "With motion off, grouped click centering is immediate and stays within the scroll bounds");
 let prevented = 0;
 const zoomWheel = (deltaY, buttons = 4, extra = {}) => handlers.wheel({
@@ -535,7 +567,7 @@ try {
   });
   otherScene.render([record("x", "X", 1, "follow.follow"), record("y", "Y", 0, "follow.follow")], "x");
   expectCount("2 people in loaded history");
-  scene.setZoom(0.8);
+  scene.render([record("solo", "Z", 0, "follow.follow")], "solo");
   expectCount("1 person in loaded history");
   otherScene.destroy();
 } finally {
@@ -565,7 +597,10 @@ assert.equal(actorQueries, beforeQueries.actorQueries, "Selection reuses the cur
 assert.equal(descendantQueries, beforeQueries.descendantQueries, "Unchanged label markup reuses its descendants");
 const beforeRedrawParents = parentQueries;
 scene.setZoom(1);
-assert.equal(parentQueries - beforeRedrawParents, events.length, "Redraw resolves one fresh parent per actor");
+assert.equal(parentQueries, beforeRedrawParents, "Zoom reuses actor parents");
+assert.equal(sceneParts[".constellation-sky"], previousSky, "Zoom reuses the sky");
+scene.render(events, "other-B");
+assert.equal(parentQueries - beforeRedrawParents, events.length, "Structural redraw resolves one fresh parent per actor");
 const oldParentWrites = previousParent.writes;
 assert.notEqual(nodes[0].parent, previousParent, "A redraw creates fresh actor parents");
 assert.notEqual(sceneParts[".constellation-sky"], previousSky, "A redraw creates new sky nodes");
@@ -575,7 +610,9 @@ assert.equal(previousParent.writes, oldParentWrites, "Detached actor parents are
 assert.equal(previousSky.style.transform, "old scene", "Frames never update the detached sky after redraw");
 assert.notEqual(sceneParts[".constellation-sky"].style.transform, undefined, "Frames update the new sky");
 const beforeResizeSky = sceneParts[".constellation-sky"];
+element.clientWidth++;
 resizeFirstScene();
+element.clientWidth--;
 beforeResizeSky.style.transform = "detached after resize";
 frame(7040);
 assert.equal(beforeResizeSky.style.transform, "detached after resize", "Resize never paints the previous sky");
@@ -650,7 +687,9 @@ try {
   meteorScene.render(events, "old-A");
   for (let i = 0; i < 96; i++) frame(10000 + i * 64);
   const oldMeteor = sceneParts[".shooting-star"], oldTail = sceneParts[".shooting-tail"];
+  element.clientWidth++;
   resizeScene();
+  element.clientWidth--;
   oldMeteor.style.opacity = "detached";
   oldTail.attributes = {};
   frame(10000 + 96 * 64);
@@ -846,7 +885,6 @@ try {
 }
 
 // Reconstruct the original per-group filter oracle from the actual layout output.
-captureLinks = true;
 const connectionScene = createConstellation({
   element, root, escape: String, label: item => item.kind, initials: item => item.actor_id,
   onSelect() {}, onOpen() {},
@@ -898,11 +936,14 @@ function verifyConnections(records, modules, lens, zoom) {
   if (records.length) connectionScene.setZoom(zoom);
   const expected = expectedConnections(records, modules, lens, zoom);
   const visible = expected.layout.overview ? [] : expected.links;
-  assert.deepEqual(renderedLinks, visible.map(({a,b,color,dash}) => ({
+  assert.deepEqual(expected.layout.overview ? [] : renderedLinks, visible.map(({a,b,color,dash}) => ({
     group:a.group, style:color ? `color:${color}` : "", d:`M${a.x},${a.y}L${b.x},${b.y}`, dash:dash || "",
   })), "Rendered paths preserve group order, endpoints, direction, colors and dashes");
-  assert.equal(renderedSparks.length, visible.length, "Each visible connection has one spark");
-  assert.equal(renderedTrails.length, visible.length, "Each visible connection has one trail");
+  assert.equal(sceneParts[".constellation-links"].style.visibility, expected.layout.overview ? "hidden" : "");
+  if (!expected.layout.overview) {
+    assert.equal(renderedSparks.length, visible.length, "Each visible connection has one spark");
+    assert.equal(renderedTrails.length, visible.length, "Each visible connection has one trail");
+  }
   return expected;
 }
 try {
@@ -942,9 +983,9 @@ try {
   const oldTrailWrites = oldTrails.map(trail => trail.attributeWrites);
   const oldSparkWrites = oldSparks.map(spark => spark.attributeWrites);
   connectionScene.setZoom(0);
-  assert.equal(renderedLinks.length, 0, "Overview renders no links, trails or sparks");
-  assert.equal(renderedSparks.length, 0);
-  assert.equal(renderedTrails.length, 0);
+  assert.equal(sceneParts[".constellation-links"].style.visibility, "hidden", "Overview hides the connection layer");
+  assert.equal(renderedSparks, oldSparks, "Overview retains the spark nodes");
+  assert.equal(renderedTrails, oldTrails, "Overview retains the trail nodes");
   frame(30016);
   assert.deepEqual(oldTrails.map(trail => trail.attributes), oldTrailAttributes, "Overview cannot update old trails");
   assert.deepEqual(oldSparks.map(spark => spark.attributes), oldSparkAttributes, "Overview cannot update old sparks");
@@ -958,7 +999,7 @@ try {
   frame(30032);
   assert.ok(renderedTrails.every(trail => trail.attributes.x1 !== undefined), "Recreated trails animate");
   expanded.links.forEach(({a,b}, index) => {
-    const part = seed(index) % 1;
+    const part = (seed(index) + 32 / 10000) % 1;
     assert.equal(renderedSparks[index].attributes.cx, (a.x + (b.x - a.x) * part).toFixed(2));
     assert.equal(renderedSparks[index].attributes.cy, (a.y + (b.y - a.y) * part).toFixed(2));
   });
@@ -974,7 +1015,6 @@ try {
   assert.equal(pending.size, 0, "Clear cancels connection animation");
 } finally {
   connectionScene.destroy();
-  captureLinks = false;
 }
 
 // Count positioned-point for-of/filter passes and link-shaped outputs around markup replacement.
@@ -986,11 +1026,11 @@ function measurePreparation(action) {
   const counts = {groupIndexes:0, preMarkupForOf:0, postMarkupForOf:0, preMarkupFilters:0, linkObjects:0};
   const isLink = item => item && typeof item === "object" &&
     item.a?.event && item.b?.event && "group" in item.a && "group" in item.b &&
-    "color" in item && "dash" in item;
+    "color" in item && "dash" in item && !("trail" in item);
   globalThis.Map = class extends NativeMap {
     constructor(entries) {
       super(entries);
-      if (beforeMarkup && Array.isArray(entries) && entries.length &&
+      if (measureRenderWork && Array.isArray(entries) && entries.length &&
           entries.every(entry => Array.isArray(entry) && Array.isArray(entry[1]) && !entry[1].length))
         counts.groupIndexes++;
     }
@@ -1002,12 +1042,12 @@ function measurePreparation(action) {
     return nativeIterator.call(this);
   };
   Array.prototype.push = function(...items) {
-    if (beforeMarkup) counts.linkObjects += nativeFilter.call(items, isLink).length;
+    if (measureRenderWork) counts.linkObjects += nativeFilter.call(items, isLink).length;
     return nativePush.apply(this, items);
   };
   Array.prototype.map = function(...args) {
     const result = nativeMap.apply(this, args);
-    if (beforeMarkup) counts.linkObjects += nativeFilter.call(result, isLink).length;
+    if (measureRenderWork) counts.linkObjects += nativeFilter.call(result, isLink).length;
     return result;
   };
   Array.prototype.filter = function(...args) {
@@ -1042,24 +1082,73 @@ const preparationScene = createConstellation({
   onSelect() {}, onOpen() {},
 });
 try {
+  let membershipReads = 0;
+  const observedEvents = connectionEvents.map(event => ({
+    ...event,
+    get audience_groups() { membershipReads++; return event.audience_groups; },
+  }));
   preparationScene.configure([activity], "activity");
-  preparationScene.render(connectionEvents, connectionEvents[0].event_id);
-  assert.deepEqual(measurePreparation(() => preparationScene.setZoom(0)),
-    {groupIndexes:0,preMarkupForOf:0,postMarkupForOf:1,preMarkupFilters:0,linkObjects:0},
-    "Overview skips connection preparation but still builds the selection lookup");
-  assert.deepEqual(measurePreparation(() => preparationScene.setZoom(1)),
-    {groupIndexes:1,preMarkupForOf:1,postMarkupForOf:1,preMarkupFilters:0,linkObjects:14}, "Multiple groups rebuild their indexed links");
-  preparationScene.update(oneGroup, oneGroup[0].event_id);
-  assert.deepEqual(measurePreparation(() => preparationScene.setZoom(0.8)),
-    {groupIndexes:0,preMarkupForOf:1,postMarkupForOf:1,preMarkupFilters:0,linkObjects:17}, "One group streams connections without an index");
+  assert.deepEqual(measurePreparation(() => preparationScene.render(observedEvents, observedEvents[0].event_id)),
+    {groupIndexes:1,preMarkupForOf:0,postMarkupForOf:2,preMarkupFilters:0,linkObjects:14},
+    "Structural render builds the selection lookup and indexed connections");
+  const originalNodes = nodes, originalLabels = labels, originalParts = sceneParts;
+  const originalPaths = sceneParts[".constellation-links"].pathNodes;
+  const before = [historyWrites, linkWrites, groupWrites, listenerWrites];
+  assert.ok(membershipReads > 0, "Structural rendering reads group membership");
+  membershipReads = 0;
+  for (const zoom of [1, 1.5, 2, 0.3]) {
+    assert.deepEqual(measurePreparation(() => preparationScene.setZoom(zoom)),
+      {groupIndexes:0,preMarkupForOf:0,postMarkupForOf:0,preMarkupFilters:0,linkObjects:0},
+      "Ordinary zoom does not prepare connection topology or rebuild the selection lookup");
+    const expected = expectedConnections(connectionEvents, [activity], "activity", zoom);
+    assert.deepEqual(nodes.map(node => parseFloat(node.style.left)), expected.layout.people.map(point => point.x));
+    assert.deepEqual(renderedLinks.map(link => link.d), expected.links.map(({a,b}) => `M${a.x},${a.y}L${b.x},${b.y}`));
+  }
+  assert.deepEqual([historyWrites, linkWrites, groupWrites, listenerWrites], before);
+  preparationScene.setZoom(0);
+  const firstGroupNodes = groupNodes;
+  const afterFirstOverview = [historyWrites, linkWrites, groupWrites, listenerWrites];
+  assert.equal(groupWrites, before[2] + 1, "Only the overview layer is created on its first visit");
+  for (const zoom of [0.25, 0.3, 0.05, 0.8]) preparationScene.setZoom(zoom);
+  assert.deepEqual([historyWrites, linkWrites, groupWrites, listenerWrites], afterFirstOverview);
+  assert.equal(membershipReads, 0, "Repeated zoom does not regroup the events");
+  assert.equal(nodes, originalNodes);
+  assert.equal(labels, originalLabels);
+  assert.equal(sceneParts, originalParts);
+  assert.equal(sceneParts[".constellation-links"].pathNodes, originalPaths);
+  assert.equal(groupNodes, firstGroupNodes);
+  preparationScene.setZoom(0);
+  groupNodes[0].handlers.click();
+  assert.equal(Number(controls.get("#scene-zoom").value), 1, "Overview cluster opens without rebuilding");
+  assert.equal(nodes, originalNodes);
+  preparationScene.setZoom(0);
+  const beforeOverviewRebuild = linkWrites;
+  preparationScene.render(observedEvents, observedEvents[0].event_id);
+  assert.equal(linkWrites, beforeOverviewRebuild, "An overview rebuild defers connection preparation");
+  preparationScene.setZoom(1);
+  assert.equal(linkWrites, beforeOverviewRebuild + 1, "First expansion builds only the missing links");
+
+  const priorNodes = nodes;
+  assert.deepEqual(measurePreparation(() => preparationScene.update(oneGroup, oneGroup[0].event_id)),
+    {groupIndexes:0,preMarkupForOf:0,postMarkupForOf:2,preMarkupFilters:0,linkObjects:17},
+    "Replacing data rebuilds single-group connections without an index");
+  assert.notEqual(nodes, priorNodes);
   preparationScene.configure([], "none");
-  assert.deepEqual(measurePreparation(() => preparationScene.setZoom(0.8)),
-    {groupIndexes:0,preMarkupForOf:1,postMarkupForOf:1,preMarkupFilters:0,linkObjects:17}, "Ungrouped connections also stream without an index");
-  preparationScene.update([oneGroup[0]], oneGroup[0].event_id);
-  assert.deepEqual(measurePreparation(() => preparationScene.setZoom(0.8)),
-    {groupIndexes:0,preMarkupForOf:1,postMarkupForOf:1,preMarkupFilters:0,linkObjects:0}, "A singleton produces no link or index");
   assert.deepEqual(measurePreparation(() => preparationScene.render([], null)),
     {groupIndexes:0,preMarkupForOf:0,postMarkupForOf:0,preMarkupFilters:0,linkObjects:0}, "Empty history produces no connection work");
+  const region = {...location, buckets:[{key:"unknown",label:"Unknown"}]};
+  const overviewEvents = connectionEvents.slice(0, 2).map(item => ({
+    ...item,
+    audience_groups:{"profile-location":"overview"},
+    audience_group_buckets:{"profile-location":{key:"overview",label:"Overview City"}},
+  }));
+  preparationScene.configure([region], "profile-location");
+  preparationScene.render(overviewEvents, overviewEvents[0].event_id);
+  const groupKey = controls.get("#constellation-key");
+  preparationScene.setZoom(0.25);
+  assert.match(groupKey.innerHTML, /All constellations/);
+  preparationScene.setZoom(0.3);
+  assert.match(groupKey.innerHTML, /Overview City/, "A group key cannot collide with the overview mode");
 } finally {
   preparationScene.destroy();
 }

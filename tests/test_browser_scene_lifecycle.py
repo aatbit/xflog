@@ -1,4 +1,4 @@
-"""Exercise parent-owned scene replacement against the real offline UI."""
+"""Exercise Constellation zoom and scene replacement against the real offline UI."""
 
 import importlib.util
 import os
@@ -6,6 +6,7 @@ import socket
 import subprocess
 import sys
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -78,7 +79,8 @@ CONTROLLED_UI = r"""(() => {
   };
   window.cancelAnimationFrame = id => id < 0 ? frames.delete(id) : nativeCancel(id);
   window.enableFrames = () => { controlled = true; };
-  window.paintCount = () => [...frames.values()].filter(cb => cb.name === 'paint').length;
+  window.paintIds = () => [...frames].filter(([, cb]) => cb.name === 'paint').map(([id]) => id);
+  window.paintCount = () => window.paintIds().length;
   window.stepFrames = () => {
     const callbacks = [...frames.values()]; frames.clear();
     callbacks.forEach(cb => cb(performance.now()));
@@ -225,11 +227,14 @@ def test_error_fallback_clears_scene_when_initial_load_kept_existing_history(off
 
 
 def test_detached_actor_click_cannot_act_on_a_reconstructed_scene(offline_page):
+    offline_page.evaluate(
+        "window.oldButton = document.querySelector('.constellation-star[aria-pressed=true]')"
+    )
+    offline_page.set_viewport_size({"width": 1100, "height": 810})
+    offline_page.wait_for_function("!window.oldButton.isConnected", polling=50)
     result = offline_page.evaluate("""() => {
-      const oldButton = document.querySelector('.constellation-star[aria-pressed="true"]');
+      const oldButton = window.oldButton;
       const id = oldButton.dataset.event;
-      const zoom = document.querySelector('#scene-zoom');
-      zoom.value = '1.25'; zoom.dispatchEvent(new Event('input', {bubbles:true}));
       const current = [...document.querySelectorAll('.constellation-star')]
         .find(button => button.dataset.event === id);
       const history = document.querySelector('#history');
@@ -251,3 +256,176 @@ def test_detached_actor_click_cannot_act_on_a_reconstructed_scene(offline_page):
         },
         "liveDialog": True,
     }
+
+
+@pytest.mark.parametrize("motion", ["no-preference", "reduce"])
+def test_zoom_reuses_grouped_scene_and_rebinds_animation(offline_page, motion):
+    page = offline_page
+    page.emulate_media(reduced_motion=motion)
+
+    def dense_demo(route):
+        response = route.fetch()
+        payload = response.json()
+        events = payload["events"]
+        templates = (
+            events[0],
+            next(event for event in events if event["kind"] != events[0]["kind"]),
+        )
+        anchor = datetime.fromisoformat(events[0]["received_at"])
+        payload["events"] = [
+            {
+                **templates[index % 2],
+                "sequence": 240 - index,
+                "event_id": f"zoom-{index}",
+                "received_at": (anchor - timedelta(seconds=index)).isoformat(),
+            }
+            for index in range(240)
+        ]
+        payload["next"] = None
+        route.fulfill(response=response, json=payload)
+
+    page.route("**/api/demo?*", dense_demo)
+    page.locator("#lens-trigger").click()
+    page.get_by_role("menuitemradio", name="Activity", exact=True).click()
+    page.wait_for_function(
+        """() => document.querySelectorAll('.constellation-star').length === 240
+        && document.querySelector('#history').getAttribute('aria-busy') === 'false'""",
+        polling=50,
+    )
+    slider = page.locator("#scene-zoom")
+    page.evaluate("""() => {
+      const history = document.querySelector('#history');
+      const selector = '.constellation-canvas, .constellation-sky, .constellation-person, '
+        + '.constellation-star, .star-label, .star-identity';
+      const nodes = [...history.querySelectorAll(selector)];
+      const selected = history.querySelector('.constellation-star[aria-pressed=true]');
+      const path = history.querySelector('.constellation-links path');
+      let listenerCount = 0, historyWrites = 0;
+      const nativeAdd = EventTarget.prototype.addEventListener;
+      EventTarget.prototype.addEventListener = function(type, ...args) {
+        if (this instanceof Element && this.matches(selector)) listenerCount++;
+        return nativeAdd.call(this, type, ...args);
+      };
+      const observer = new MutationObserver(records => { historyWrites += records.length; });
+      observer.observe(history, {childList:true});
+      window.zoomProbe = {
+        history, selected, path, initialPath: path.getAttribute('d'),
+        unchanged: () => {
+          const current = [...history.querySelectorAll(selector)];
+          return history === document.querySelector('#history') && current.length === nodes.length
+            && nodes.every((node, index) => node === current[index]);
+        },
+        work: () => ({historyWrites:historyWrites + observer.takeRecords().length,
+          listeners:listenerCount}),
+        finish: () => { observer.disconnect(); EventTarget.prototype.addEventListener = nativeAdd; },
+      };
+      window.setZoomInput = value => {
+        const input = document.querySelector('#scene-zoom');
+        input.value = String(value);
+        input.dispatchEvent(new Event('input', {bubbles:true}));
+      };
+      selected.focus({preventScroll:true});
+      zoomProbe.paintBefore = paintIds()[0];
+      setZoomInput(1.25);
+      zoomProbe.paintAfter = paintIds()[0];
+    }""")
+    assert page.evaluate("zoomProbe.unchanged() && document.activeElement === zoomProbe.selected")
+    if motion == "no-preference":
+        assert page.evaluate(
+            "zoomProbe.paintBefore < 0 && zoomProbe.paintBefore === zoomProbe.paintAfter"
+        )
+
+    slider.press("ArrowRight")
+    assert float(slider.input_value()) == 1.3
+    bounds = slider.bounding_box()
+    assert bounds is not None
+    x, y = bounds["x"], bounds["y"] + bounds["height"] / 2
+    page.mouse.move(x + bounds["width"] * 0.65, y)
+    page.mouse.down()
+    page.mouse.move(x + bounds["width"] * 0.90, y, steps=12)
+    page.mouse.up()
+    assert float(slider.input_value()) > 1.5
+    page.locator("#zoom-out").click()
+    assert page.evaluate(
+        "zoomProbe.unchanged() && zoomProbe.path.getAttribute('d') !== zoomProbe.initialPath"
+    )
+
+    before_wheel = float(slider.input_value())
+    history_bounds = page.locator("#history").bounding_box()
+    assert history_bounds is not None
+    x = history_bounds["x"] + history_bounds["width"] / 2
+    y = history_bounds["y"] + history_bounds["height"] / 2
+    page.mouse.move(x, y)
+    page.mouse.down(button="middle")
+    # Playwright's wheel helper omits the pressed-button mask.
+    session = page.context.new_cdp_session(page)
+    session.send(
+        "Input.dispatchMouseEvent",
+        {"type": "mouseWheel", "x": x, "y": y, "deltaX": 0, "deltaY": 100, "buttons": 4},
+    )
+    session.detach()
+    page.mouse.up(button="middle")
+    page.wait_for_function(
+        "previous => Number(document.querySelector('#scene-zoom').value) < previous",
+        arg=before_wheel,
+        polling=50,
+    )
+    assert before_wheel - float(slider.input_value()) == pytest.approx(0.225, abs=0.026)
+    page.evaluate("setZoomInput(1); stepFrames(); setZoomInput(0.25); stepFrames()")
+    assert page.locator(".constellation-group:visible").count() == 2
+    assert page.evaluate("""() => zoomProbe.unchanged() && zoomProbe.selected.tabIndex === -1
+      && zoomProbe.selected.getAttribute('aria-hidden') === 'true'
+      && zoomProbe.history.scrollLeft >= 0
+      && zoomProbe.history.scrollLeft <= zoomProbe.history.scrollWidth - zoomProbe.history.clientWidth""")
+    assert page.locator(".constellation-links path:visible").count() == 0
+    assert page.evaluate("""() => {
+      const link = zoomProbe.path.parentNode;
+      const observer = new MutationObserver(() => {});
+      observer.observe(link, {attributes:true, subtree:true});
+      stepFrames();
+      const writes = observer.takeRecords().length;
+      observer.disconnect();
+      return writes === 0;
+    }""")
+
+    page.evaluate("setZoomInput(0.30); stepFrames()")
+    assert page.locator(".constellation-group:visible").count() == 0
+    assert page.evaluate("""() => {
+      const {history, selected, path} = zoomProbe;
+      const expected = Math.max(0, Math.min(parseFloat(selected.style.left) - history.clientWidth / 2,
+        history.scrollWidth - history.clientWidth));
+      const spark = path.parentNode.querySelector('.sequence-spark');
+      const trail = path.parentNode.querySelector('.sequence-trail');
+      const [ax, ay, bx, by] = path.getAttribute('d').slice(1).split(/[,L]/).map(Number);
+      const cx = Number(spark.getAttribute('cx')), cy = Number(spark.getAttribute('cy'));
+      const progress = (cx - ax) / (bx - ax);
+      return zoomProbe.unchanged() && path.isConnected && selected.tabIndex === 0
+        && selected.getAttribute('aria-hidden') === 'false'
+        && selected.getAttribute('aria-pressed') === 'true'
+        && Math.abs(history.scrollLeft - expected) < 2
+        && spark.hasAttribute('cx') && spark.getAttribute('cx') === trail.getAttribute('x2')
+        && spark.getAttribute('cy') === trail.getAttribute('y2')
+        && progress >= 0 && progress <= 1 && Math.abs(cy - (ay + (by - ay) * progress)) < 0.1;
+    }""")
+    assert page.evaluate("zoomProbe.work()") == {"historyWrites": 0, "listeners": 0}
+    assert page.evaluate("() => { stepFrames(); return paintCount(); }") == (
+        0 if motion == "reduce" else 1
+    )
+
+    page.evaluate("setZoomInput(0.2)")
+    page.locator(".constellation-group:visible").first.click()
+    assert float(slider.input_value()) == 1
+    assert page.evaluate("zoomProbe.unchanged()")
+    assert page.evaluate("""() => {
+      const {history} = zoomProbe;
+      const other = history.querySelector('.constellation-star[aria-pressed=false]');
+      other.click();
+      setZoomInput(1.5);
+      const expected = Math.max(0, Math.min(parseFloat(other.style.left) - history.clientWidth / 2,
+        history.scrollWidth - history.clientWidth));
+      return zoomProbe.unchanged() && other.getAttribute('aria-pressed') === 'true'
+        && Math.abs(history.scrollLeft - expected) < 2;
+    }""")
+    page.evaluate("zoomProbe.finish()")
+    page.set_viewport_size({"width": 1050, "height": 800})
+    page.wait_for_function("!zoomProbe.unchanged()", polling=50)
