@@ -32,6 +32,8 @@ export function createConstellation({
     modules = [],
     lens = "none",
     geometry = null;
+  // Layout-only redraws preserve membership; data and grouping changes invalidate the count.
+  let personCount = 0, countDirty = true;
   let zoom = 0.8,
     wheelZoom = null,
     frame = 0,
@@ -95,9 +97,8 @@ export function createConstellation({
     history.value = maximum()
       ? Math.round((1 - element.scrollLeft / maximum()) * 1000)
       : 500;
-    const count = new Set(geometry.people.map(person => person.event.actor_id)).size;
     $("#scene-people-count").textContent =
-      `${count} ${count === 1 ? "person" : "people"} in ${geometry.grouped ? "saved" : "loaded"} history`;
+      `${personCount} ${personCount === 1 ? "person" : "people"} in ${geometry.grouped ? "saved" : "loaded"} history`;
   }
   function groupHint() {
     const key = $("#constellation-key");
@@ -316,6 +317,10 @@ export function createConstellation({
       modules,
       lens,
     });
+    if (countDirty) {
+      personCount = new Set(geometry.people.map(person => person.event.actor_id)).size;
+      countDirty = false;
+    }
     element.dataset.canPan = String(geometry.canPan);
     element.classList.toggle("is-group-overview", geometry.overview);
     element.classList.toggle("is-grouped", geometry.grouped);
@@ -605,9 +610,13 @@ export function createConstellation({
   reduced.addEventListener("change", preference);
   preference();
   return {
-    render,
+    render(nextEvents, identity) {
+      countDirty = true;
+      render(nextEvents, identity);
+    },
     update(nextEvents, identity) {
       const offset = position() ? position().x - element.scrollLeft : null;
+      countDirty = true;
       render(nextEvents, identity);
       if (offset !== null && position())
         element.scrollLeft = clamp(position().x - offset, 0, maximum());
@@ -621,12 +630,15 @@ export function createConstellation({
     configure: (nextModules, nextLens) => {
       modules = nextModules;
       lens = nextLens;
+      countDirty = true;
       if (geometry) render(events, selected);
     },
     clear: () => {
       stop();
       geometry = null;
       events = [];
+      personCount = 0;
+      countDirty = true;
       $("#constellation-key").hidden = true;
       $("#memory-scrubber").disabled = true;
       travelControls();

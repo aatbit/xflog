@@ -38,7 +38,9 @@ globalThis.MutationObserver = class {
   observe() {}
   disconnect() {}
 };
+let resizeScene;
 globalThis.ResizeObserver = class {
+  constructor(callback) { resizeScene = callback; }
   observe() {}
   disconnect() {}
 };
@@ -407,6 +409,87 @@ for (const type of ["mousedown", "auxclick"]) {
   cancelled = false;
   handlers[type]({ button: 1, target: { closest: () => ({}) }, preventDefault() { cancelled = true; } });
   assert.equal(cancelled, false, "Middle-clicking links retains normal browser behavior");
+}
+// Count only Set allocations made directly by the renderer's actor-count scan.
+const NativeSet = globalThis.Set;
+let actorScans = 0;
+globalThis.Set = class extends NativeSet {
+  constructor(values) {
+    super(values);
+    if (Array.isArray(values) && /at (?:navigator|render) \(/.test(new Error().stack.split("\n")[2]))
+      actorScans++;
+  }
+};
+const expectCount = (text) => assert.equal(controls.get("#scene-people-count").textContent, text);
+try {
+  root.dataset.motion = "on";
+  scene.configure([], "none");
+  assert.ok(actorScans > 0, "The scan spy detects a real count calculation");
+  const records = [event("a1", "A", 4, "follow.follow"), event("a2", "A", 3, "follow.unfollow"), event("b1", "B", 2, "follow.follow")];
+  const beforeRender = actorScans;
+  scene.render(records, "a1");
+  assert.equal(actorScans, beforeRender + 1, "New history recalculates the actor count once");
+  expectCount("2 people in loaded history");
+  records.push(event("a3", "A", 1, "follow.follow"));
+  scene.update(records, "a1");
+  expectCount("2 people in loaded history");
+  records.push(event("c1", "C", 0, "follow.follow"));
+  scene.update(records, "a1");
+  expectCount("3 people in loaded history");
+  records[0].actor_id = "D";
+  scene.render(records, "a1");
+  expectCount("4 people in loaded history");
+  records[0].actor_id = "B";
+  scene.update(records, "a1");
+  expectCount("3 people in loaded history");
+  const beforeLayout = actorScans;
+  scene.select("a2");
+  scene.scrub(0.4);
+  frame(6000);
+  frame(6016);
+  controls.get("#scene-zoom").handlers.input({ target: { value: "1.2" } });
+  zoomWheel(-100);
+  resizeScene();
+  assert.equal(actorScans, beforeLayout, "Frames, selection, scrubbing, zoom and resize reuse the actor count");
+
+  const groupModules = [{key:"activity",enabled:true,label:"Activity",buckets:[
+    {key:"follow.follow",label:"Followed you",tone:"positive"},
+    {key:"follow.unfollow",label:"Unfollowed",tone:"negative"},
+    {key:"unknown",label:"Unknown",tone:"neutral"},
+  ]}];
+  const duplicates = [
+    {...event("duplicate", "A", 3, "follow.follow"), audience_groups:{activity:"follow.follow"}},
+    {...event("duplicate", "B", 2, "follow.unfollow"), audience_groups:{activity:"follow.unfollow"}},
+  ];
+  scene.render(duplicates, "duplicate");
+  expectCount("1 person in loaded history");
+  const beforeConfigure = actorScans;
+  scene.configure(groupModules, "activity");
+  assert.equal(actorScans, beforeConfigure + 1, "Changing groups recalculates the actor count once");
+  expectCount("2 people in saved history");
+  scene.setZoom(0);
+  const beforeSeek = actorScans;
+  scene.seek(0, "instant");
+  assert.equal(actorScans, beforeSeek, "Leaving the grouped overview reuses the actor count");
+  expectCount("2 people in saved history");
+  scene.configure(groupModules, "none");
+  expectCount("1 person in loaded history");
+  scene.clear();
+  scene.render([event("solo", "Z", 0, "follow.follow")], "solo");
+  expectCount("1 person in loaded history");
+  scene.update([event("z1", "Z", 1, "follow.follow"), event("z2", "Z", 0, "follow.follow")], "z1");
+  expectCount("1 person in loaded history");
+  const otherScene = createConstellation({
+    element, root, escape: String, label: (e) => e.kind, initials: (e) => e.actor_id,
+    onSelect() {}, onOpen() {},
+  });
+  otherScene.render([event("x", "X", 1, "follow.follow"), event("y", "Y", 0, "follow.follow")], "x");
+  expectCount("2 people in loaded history");
+  scene.setZoom(0.8);
+  expectCount("1 person in loaded history");
+  otherScene.destroy();
+} finally {
+  globalThis.Set = NativeSet;
 }
 scene.destroy();
 console.log(
