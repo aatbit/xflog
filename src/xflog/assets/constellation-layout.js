@@ -150,6 +150,12 @@ export function constellationLayout({
     group.x = (zoom <= 0.25 ? overviewWidth : width) * (((index % columns) + 0.5) / inRow);
     group.y = zoom <= 0.25 ? upper + areaHeight * ((row + 0.5) / rows) : upper + areaHeight / 2;
   });
+  const positions = new Map();
+  occupied.forEach((group, groupIndex) => {
+    group.people.forEach((person, memberIndex) => {
+      positions.set(person, { group, memberIndex, groupIndex });
+    });
+  });
   const blend = clamp((zoom - 0.25) / 0.75, 0, 1);
   const spacing = (width < 680 ? 245 : 285) * zoom;
   const orderedPeople = buckets ? [...occupied].reverse().flatMap(group => group.people) : people;
@@ -157,14 +163,13 @@ export function constellationLayout({
   const worldWidth = zoom <= 0.25 ? overviewWidth : width + Math.max(0, orderedPeople.length - 1) * spacing * blend +
     Math.max(0, occupied.length - 1) * groupGap;
   const points = orderedPeople.map((person, index) => {
-    const group = occupied.find((item) => item.people.includes(person));
-    const member = group.people.indexOf(person);
+    const { group, memberIndex: member, groupIndex } = positions.get(person);
     const angle = member * 2.399963229728653;
     const radius = Math.min(width < 600 ? 44 : 76, 14 + Math.sqrt(member) * 13);
     const fitX = clamp(group.x + Math.cos(angle) * radius, 32, (zoom <= 0.25 ? overviewWidth : width) - 32);
     const fitY = clamp(group.y + Math.sin(angle) * radius * 0.6, upper, lower);
     const timelineX = width / 2 + (orderedPeople.length - 1 - index) * spacing;
-    const groupOffset = occupied.indexOf(group) * groupGap;
+    const groupOffset = groupIndex * groupGap;
     const timelineY = clamp(
       group.y + (seed(person.id) - 0.5) * Math.min(400, areaHeight * 0.9),
       upper + 20,

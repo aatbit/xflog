@@ -26,12 +26,20 @@ export function createConstellation({
   onOlder = () => {},
 }) {
   const $ = (selector) => root.querySelector(selector);
+  const zoomValue = $("#zoom-value"), zoomControl = $("#scene-zoom"),
+    zoomIn = $("#zoom-in"), zoomOut = $("#zoom-out"),
+    history = $("#memory-scrubber"), peopleCount = $("#scene-people-count"),
+    next = $("#memory-next"), previous = $("#memory-previous"),
+    key = $("#constellation-key"), context = $(".scene-context");
   const shootingStar = createShootingStar();
   let events = [],
     selected = null,
     modules = [],
     lens = "none",
     geometry = null;
+  let sceneVersion = 0;
+  // History is deduplicated by event ID before grouping, so only data changes alter membership.
+  let personCount = 0, countDirty = true;
   let zoom = 0.8,
     wheelZoom = null,
     frame = 0,
@@ -44,11 +52,14 @@ export function createConstellation({
   let stars = [],
     labels = [],
     sparks = [],
+    actorButtons = [],
+    sky = null, meteor = null, meteorTail = null,
     labelInset = 16,
     keyScope = null;
   const reduced = matchMedia("(prefers-reduced-motion: reduce)");
   const active = () =>
     geometry &&
+    root.isConnected && element.isConnected &&
     element.classList.contains("horizontal") &&
     root.dataset.route === "timeline" &&
     !document.hidden;
@@ -70,6 +81,19 @@ export function createConstellation({
     last = 0;
     root.dataset.animating = "false";
   }
+  function releaseScene() {
+    if (drag && element.hasPointerCapture(drag.id)) element.releasePointerCapture(drag.id);
+    drag = null;
+    target = null;
+    seeking = false;
+    delete element.dataset.panning;
+    delete element.dataset.userScrolling;
+    stars = [];
+    labels = [];
+    sparks = [];
+    actorButtons = [];
+    sky = meteor = meteorTail = null;
+  }
   function queue() {
     if (!frame && active()) frame = requestAnimationFrame(paint);
   }
@@ -77,30 +101,27 @@ export function createConstellation({
     if (!geometry) return;
     travelControls();
     groupHint();
-    $("#zoom-value").textContent = `${Math.round(zoom * 100)}%`;
-    $("#scene-zoom").value = zoom;
-    $("#scene-zoom").setAttribute(
+    zoomValue.textContent = `${Math.round(zoom * 100)}%`;
+    zoomControl.value = zoom;
+    zoomControl.setAttribute(
       "aria-valuetext",
       geometry.overview
         ? "Audience groups overview"
         : `${Math.round(zoom * 100)} percent`,
     );
-    for (const id of ["#scene-zoom", "#zoom-in", "#zoom-out"])
-      $(id).disabled = geometry.people.length < 2;
-    $("#zoom-out").disabled ||= zoom === 0;
-    $("#zoom-in").disabled ||= zoom === 2;
-    const history = $("#memory-scrubber");
+    for (const control of [zoomControl, zoomIn, zoomOut])
+      control.disabled = geometry.people.length < 2;
+    zoomOut.disabled ||= zoom === 0;
+    zoomIn.disabled ||= zoom === 2;
     history.max = 1000;
     history.disabled = !geometry.canPan;
     history.value = maximum()
       ? Math.round((1 - element.scrollLeft / maximum()) * 1000)
       : 500;
-    const count = new Set(geometry.people.map(person => person.event.actor_id)).size;
-    $("#scene-people-count").textContent =
-      `${count} ${count === 1 ? "person" : "people"} in ${geometry.grouped ? "saved" : "loaded"} history`;
+    peopleCount.textContent =
+      `${personCount} ${personCount === 1 ? "person" : "people"} in ${geometry.grouped ? "saved" : "loaded"} history`;
   }
   function groupHint() {
-    const key = $("#constellation-key");
     key.hidden = !geometry.grouped;
     const group = geometry.groups.find(item => item.key === position()?.group);
     const scope = geometry.overview ? "overview" : group?.key;
@@ -111,7 +132,7 @@ export function createConstellation({
         : groupKey(group ? [group] : [], esc)
       : "";
     key.setAttribute("aria-label", geometry.overview ? "Constellation groups" : "Current constellation");
-    labelInset = ($(".scene-context")?.offsetHeight || 0) + 28;
+    labelInset = (context?.offsetHeight || 0) + 28;
   }
   function selectVisibleProfile(notify = onSelect) {
     const center = element.scrollLeft + element.clientWidth / 2;
@@ -128,39 +149,34 @@ export function createConstellation({
   function travelControls() {
     const index = selectedProfileIndex();
     const canPan = geometry?.canPan && index >= 0;
-    for (const [id, available] of [
+    for (const [button, available] of [
       [
-        "#memory-next",
+        next,
         canPan && (index < geometry.people.length - 1 || hasOlder()),
       ],
-      ["#memory-previous", canPan && index > 0],
+      [previous, canPan && index > 0],
     ]) {
-      const button = $(id);
       button.disabled = !available;
       button.classList.toggle("is-unavailable", !available);
       button.setAttribute("aria-hidden", String(!available));
       button.setAttribute("aria-label", geometry?.grouped
-        ? id === "#memory-next" ? "Previous event" : "Next event"
-        : id === "#memory-next" ? "Older memory" : "Newer memory");
+        ? button === next ? "Previous event" : "Next event"
+        : button === next ? "Older memory" : "Newer memory");
     }
   }
   function select(identity) {
+    if (!root.isConnected || !element.isConnected) return;
     selected = identity;
     const chosenPerson = position();
-    element.querySelectorAll("[data-actor]").forEach((button) => {
+    actorButtons.forEach(({button, personElement, person}) => {
       const chosen = button.dataset.event === chosenPerson?.event.event_id;
-      const person = geometry.people.find(
-        (item) => item.event.event_id === button.dataset.event,
-      );
       const event = chosen ? current() : person.event;
       button.setAttribute("aria-pressed", String(chosen));
       button.setAttribute(
         "aria-label",
         `${event.name || event.handle || "X account"}, ${label(event)}, recorded event`,
       );
-      button
-        .closest(".constellation-person")
-        .classList.toggle("is-selected", chosen);
+      personElement.classList.toggle("is-selected", chosen);
     });
     for (const item of labels) {
       const event = item.person === chosenPerson ? current() : item.person.event;
@@ -168,9 +184,9 @@ export function createConstellation({
       if (item.identity !== event.event_id) {
         item.label.innerHTML = personLabel(item.person, event);
         item.identity = event.event_id;
+        item.controls = item.label.querySelectorAll?.("button,a") || [];
+        item.preview = item.label.querySelector?.(".star-post");
       }
-      item.controls = item.label.querySelectorAll?.("button,a") || [];
-      item.preview = item.label.querySelector?.(".star-post");
       const box = item.label.getBoundingClientRect();
       item.width = box.width;
       item.height = box.height;
@@ -205,10 +221,7 @@ export function createConstellation({
     if (browsing) selectVisibleProfile(onPreview);
     const left = element.scrollLeft,
       chosenPerson = position();
-    element.querySelector(".constellation-sky").style.transform =
-      `translateX(${left}px)`;
-    const meteor = element.querySelector(".shooting-star");
-    const meteorTail = element.querySelector(".shooting-tail");
+    sky.style.transform = `translateX(${left}px)`;
     const shot = moving()
       ? shootingStar(clock, element.clientWidth, element.clientHeight)
       : null;
@@ -304,6 +317,7 @@ export function createConstellation({
     else last = 0;
   }
   function render(nextEvents, identity) {
+    const renderedVersion = ++sceneVersion;
     stop();
     wheelZoom = null;
     events = nextEvents;
@@ -316,6 +330,10 @@ export function createConstellation({
       modules,
       lens,
     });
+    if (countDirty) {
+      personCount = new Set(geometry.people.map(person => person.event.actor_id)).size;
+      countDirty = false;
+    }
     element.dataset.canPan = String(geometry.canPan);
     element.classList.toggle("is-group-overview", geometry.overview);
     element.classList.toggle("is-grouped", geometry.grouped);
@@ -326,15 +344,40 @@ export function createConstellation({
       (_, index) =>
         `<circle class="sky-star" cx="${seed("x" + index) * element.clientWidth}" cy="${seed("y" + index) * element.clientHeight * 0.74}" r="${index % 9 ? 0.8 : 1.5}"/>`,
     ).join("");
-    const links = geometry.groups.flatMap((group) => {
-      const people = geometry.people.filter(
-        (person) => person.group === group.key,
-      );
-      return people
-        .slice(1)
-        .map((person, index) => ({ a: person, b: people[index], color: group.color, dash: group.dash }));
-    });
+    const links = [];
+    if (!geometry.overview) {
+      if (geometry.groups.length === 1) {
+        const group = geometry.groups[0];
+        let previous = null;
+        for (const person of geometry.people) {
+          if (person.group !== group.key) continue;
+          if (previous) links.push({ a: person, b: previous, color: group.color, dash: group.dash });
+          previous = person;
+        }
+      } else if (geometry.groups.length > 1) {
+        const peopleByGroup = new Map(geometry.groups.map(group => [group.key, []]));
+        // Map matches NaN keys, but the previous strict group comparison did not.
+        for (const person of geometry.people)
+          if (!Number.isNaN(person.group)) peopleByGroup.get(person.group)?.push(person);
+        for (const group of geometry.groups) {
+          const people = peopleByGroup.get(group.key);
+          for (let index = 1; index < people.length; index++)
+            links.push({ a: people[index], b: people[index - 1], color: group.color, dash: group.dash });
+        }
+      }
+    }
     element.innerHTML = `<svg class="constellation-sky" viewBox="0 0 ${element.clientWidth} ${element.clientHeight}" aria-hidden="true">${background}<defs><linearGradient id="xf-shooting-tail" class="shooting-tail" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="currentColor" stop-opacity="0"/><stop offset="1" stop-color="currentColor"/></linearGradient></defs><line class="shooting-star" data-active="false" stroke="url(#xf-shooting-tail)" opacity="0"/></svg><div class="constellation-canvas" style="width:${geometry.width}px"><svg class="constellation-links${geometry.grouped ? " is-grouped" : ""}" viewBox="0 0 ${geometry.width} ${element.clientHeight}" aria-hidden="true">${geometry.overview ? "" : links.map(({ a, b, color, dash }) => `<g data-link-group="${esc(a.group)}" style="${color ? `color:${color}` : ""}"><path d="M${a.x},${a.y}L${b.x},${b.y}" stroke-dasharray="${dash || ""}"/><line class="sequence-trail"/><circle class="sequence-spark" r="2"/></g>`).join("")}</svg>${geometry.people.map((person) => `<article class="constellation-person" data-person="${esc(person.id)}" style="--group-color:${person.color || "var(--muted)"}"><button class="constellation-star ${esc(person.tone)}" type="button" style="left:${person.x}px;top:${person.y}px" data-actor="${esc(person.event.actor_id)}" data-event="${esc(person.event.event_id)}" aria-label="${esc(person.event.name || person.event.handle || "X account")}, ${esc(label(person.event))}, recorded event"><span class="star-core" aria-hidden="true"></span><span class="star-initials" aria-hidden="true">${esc(initials(person.event))}</span></button><div class="star-label" data-label="${esc(person.event.event_id)}" aria-label="Open recorded event for ${esc(person.event.name || person.event.handle || "X account")}">${personLabel(person)}</div></article>`).join("")}${geometry.overview ? geometry.groups.map((group) => `<button type="button" class="constellation-group ${esc(group.tone)}" style="--group-color:${group.color};left:${group.x}px;top:${group.y}px" data-group="${esc(group.key)}" title="${esc(groupDescription(group))}" aria-label="Explore ${esc(group.label)}, ${esc(groupDescription(group))}"><span class="cluster-count">${group.people.length}</span><strong title="${esc(group.label)}">${esc(group.label)}</strong></button>`).join("") : ""}</div>`;
+    sky = element.querySelector(".constellation-sky");
+    meteor = element.querySelector(".shooting-star");
+    meteorTail = element.querySelector(".shooting-tail");
+    const peopleByEvent = new Map();
+    for (const person of geometry.people)
+      if (!peopleByEvent.has(person.event.event_id))
+        peopleByEvent.set(person.event.event_id, person);
+    actorButtons = [...element.querySelectorAll("[data-actor]")].map(button => ({
+      button, personElement: button.closest(".constellation-person"),
+      person: peopleByEvent.get(button.dataset.event),
+    }));
     stars = [...element.querySelectorAll(".sky-star")];
     const labelNodes = new Map(
       [...element.querySelectorAll("[data-label]")].map((item) => [
@@ -346,19 +389,23 @@ export function createConstellation({
       person,
       label: labelNodes.get(person.event.event_id),
     }));
+    const trails = element.querySelectorAll(".sequence-trail");
     sparks = [...element.querySelectorAll(".sequence-spark")].map(
       (spark, index) => ({
         element: spark,
-        trail: element.querySelectorAll(".sequence-trail")[index],
+        trail: trails[index],
         ...links[index],
       }),
     );
-    element.querySelectorAll("[data-actor]").forEach((button) =>
+    actorButtons.forEach(({button, person}) =>
       button.addEventListener("click", () => {
-        clickPerson(geometry.people.find(person => person.event.event_id === button.dataset.event));
+        if (renderedVersion !== sceneVersion || !geometry || !root.isConnected ||
+            !element.isConnected || !element.contains(button) ||
+            !person || person.event.event_id !== button.dataset.event) return;
+        clickPerson(person);
       }),
     );
-    element.querySelectorAll("[data-actor]").forEach((button) => {
+    actorButtons.forEach(({button}) => {
       button.tabIndex = geometry.overview ? -1 : 0;
       button.setAttribute("aria-hidden", String(geometry.overview));
     });
@@ -586,9 +633,9 @@ export function createConstellation({
     [element, "pointerup", up],
     [element, "pointercancel", up],
     [document, "visibilitychange", refresh],
-    [$("#zoom-in"), "click", () => setZoom(zoom + 0.25)],
-    [$("#zoom-out"), "click", () => setZoom(zoom - 0.25)],
-    [$("#scene-zoom"), "input", (event) => setZoom(Number(event.target.value))],
+    [zoomIn, "click", () => setZoom(zoom + 0.25)],
+    [zoomOut, "click", () => setZoom(zoom - 0.25)],
+    [zoomControl, "input", (event) => setZoom(Number(event.target.value))],
   ];
   listeners.forEach(([target, type, listener, options]) =>
     target.addEventListener(type, listener, options),
@@ -605,9 +652,13 @@ export function createConstellation({
   reduced.addEventListener("change", preference);
   preference();
   return {
-    render,
+    render(nextEvents, identity) {
+      countDirty = true;
+      render(nextEvents, identity);
+    },
     update(nextEvents, identity) {
       const offset = position() ? position().x - element.scrollLeft : null;
+      countDirty = true;
       render(nextEvents, identity);
       if (offset !== null && position())
         element.scrollLeft = clamp(position().x - offset, 0, maximum());
@@ -627,14 +678,19 @@ export function createConstellation({
       stop();
       geometry = null;
       events = [];
-      $("#constellation-key").hidden = true;
-      $("#memory-scrubber").disabled = true;
+      releaseScene();
+      personCount = 0;
+      countDirty = true;
+      key.hidden = true;
+      history.disabled = true;
       travelControls();
-      for (const id of ["#scene-zoom", "#zoom-in", "#zoom-out"])
-        $(id).disabled = true;
+      for (const control of [zoomControl, zoomIn, zoomOut])
+        control.disabled = true;
     },
     destroy: () => {
       stop();
+      geometry = null;
+      releaseScene();
       observer.disconnect();
       resize.disconnect();
       reduced.removeEventListener("change", preference);
