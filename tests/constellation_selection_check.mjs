@@ -114,7 +114,7 @@ let nodes = [],
   labels = [],
   paths = [];
 let captureLinks = false, renderedLinks = [], renderedTrails = [], renderedSparks = [];
-let capturePreparation = false;
+let beforeMarkup = false, measureRenderWork = false;
 let sceneParts = {};
 const handlers = {};
 let scrollLeft = 0, roundScroll = false, capturedPointers = 0, releasedPointers = 0;
@@ -157,7 +157,7 @@ const element = {
   },
   contains(node) { return nodes.includes(node); },
   set innerHTML(value) {
-    capturePreparation = false;
+    beforeMarkup = false;
     sceneParts = Object.fromEntries([".constellation-sky", ".shooting-star", ".shooting-tail"].map(key => [key, { style: {}, dataset: {}, attributes: {}, setAttribute(k, v) { this.attributes[k] = v; } }]));
     paths = [...value.matchAll(/<path d="M([\d.]+),[\d.]+L([\d.]+),[\d.]+"/g)];
     renderedLinks = captureLinks ? [...value.matchAll(/<g data-link-group="([^"]*)" style="([^"]*)"><path d="([^"]*)" stroke-dasharray="([^"]*)"\/>/g)]
@@ -918,6 +918,7 @@ try {
   const invalidRecords = connectionEvents.slice(0, 2).map(item => ({...item, audience_groups:{invalid:NaN}}));
   verifyConnections(invalidRecords, [invalid], "invalid", 0.8);
   assert.equal(renderedLinks.length, 0, "NaN group keys do not match under the old strict comparison");
+  verifyConnections(invalidRecords, [invalid], "invalid", 0);
   const mixedInvalid = [...invalidRecords, ...connectionEvents.slice(2, 4).map(item => ({
     ...item, audience_groups:{invalid:"unknown"},
   }))];
@@ -976,39 +977,54 @@ try {
   captureLinks = false;
 }
 
-// Observe actual renders before the DOM replacement, without production hooks.
+// Count positioned-point for-of/filter passes and link-shaped outputs around markup replacement.
+// The post-markup for-of pass builds the separate event-to-person selection lookup.
 function measurePreparation(action) {
   const NativeMap = globalThis.Map, nativePush = Array.prototype.push;
-  const nativeIterator = Array.prototype[Symbol.iterator];
-  const counts = {indexes:0, traversals:0, links:0};
+  const nativeIterator = Array.prototype[Symbol.iterator], nativeMap = Array.prototype.map;
+  const nativeFilter = Array.prototype.filter;
+  const counts = {groupIndexes:0, preMarkupForOf:0, postMarkupForOf:0, preMarkupFilters:0, linkObjects:0};
+  const isLink = item => item && typeof item === "object" &&
+    item.a?.event && item.b?.event && "group" in item.a && "group" in item.b &&
+    "color" in item && "dash" in item;
   globalThis.Map = class extends NativeMap {
     constructor(entries) {
       super(entries);
-      if (capturePreparation && Array.isArray(entries) && entries.length &&
+      if (beforeMarkup && Array.isArray(entries) && entries.length &&
           entries.every(entry => Array.isArray(entry) && Array.isArray(entry[1]) && !entry[1].length))
-        counts.indexes++;
+        counts.groupIndexes++;
     }
   };
   Array.prototype[Symbol.iterator] = function() {
-    if (capturePreparation && this.length && this[0]?.event && Array.isArray(this[0]?.events) &&
-        "group" in this[0] && "x" in this[0]) counts.traversals++;
+    if (measureRenderWork && this.length && this[0]?.event && Array.isArray(this[0]?.events) &&
+        "group" in this[0] && "x" in this[0])
+      counts[beforeMarkup ? "preMarkupForOf" : "postMarkupForOf"]++;
     return nativeIterator.call(this);
   };
   Array.prototype.push = function(...items) {
-    if (capturePreparation)
-      counts.links += items.filter(item => item && typeof item === "object" &&
-        item.a?.event && item.b?.event && "group" in item.a && "group" in item.b &&
-        "color" in item && "dash" in item).length;
+    if (beforeMarkup) counts.linkObjects += nativeFilter.call(items, isLink).length;
     return nativePush.apply(this, items);
   };
+  Array.prototype.map = function(...args) {
+    const result = nativeMap.apply(this, args);
+    if (beforeMarkup) counts.linkObjects += nativeFilter.call(result, isLink).length;
+    return result;
+  };
+  Array.prototype.filter = function(...args) {
+    if (beforeMarkup && this.length && this[0]?.event && Array.isArray(this[0]?.events) &&
+        "group" in this[0] && "x" in this[0]) counts.preMarkupFilters++;
+    return nativeFilter.apply(this, args);
+  };
   try {
-    capturePreparation = true;
+    beforeMarkup = measureRenderWork = true;
     action();
     return counts;
   } finally {
-    capturePreparation = false;
+    beforeMarkup = measureRenderWork = false;
     globalThis.Map = NativeMap;
     Array.prototype.push = nativePush;
+    Array.prototype.map = nativeMap;
+    Array.prototype.filter = nativeFilter;
     Array.prototype[Symbol.iterator] = nativeIterator;
   }
 }
@@ -1017,8 +1033,10 @@ assert.deepEqual(measurePreparation(() => {
   new Map([["all", []]]);
   for (const person of [point]) { void person; }
   [].push({a:point,b:point,color:"red",dash:""});
+  [point].map(person => ({a:person,b:person,color:"red",dash:""}));
+  [point].filter(() => true);
   [].push({a:"unrelated",b:"event",color:"red",dash:""});
-}), {indexes:1,traversals:1,links:1}, "Structural counters have positive controls");
+}), {groupIndexes:1,preMarkupForOf:1,postMarkupForOf:0,preMarkupFilters:1,linkObjects:2}, "Structural counters have positive controls");
 const preparationScene = createConstellation({
   element, root, escape:String, label:item => item.kind, initials:item => item.actor_id,
   onSelect() {}, onOpen() {},
@@ -1027,20 +1045,21 @@ try {
   preparationScene.configure([activity], "activity");
   preparationScene.render(connectionEvents, connectionEvents[0].event_id);
   assert.deepEqual(measurePreparation(() => preparationScene.setZoom(0)),
-    {indexes:0,traversals:0,links:0}, "Overview skips indexing, traversal and link allocation");
+    {groupIndexes:0,preMarkupForOf:0,postMarkupForOf:1,preMarkupFilters:0,linkObjects:0},
+    "Overview skips connection preparation but still builds the selection lookup");
   assert.deepEqual(measurePreparation(() => preparationScene.setZoom(1)),
-    {indexes:1,traversals:1,links:14}, "Multiple groups rebuild their indexed links");
+    {groupIndexes:1,preMarkupForOf:1,postMarkupForOf:1,preMarkupFilters:0,linkObjects:14}, "Multiple groups rebuild their indexed links");
   preparationScene.update(oneGroup, oneGroup[0].event_id);
   assert.deepEqual(measurePreparation(() => preparationScene.setZoom(0.8)),
-    {indexes:0,traversals:1,links:17}, "One group streams connections without an index");
+    {groupIndexes:0,preMarkupForOf:1,postMarkupForOf:1,preMarkupFilters:0,linkObjects:17}, "One group streams connections without an index");
   preparationScene.configure([], "none");
   assert.deepEqual(measurePreparation(() => preparationScene.setZoom(0.8)),
-    {indexes:0,traversals:1,links:17}, "Ungrouped connections also stream without an index");
+    {groupIndexes:0,preMarkupForOf:1,postMarkupForOf:1,preMarkupFilters:0,linkObjects:17}, "Ungrouped connections also stream without an index");
   preparationScene.update([oneGroup[0]], oneGroup[0].event_id);
   assert.deepEqual(measurePreparation(() => preparationScene.setZoom(0.8)),
-    {indexes:0,traversals:1,links:0}, "A singleton produces no link or index");
+    {groupIndexes:0,preMarkupForOf:1,postMarkupForOf:1,preMarkupFilters:0,linkObjects:0}, "A singleton produces no link or index");
   assert.deepEqual(measurePreparation(() => preparationScene.render([], null)),
-    {indexes:0,traversals:0,links:0}, "Empty history produces no connection work");
+    {groupIndexes:0,preMarkupForOf:0,postMarkupForOf:0,preMarkupFilters:0,linkObjects:0}, "Empty history produces no connection work");
 } finally {
   preparationScene.destroy();
 }
