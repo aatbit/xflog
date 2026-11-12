@@ -1201,7 +1201,7 @@ const near = {id: Symbol("test"), top: 0, distance: 0};
 const far = {...near, distance: 1};
 Array.prototype.sort = function(compare) {
   // The initial candidate sort uses distance. Neighbor sorts use vertical position.
-  if (this[0]?.id?.event && "minTop" in this[0] && compare(near, far) === -1)
+  if ((!this.length || (this[0]?.id?.event && "minTop" in this[0])) && compare?.(near, far) === -1)
     collisionPasses++;
   return nativeSort.call(this, compare);
 };
@@ -1266,6 +1266,76 @@ try {
   viewportScene.setZoom(0.9);
   frame(40128);
   assert.ok(spark.attributeWrites > frozen, "Paused sparks still rebind to changed geometry");
+
+  const groupedEvents = [withPreview, ...events].map(item => ({
+    ...item, audience_groups: {activity: item.kind},
+  }));
+  viewportScene.configure([activity], "activity");
+  viewportScene.setZoom(0);
+  viewportScene.render(groupedEvents, "preview");
+  const overviewLabels = labels;
+  const labelWork = () => [collisionPasses, labelReads, previewReads, labelWrites()];
+  const beforeOverview = labelWork();
+  frame(40144);
+  assert.deepEqual(labelWork(), beforeOverview, "A fresh overview frame skips label layout");
+  const assertOverviewHidden = () => {
+    assert.ok(labels.every(item => item.style.visibility === "hidden" &&
+      item.attributes["aria-hidden"] === "true" && item.identityControl.tabIndex === -1 &&
+      (!item.previewControl || item.previewControl.tabIndex === -1)));
+  };
+  assertOverviewHidden();
+  for (const [index, zoom] of [0.05, 0.25, 0].entries()) {
+    viewportScene.setZoom(zoom);
+    frame(40160 + index * 16);
+  }
+  assert.deepEqual(labelWork(), beforeOverview, "Overview zoom does no label reads, collision passes or visibility writes");
+  assert.ok(labels.every(item => item.style.left === undefined && item.style.top === undefined),
+    "Overview zoom leaves fresh labels unpositioned");
+
+  const scrollWidth = element.scrollWidth;
+  element.scrollWidth = element.clientWidth;
+  viewportScene.setZoom(0.3);
+  assertOverviewHidden();
+  frame(40208);
+  element.scrollWidth = scrollWidth;
+  assert.equal(collisionPasses, beforeOverview[0] + 1, "Expansion runs collision layout");
+  assert.equal(labelReads - beforeOverview[1], labels.length, "First expansion measures cold labels");
+  assert.equal(previewReads - beforeOverview[2], 1, "First expansion measures the selected preview");
+  const selectedLabel = labels.find(item => item.dataset.label === "preview");
+  assert.equal(selectedLabel.style.visibility, "visible");
+  assert.equal(selectedLabel.attributes["aria-hidden"], "false");
+  assert.equal(selectedLabel.identityControl.tabIndex, 0);
+  assert.equal(selectedLabel.previewControl.tabIndex, 0);
+
+  const measured = [labelReads, previewReads];
+  viewportScene.setZoom(0.25);
+  frame(40224);
+  assertOverviewHidden();
+  viewportScene.setZoom(0.4);
+  frame(40240);
+  assert.equal(labels, overviewLabels, "Repeated transitions preserve the label nodes");
+  assert.deepEqual([labelReads, previewReads], measured, "Expansion reuses still-valid dimensions");
+  assert.equal(selectedLabel.attributes["aria-hidden"], "false");
+  assert.equal(pending.size, 0, "Paused expansion settles after one frame");
+
+  viewportScene.setZoom(0.25);
+  viewportScene.select("new-A");
+  frame(40256);
+  assertOverviewHidden();
+  assert.deepEqual([labelReads, previewReads], measured, "Selection in overview defers invalidated sizes");
+  element.scrollLeft = 100;
+  handlers.scroll();
+  const beforeScroll = labelWork();
+  frame(40272);
+  assert.deepEqual(labelWork(), beforeScroll, "Overview scrolling still skips timeline label work");
+  assert.equal(Number(controls.get("#memory-scrubber").value), 800, "The scrubber tracks the overview offset");
+
+  viewportScene.setZoom(0.4);
+  frame(40288);
+  assert.equal(labelReads - measured[0], 2, "Expansion measures only labels affected by the selection change");
+  const newlySelectedLabel = labels.find(item => item.dataset.label === "new-A");
+  assert.equal(newlySelectedLabel.attributes["aria-hidden"], "false");
+  assert.equal(newlySelectedLabel.identityControl.tabIndex, 0);
 } finally {
   viewportScene.destroy();
   Array.prototype.sort = nativeSort;

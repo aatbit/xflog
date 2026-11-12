@@ -524,6 +524,27 @@ def test_zoom_reuses_grouped_scene_and_rebinds_animation(offline_page, motion):
       return writes === 0;
     }""")
 
+    assert page.evaluate("""() => {
+      const {history} = zoomProbe;
+      const labels = [...history.querySelectorAll('.star-label')];
+      const hidden = () => labels.every(label => getComputedStyle(label).visibility === 'hidden'
+        && label.getAttribute('aria-hidden') === 'true'
+        && [...label.querySelectorAll('button, a')].every(control => control.tabIndex === -1));
+      const observer = new MutationObserver(() => {});
+      for (const label of labels) observer.observe(label, {attributes: true, subtree: true});
+      const width = () => Math.max(history.clientWidth, history.querySelector('.constellation-canvas').offsetWidth);
+      try {
+        for (const zoom of [0, 0.1, 0.25]) {
+          setZoomInput(zoom);
+          stepFrames();
+          if (!hidden() || history.scrollWidth !== width()) return false;
+        }
+        return zoomProbe.unchanged() && observer.takeRecords().length === 0;
+      } finally {
+        observer.disconnect();
+      }
+    }""")
+
     page.evaluate("setZoomInput(0.30); stepFrames()")
     assert page.locator(".constellation-group:visible").count() == 0
     assert page.evaluate("""() => {
@@ -535,7 +556,10 @@ def test_zoom_reuses_grouped_scene_and_rebinds_animation(offline_page, motion):
       const [ax, ay, bx, by] = path.getAttribute('d').slice(1).split(/[,L]/).map(Number);
       const cx = Number(spark.getAttribute('cx')), cy = Number(spark.getAttribute('cy'));
       const progress = (cx - ax) / (bx - ax);
+      const label = selected.parentElement.querySelector('.star-label');
       return zoomProbe.unchanged() && path.isConnected && selected.tabIndex === 0
+        && getComputedStyle(label).visibility === 'visible'
+        && label.getAttribute('aria-hidden') === 'false' && label.querySelector('button').tabIndex === 0
         && selected.getAttribute('aria-hidden') === 'false'
         && selected.getAttribute('aria-pressed') === 'true'
         && Math.abs(history.scrollLeft - expected) < 2

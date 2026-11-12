@@ -512,6 +512,8 @@
   border: 0;
   background: transparent;
 }
+/* Retained timeline positions must not extend the overview scroll area. */
+.is-group-overview .star-label,
 .is-group-overview .star-initials {
   display: none;
 }

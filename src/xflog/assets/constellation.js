@@ -250,7 +250,6 @@ export function createConstellation({
       item.label.style.left = `${center + left}px`;
       item.label.style.top = `${top}px`;
       if (
-        !geometry.overview &&
         (chosen || (x >= 12 && x <= viewportWidth - 12)) &&
         center - width / 2 >= 12 &&
         center + width / 2 <= viewportWidth - 12
@@ -346,7 +345,7 @@ export function createConstellation({
     if (!browsing) browseLeft = null;
     if (scrolled) sky.style.transform = `translateX(${left}px)`;
     if (scrolled || labelsDirty) {
-      layoutLabels(left);
+      if (!geometry.overview) layoutLabels(left);
       scrubber();
       viewportLeft = left;
       labelsDirty = false;
@@ -441,8 +440,8 @@ export function createConstellation({
             !event?.target?.closest?.("a")) clickPerson(first);
       });
     });
-    updateMode();
     applySelection(identity, true);
+    updateMode();
     anchor();
     scrubber();
     queue();
@@ -592,7 +591,8 @@ export function createConstellation({
     zoomControls();
     travelControls();
     scrubber();
-    labelsDirty = animationDirty = true;
+    labelsDirty = !geometry.overview;
+    animationDirty = true;
     queue();
   }
   function scrub(progress) {
