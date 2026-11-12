@@ -47,6 +47,7 @@ globalThis.ResizeObserver = class {
 const controls = new Map(),
   opened = [];
 let olderLoads = 0;
+let shellQueries = 0, sceneQueries = 0, actorQueries = 0, descendantQueries = 0;
 const selectedSteps = [];
 const previewSteps = [];
 function button(dataset) {
@@ -55,7 +56,14 @@ function button(dataset) {
     style: {},
     attributes: {},
     handlers: {},
-    innerHTML: "",
+    markup: "",
+    get innerHTML() { return this.markup; },
+    set innerHTML(value) {
+      this.markup = value;
+      this.identityControl = { tabIndex: 0 };
+      this.previewControl = value.includes('class="star-post"')
+        ? { tabIndex: 0, offsetHeight: 24, style: {} } : null;
+    },
     classList: { toggle() {} },
     setAttribute(k, v) {
       this.attributes[k] = v;
@@ -70,11 +78,14 @@ function button(dataset) {
     getBoundingClientRect() {
       return { width: 190, height: 140 };
     },
+    querySelectorAll() { descendantQueries++; return [this.identityControl, this.previewControl].filter(Boolean); },
+    querySelector() { descendantQueries++; return this.previewControl; },
   };
 }
 const root = {
   dataset: { route: "timeline", motion: "on" },
   querySelector(key) {
+    shellQueries++;
     if (key.startsWith("#") && !controlIds.has(key.slice(1))) return null;
     if (!controls.has(key))
       controls.set(key, {
@@ -93,6 +104,7 @@ const root = {
 let nodes = [],
   labels = [],
   paths = [];
+let sceneParts = {};
 const handlers = {};
 let scrollLeft = 0, roundScroll = false;
 const element = {
@@ -117,10 +129,12 @@ const element = {
     return true;
   },
   releasePointerCapture() {},
-  querySelector() {
-    return { style: {}, dataset: {}, setAttribute() {} };
+  querySelector(key) {
+    sceneQueries++;
+    return sceneParts[key];
   },
   querySelectorAll(key) {
+    if (key === "[data-actor]") actorQueries++;
     return key === "[data-actor]"
       ? nodes
       : key === "[data-label]"
@@ -128,6 +142,7 @@ const element = {
         : [];
   },
   set innerHTML(value) {
+    sceneParts = Object.fromEntries([".constellation-sky", ".shooting-star", ".shooting-tail"].map(key => [key, { style: {}, dataset: {}, attributes: {}, setAttribute(k, v) { this.attributes[k] = v; } }]));
     paths = [...value.matchAll(/<path d="M([\d.]+),[\d.]+L([\d.]+),[\d.]+"/g)];
     const buttons = [
       ...value.matchAll(/<(?:button|div(?= class="star-label"))\b([^>]*)>([\s\S]*?)<\/(?:button|div)>/g),
@@ -173,6 +188,7 @@ const scene = createConstellation({
   hasOlder: () => true,
   onOlder: () => olderLoads++,
 });
+const resizeFirstScene = resizeScene;
 scene.render(events, "old-A");
 assert.equal(
   Number(controls.get("#scene-zoom").value),
@@ -504,7 +520,76 @@ try {
 } finally {
   globalThis.Set = NativeSet;
 }
+scene.render(events, "old-A");
+const previousSky = sceneParts[".constellation-sky"];
+const beforeQueries = {shellQueries, sceneQueries, actorQueries, descendantQueries};
+scene.select("other-B");
+frame(7000);
+frame(7016);
+assert.equal(shellQueries, beforeQueries.shellQueries, "Shell controls are reused during selection and frames");
+assert.equal(sceneQueries, beforeQueries.sceneQueries, "Frames reuse scene-specific elements");
+assert.equal(actorQueries, beforeQueries.actorQueries, "Selection reuses the current actor buttons");
+assert.equal(descendantQueries, beforeQueries.descendantQueries, "Unchanged label markup reuses its descendants");
+scene.setZoom(1);
+assert.notEqual(sceneParts[".constellation-sky"], previousSky, "A redraw creates new sky nodes");
+previousSky.style.transform = "old scene";
+frame(7032);
+assert.equal(previousSky.style.transform, "old scene", "Frames never update the detached sky after redraw");
+assert.notEqual(sceneParts[".constellation-sky"].style.transform, undefined, "Frames update the new sky");
+const beforeResizeSky = sceneParts[".constellation-sky"];
+resizeFirstScene();
+beforeResizeSky.style.transform = "detached after resize";
+frame(7040);
+assert.equal(beforeResizeSky.style.transform, "detached after resize", "Resize never paints the previous sky");
+assert.notEqual(sceneParts[".constellation-sky"].style.transform, undefined, "Resize uses the new sky");
+scene.clear();
+assert.equal(pending.size, 0, "Clear cancels the active frame");
+scene.render(events, "new-A");
+frame(7048);
+assert.notEqual(sceneParts[".constellation-sky"].style.transform, undefined, "A new scene works after clear");
+const withPreview = {...event("preview", "P", 1, "interaction.replies"), post_id:"123", post_text:"First post"};
+scene.render([withPreview], "preview");
+const oldLabel = labels[0], oldPreview = oldLabel.previewControl;
+frame(7064);
+assert.ok(oldPreview && oldPreview.style.top, "Selected post preview is updated by paint");
+const beforeSameSelection = descendantQueries;
+scene.select("preview");
+assert.equal(descendantQueries, beforeSameSelection, "Selecting unchanged markup reuses descendants");
+scene.update([{...withPreview, post_text:"Updated post"}], "preview");
+const newLabel = labels[0], newPreview = newLabel.previewControl;
+assert.notEqual(newPreview, oldPreview, "Updated scene receives new preview controls");
+oldPreview.style.top = "detached";
+newPreview.tabIndex = -1;
+frame(7080);
+assert.equal(oldPreview.style.top, "detached", "A detached preview is not updated");
+assert.ok(newPreview.style.top, "Updated preview receives positioning");
+assert.equal(newPreview.tabIndex, 0, "Visible preview remains keyboard accessible");
 scene.destroy();
+assert.equal(pending.size, 0, "Destroy cancels the active frame");
+scene.select("preview");
+assert.equal(pending.size, 0, "Selecting after destroy cannot queue work on released nodes");
+const originalRandom = Math.random;
+Math.random = () => 0;
+try {
+  const meteorScene = createConstellation({
+    element, root, escape: String, label: (e) => e.kind, initials: (e) => e.actor_id,
+    onSelect() {}, onOpen() {},
+  });
+  meteorScene.render(events, "old-A");
+  for (let i = 0; i < 96; i++) frame(10000 + i * 64);
+  const oldMeteor = sceneParts[".shooting-star"], oldTail = sceneParts[".shooting-tail"];
+  resizeScene();
+  oldMeteor.style.opacity = "detached";
+  oldTail.attributes = {};
+  frame(10000 + 96 * 64);
+  assert.equal(oldMeteor.style.opacity, "detached", "Detached meteor is not repainted");
+  assert.deepEqual(oldTail.attributes, {}, "Detached tail is not repainted");
+  assert.ok(sceneParts[".shooting-tail"].attributes.x1, "New tail receives active meteor coordinates");
+  assert.notEqual(sceneParts[".shooting-star"].style.opacity, undefined, "New meteor is repainted");
+  meteorScene.destroy();
+} finally {
+  Math.random = originalRandom;
+}
 console.log(
   JSON.stringify({
     script: new URL(import.meta.url).pathname,
