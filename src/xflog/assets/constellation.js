@@ -344,14 +344,16 @@ export function createConstellation({
       (_, index) =>
         `<circle class="sky-star" cx="${seed("x" + index) * element.clientWidth}" cy="${seed("y" + index) * element.clientHeight * 0.74}" r="${index % 9 ? 0.8 : 1.5}"/>`,
     ).join("");
-    const links = geometry.groups.flatMap((group) => {
-      const people = geometry.people.filter(
-        (person) => person.group === group.key,
-      );
-      return people
-        .slice(1)
-        .map((person, index) => ({ a: person, b: people[index], color: group.color, dash: group.dash }));
-    });
+    const peopleByGroup = new Map(geometry.groups.map(group => [group.key, []]));
+    // Map matches NaN keys, but the previous strict group comparison did not.
+    for (const person of geometry.people)
+      if (!Number.isNaN(person.group)) peopleByGroup.get(person.group)?.push(person);
+    const links = [];
+    for (const group of geometry.groups) {
+      const people = peopleByGroup.get(group.key);
+      for (let index = 1; index < people.length; index++)
+        links.push({ a: people[index], b: people[index - 1], color: group.color, dash: group.dash });
+    }
     element.innerHTML = `<svg class="constellation-sky" viewBox="0 0 ${element.clientWidth} ${element.clientHeight}" aria-hidden="true">${background}<defs><linearGradient id="xf-shooting-tail" class="shooting-tail" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="currentColor" stop-opacity="0"/><stop offset="1" stop-color="currentColor"/></linearGradient></defs><line class="shooting-star" data-active="false" stroke="url(#xf-shooting-tail)" opacity="0"/></svg><div class="constellation-canvas" style="width:${geometry.width}px"><svg class="constellation-links${geometry.grouped ? " is-grouped" : ""}" viewBox="0 0 ${geometry.width} ${element.clientHeight}" aria-hidden="true">${geometry.overview ? "" : links.map(({ a, b, color, dash }) => `<g data-link-group="${esc(a.group)}" style="${color ? `color:${color}` : ""}"><path d="M${a.x},${a.y}L${b.x},${b.y}" stroke-dasharray="${dash || ""}"/><line class="sequence-trail"/><circle class="sequence-spark" r="2"/></g>`).join("")}</svg>${geometry.people.map((person) => `<article class="constellation-person" data-person="${esc(person.id)}" style="--group-color:${person.color || "var(--muted)"}"><button class="constellation-star ${esc(person.tone)}" type="button" style="left:${person.x}px;top:${person.y}px" data-actor="${esc(person.event.actor_id)}" data-event="${esc(person.event.event_id)}" aria-label="${esc(person.event.name || person.event.handle || "X account")}, ${esc(label(person.event))}, recorded event"><span class="star-core" aria-hidden="true"></span><span class="star-initials" aria-hidden="true">${esc(initials(person.event))}</span></button><div class="star-label" data-label="${esc(person.event.event_id)}" aria-label="Open recorded event for ${esc(person.event.name || person.event.handle || "X account")}">${personLabel(person)}</div></article>`).join("")}${geometry.overview ? geometry.groups.map((group) => `<button type="button" class="constellation-group ${esc(group.tone)}" style="--group-color:${group.color};left:${group.x}px;top:${group.y}px" data-group="${esc(group.key)}" title="${esc(groupDescription(group))}" aria-label="Explore ${esc(group.label)}, ${esc(groupDescription(group))}"><span class="cluster-count">${group.people.length}</span><strong title="${esc(group.label)}">${esc(group.label)}</strong></button>`).join("") : ""}</div>`;
     sky = element.querySelector(".constellation-sky");
     meteor = element.querySelector(".shooting-star");

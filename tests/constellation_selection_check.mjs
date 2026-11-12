@@ -12,6 +12,9 @@ const controlIds = new Set(
 const { createConstellation } = await import(
   new URL("constellation.js", pathToFileURL(process.argv[2] + "/"))
 );
+const { constellationLayout, seed } = await import(
+  new URL("constellation-layout.js", pathToFileURL(process.argv[2] + "/"))
+);
 globalThis.matchMedia = () => ({
   matches: false,
   addEventListener() {},
@@ -109,6 +112,7 @@ const root = {
 let nodes = [],
   labels = [],
   paths = [];
+let captureLinks = false, renderedLinks = [], renderedTrails = [], renderedSparks = [];
 let sceneParts = {};
 const handlers = {};
 let scrollLeft = 0, roundScroll = false, capturedPointers = 0, releasedPointers = 0;
@@ -145,12 +149,18 @@ const element = {
       ? nodes
       : key === "[data-label]"
         ? labels
+        : key === ".sequence-trail" ? renderedTrails
+        : key === ".sequence-spark" ? renderedSparks
         : [];
   },
   contains(node) { return nodes.includes(node); },
   set innerHTML(value) {
     sceneParts = Object.fromEntries([".constellation-sky", ".shooting-star", ".shooting-tail"].map(key => [key, { style: {}, dataset: {}, attributes: {}, setAttribute(k, v) { this.attributes[k] = v; } }]));
     paths = [...value.matchAll(/<path d="M([\d.]+),[\d.]+L([\d.]+),[\d.]+"/g)];
+    renderedLinks = captureLinks ? [...value.matchAll(/<g data-link-group="([^"]*)" style="([^"]*)"><path d="([^"]*)" stroke-dasharray="([^"]*)"\/>/g)]
+      .map(([, group, style, d, dash]) => ({group, style, d, dash})) : [];
+    renderedTrails = renderedLinks.map(() => button({}));
+    renderedSparks = renderedLinks.map(() => button({}));
     const buttons = [
       ...value.matchAll(/<(?:button|div(?= class="star-label"))\b([^>]*)>([\s\S]*?)<\/(?:button|div)>/g),
     ].map((m) => {
@@ -830,6 +840,136 @@ try {
   recreated.destroy();
 } finally {
   Array.prototype.find = nativeFind;
+}
+
+// Reconstruct the original per-group filter oracle from the actual layout output.
+captureLinks = true;
+const connectionScene = createConstellation({
+  element, root, escape: String, label: item => item.kind, initials: item => item.actor_id,
+  onSelect() {}, onOpen() {},
+});
+const activity = {key:"activity", enabled:true, buckets:[
+  {key:"follow.follow",label:"Followed",tone:"positive"},
+  {key:"follow.unfollow",label:"Unfollowed",tone:"negative"},
+  {key:"interaction.replies",label:"Replies",tone:"neutral"},
+  {key:"unknown",label:"Unknown",tone:"neutral"},
+]};
+const location = {key:"profile-location", enabled:true, dynamic_buckets:true,
+  buckets:[{key:"unknown",label:"Unknown",tone:"neutral"}]};
+// Invalid non-string keys are unsupported, but must retain the old strict comparison behavior.
+const invalid = {key:"invalid", enabled:true, buckets:[
+  {key:NaN,label:"Invalid",tone:"neutral",color:"red"},
+  {key:"unknown",label:"Unknown",tone:"neutral"},
+]};
+const connectionEvents = Array.from({length: 18}, (_, index) => {
+  const key = ["follow.follow", "follow.unfollow", "interaction.replies", "missing"][index % 4];
+  const city = index % 5 ? `city-${index % 7}` : "missing";
+  return {...event(`connection-${index}`, `actor-${index % 3}`, 18 - index, key),
+    audience_groups:{activity:key, "profile-location":city},
+    audience_group_buckets:{"profile-location":city === "missing" ? undefined : {key:city,label:`City ${city}`}}};
+});
+const crossGroupDuplicate = {...connectionEvents[0],
+  audience_groups:{activity:"follow.unfollow", "profile-location":"city-1"},
+  audience_group_buckets:{"profile-location":{key:"city-1",label:"City city-1"}}};
+const skewedConnections = connectionEvents.map((item, index) => ({...item,
+  audience_groups:{...item.audience_groups, activity:index < 15 ? "follow.follow" :
+    ["follow.unfollow", "interaction.replies", "missing"][index - 15]}}));
+function expectedConnections(records, modules, lens, zoom) {
+  const layout = constellationLayout({events:records,width:element.clientWidth,height:element.clientHeight,zoom,modules,lens});
+  const links = layout.groups.flatMap(group => {
+    const members = layout.people.filter(person => person.group === group.key);
+    return members.slice(1).map((person, index) => ({a:person,b:members[index],color:group.color,dash:group.dash}));
+  });
+  assert.ok(links.every(link => link.a.group === link.b.group), "Connections stay inside their group");
+  return {layout, links};
+}
+function verifyConnections(records, modules, lens, zoom) {
+  connectionScene.clear();
+  connectionScene.configure(modules, lens);
+  connectionScene.render(records, records[0]?.event_id || null);
+  if (records.length) connectionScene.setZoom(zoom);
+  const expected = expectedConnections(records, modules, lens, zoom);
+  const visible = expected.layout.overview ? [] : expected.links;
+  assert.deepEqual(renderedLinks, visible.map(({a,b,color,dash}) => ({
+    group:a.group, style:color ? `color:${color}` : "", d:`M${a.x},${a.y}L${b.x},${b.y}`, dash:dash || "",
+  })), "Rendered paths preserve group order, endpoints, direction, colors and dashes");
+  assert.equal(renderedSparks.length, visible.length, "Each visible connection has one spark");
+  assert.equal(renderedTrails.length, visible.length, "Each visible connection has one trail");
+  return expected;
+}
+try {
+  for (const [records, modules, lens] of [
+    [[], [], "none"], [[connectionEvents[0]], [], "none"],
+    [connectionEvents, [], "none"], [connectionEvents.slice(0, 1), [activity], "activity"],
+    [connectionEvents, [activity], "activity"],
+    [skewedConnections, [activity], "activity"],
+    [[...connectionEvents, crossGroupDuplicate], [activity], "activity"],
+    [connectionEvents, [location], "profile-location"],
+  ]) verifyConnections(records, modules, lens, 0.8);
+  const invalidRecords = connectionEvents.slice(0, 2).map(item => ({...item, audience_groups:{invalid:NaN}}));
+  verifyConnections(invalidRecords, [invalid], "invalid", 0.8);
+  assert.equal(renderedLinks.length, 0, "NaN group keys do not match under the old strict comparison");
+
+  const {links: animatedLinks} = verifyConnections(connectionEvents, [activity], "activity", 1);
+  assert.ok(animatedLinks.length > 2, "The animation fixture has multiple indexed links");
+  frame(30000);
+  animatedLinks.forEach(({a,b}, index) => {
+    const part = seed(index) % 1, tail = Math.max(0, part - 0.06);
+    assert.equal(renderedSparks[index].attributes.cx, (a.x + (b.x - a.x) * part).toFixed(2));
+    assert.equal(renderedSparks[index].attributes.cy, (a.y + (b.y - a.y) * part).toFixed(2));
+    assert.equal(renderedTrails[index].attributes.x1, (a.x + (b.x - a.x) * tail).toFixed(2));
+    assert.equal(renderedTrails[index].attributes.y1, (a.y + (b.y - a.y) * tail).toFixed(2));
+    assert.equal(renderedTrails[index].attributes.x2, (a.x + (b.x - a.x) * part).toFixed(2));
+    assert.equal(renderedTrails[index].attributes.y2, (a.y + (b.y - a.y) * part).toFixed(2));
+  });
+  const oldTrails = renderedTrails, oldTrailAttributes = oldTrails.map(trail => ({...trail.attributes}));
+  connectionScene.setZoom(0);
+  assert.equal(renderedLinks.length, 0, "Overview renders no links, trails or sparks");
+  assert.equal(renderedSparks.length, 0);
+  frame(30016);
+  assert.deepEqual(oldTrails.map(trail => trail.attributes), oldTrailAttributes, "Overview cannot update old trails");
+  connectionScene.setZoom(1);
+  const expanded = expectedConnections(connectionEvents, [activity], "activity", 1);
+  assert.equal(renderedLinks.length, expanded.links.length, "Leaving overview restores all connections");
+  frame(30032);
+  assert.ok(renderedTrails.every(trail => trail.attributes.x1 !== undefined), "Recreated trails animate");
+  const priorTrails = renderedTrails, priorAttributes = priorTrails.map(trail => ({...trail.attributes}));
+  connectionScene.update(connectionEvents.slice(0, 9), connectionEvents[0].event_id);
+  frame(30048);
+  assert.deepEqual(priorTrails.map(trail => trail.attributes), priorAttributes, "Updates cannot animate stale trails");
+  const replacement = expectedConnections(connectionEvents.slice(0, 9), [activity], "activity", 1);
+  assert.deepEqual(renderedLinks, replacement.links.map(({a,b,color,dash}) => ({
+    group:a.group, style:color ? `color:${color}` : "", d:`M${a.x},${a.y}L${b.x},${b.y}`, dash:dash || "",
+  })), "Update rebuilds the exact ordered connections");
+  connectionScene.clear();
+  assert.equal(pending.size, 0, "Clear cancels connection animation");
+} finally {
+  connectionScene.destroy();
+  captureLinks = false;
+}
+
+// Count only full-array scans of positioned points, with a positive control.
+const nativeFilter = Array.prototype.filter;
+let geometryScans = 0;
+Array.prototype.filter = function(predicate, ...args) {
+  if (this.length && this[0]?.event && Array.isArray(this[0]?.events) && "group" in this[0] && "x" in this[0])
+    geometryScans++;
+  return nativeFilter.call(this, predicate, ...args);
+};
+try {
+  [{event:{},events:[],group:"all",x:0}].filter(() => true);
+  assert.equal(geometryScans, 1, "The scan counter detects positioned-point filters");
+  const countedScene = createConstellation({
+    element, root, escape:String, label:item => item.kind, initials:item => item.actor_id,
+    onSelect() {}, onOpen() {},
+  });
+  countedScene.configure([activity], "activity");
+  geometryScans = 0;
+  countedScene.render(connectionEvents, connectionEvents[0].event_id);
+  assert.equal(geometryScans, 0, "Rendering no longer scans all points once per group");
+  countedScene.destroy();
+} finally {
+  Array.prototype.filter = nativeFilter;
 }
 console.log(
   JSON.stringify({
