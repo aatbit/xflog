@@ -997,7 +997,8 @@ function measurePreparation(action) {
   Array.prototype.push = function(...items) {
     if (capturePreparation)
       counts.links += items.filter(item => item && typeof item === "object" &&
-        "a" in item && "b" in item && "color" in item && "dash" in item).length;
+        item.a?.event && item.b?.event && "group" in item.a && "group" in item.b &&
+        "color" in item && "dash" in item).length;
     return nativePush.apply(this, items);
   };
   try {
@@ -1016,6 +1017,7 @@ assert.deepEqual(measurePreparation(() => {
   new Map([["all", []]]);
   for (const person of [point]) { void person; }
   [].push({a:point,b:point,color:"red",dash:""});
+  [].push({a:"unrelated",b:"event",color:"red",dash:""});
 }), {indexes:1,traversals:1,links:1}, "Structural counters have positive controls");
 const preparationScene = createConstellation({
   element, root, escape:String, label:item => item.kind, initials:item => item.actor_id,
