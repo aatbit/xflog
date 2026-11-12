@@ -38,6 +38,7 @@ export function createConstellation({
     lens = "none",
     geometry = null,
     layoutAtZoom = null;
+  let selectionByEvent = null, selection = null;
   let sceneVersion = 0;
   // History is deduplicated by event ID before grouping, so only data changes alter membership.
   let personCount = 0, countDirty = true;
@@ -58,8 +59,9 @@ export function createConstellation({
     canvas = null, linkLayer = null, groupLayer = null,
     groupButtons = null, connections = null,
     sceneWidth = 0, sceneHeight = 0,
-    labelInset = 16,
     keyScope = null;
+  let labelInset = null, labelsDirty = true, viewportLeft = null,
+    animationDirty = true, lastMotion = null, browseLeft = null;
   const reduced = matchMedia("(prefers-reduced-motion: reduce)");
   const active = () =>
     geometry &&
@@ -68,13 +70,9 @@ export function createConstellation({
     root.dataset.route === "timeline" &&
     !document.hidden;
   const moving = () => !reduced.matches && root.dataset.motion !== "off";
-  const current = () => events.find((event) => event.event_id === selected);
   const maximum = () => Math.max(0, element.scrollWidth - element.clientWidth);
-  const position = () =>
-    geometry?.people.find((person) => person.events.some(event => event.event_id === selected));
-  const selectedProfileIndex = () =>
-    geometry?.people.indexOf(position()) ??
-    -1;
+  const position = () => selection?.person;
+  const selectedProfileIndex = () => selection?.index ?? -1;
   function personLabel(person, event = person.event) {
     return `<button type="button" class="star-identity"><strong>${esc(event.name || event.handle || "X account")}${verificationBadge(event, modules)}</strong><span class="star-handle">${esc(event.handle ? "@" + event.handle : "ID " + event.actor_id)}</span>${activityIcon(event)}</button>${postPreview(event, 140, "star-post")}`;
   }
@@ -98,15 +96,15 @@ export function createConstellation({
     actorButtons = [];
     sky = meteor = meteorTail = canvas = linkLayer = groupLayer = null;
     groupButtons = connections = layoutAtZoom = null;
-    keyScope = null;
+    selectionByEvent = selection = keyScope = null;
+    viewportLeft = browseLeft = labelInset = null;
+    labelsDirty = animationDirty = true;
+    lastMotion = null;
   }
   function queue() {
     if (!frame && active()) frame = requestAnimationFrame(paint);
   }
-  function navigator() {
-    if (!geometry) return;
-    travelControls();
-    groupHint();
+  function zoomControls() {
     zoomValue.textContent = `${Math.round(zoom * 100)}%`;
     zoomControl.value = zoom;
     zoomControl.setAttribute(
@@ -119,18 +117,17 @@ export function createConstellation({
       control.disabled = geometry.people.length < 2;
     zoomOut.disabled ||= zoom === 0;
     zoomIn.disabled ||= zoom === 2;
-    history.max = 1000;
     history.disabled = !geometry.canPan;
-    history.value = maximum()
-      ? Math.round((1 - element.scrollLeft / maximum()) * 1000)
-      : 500;
-    peopleCount.textContent =
-      `${personCount} ${personCount === 1 ? "person" : "people"} in ${geometry.grouped ? "saved" : "loaded"} history`;
+  }
+  function scrubber() {
+    const max = maximum();
+    const value = max ? Math.round((1 - element.scrollLeft / max) * 1000) : 500;
+    if (Number(history.value) !== value) history.value = value;
   }
   function groupHint() {
-    key.hidden = !geometry.grouped;
-    const groupId = position()?.group;
-    const group = geometry.groups.find(item => item.key === groupId);
+    const group = geometry.grouped && !geometry.overview
+      ? geometry.groups.find(item => item.key === position()?.group)
+      : null;
     const scope = geometry.overview ? "overview" : group;
     if (keyScope === scope) return;
     keyScope = scope;
@@ -139,9 +136,10 @@ export function createConstellation({
         : groupKey(group ? [group] : [], esc)
       : "";
     key.setAttribute("aria-label", geometry.overview ? "Constellation groups" : "Current constellation");
-    labelInset = (context?.offsetHeight || 0) + 28;
+    labelInset = null;
+    labelsDirty = true;
   }
-  function selectVisibleProfile(notify = onSelect) {
+  function selectVisibleProfile(notify = onSelect, duringPaint = false) {
     const center = element.scrollLeft + element.clientWidth / 2;
     const closest = geometry.people.reduce(
       (best, person) =>
@@ -149,7 +147,8 @@ export function createConstellation({
       geometry.people[0],
     );
     if (closest && closest !== position()) {
-      select(closest.event.event_id);
+      applySelection(closest.event.event_id);
+      if (!duringPaint) queue();
       notify(closest.event.event_id);
     }
   }
@@ -171,13 +170,16 @@ export function createConstellation({
         : button === next ? "Older memory" : "Newer memory");
     }
   }
-  function select(identity) {
-    if (!root.isConnected || !element.isConnected) return;
+  function applySelection(identity, initial = false) {
+    if (!initial && identity === selected) return false;
+    const previous = position();
     selected = identity;
+    selection = selectionByEvent.get(identity);
     const chosenPerson = position();
+    const current = events.find(event => event.event_id === identity);
     actorButtons.forEach(({button, personElement, person}) => {
       const chosen = button.dataset.event === chosenPerson?.event.event_id;
-      const event = chosen ? current() : person.event;
+      const event = chosen ? current : person.event;
       button.setAttribute("aria-pressed", String(chosen));
       button.setAttribute(
         "aria-label",
@@ -186,20 +188,27 @@ export function createConstellation({
       personElement.classList.toggle("is-selected", chosen);
     });
     for (const item of labels) {
-      const event = item.person === chosenPerson ? current() : item.person.event;
+      const event = item.person === chosenPerson ? current : item.person.event;
       item.label.setAttribute("aria-label", `${item.person === chosenPerson ? "Open recorded event for" : "Select"} ${event.name || event.handle || "X account"}`);
       if (item.identity !== event.event_id) {
         item.label.innerHTML = personLabel(item.person, event);
         item.identity = event.event_id;
         item.controls = item.label.querySelectorAll?.("button,a") || [];
         item.preview = item.label.querySelector?.(".star-post");
+        item.width = undefined;
       }
-      const box = item.label.getBoundingClientRect();
-      item.width = box.width;
-      item.height = box.height;
+      const id = item.person.event.event_id;
+      if (id === previous?.event.event_id || id === chosenPerson?.event.event_id)
+        item.width = undefined;
     }
-    navigator();
-    queue();
+    if (initial || previous?.group !== chosenPerson?.group) groupHint();
+    travelControls();
+    labelsDirty = true;
+    return true;
+  }
+  function select(identity) {
+    if (geometry && root.isConnected && element.isConnected && applySelection(identity))
+      queue();
   }
   function showLabel(item, visible) {
     item.label.style.visibility = visible ? "visible" : "hidden";
@@ -207,69 +216,44 @@ export function createConstellation({
     item.label.tabIndex = -1;
     item.controls?.forEach(control => { control.tabIndex = visible ? 0 : -1; });
   }
-  function paint(now) {
-    frame = 0;
-    if (!active()) {
-      last = 0;
-      return;
-    }
-    const elapsed = last ? clamp(now - last, 0, 64) : 0;
-    last = now;
-    if (moving())
-      clock += elapsed * normalizeMotionSpeed(root.dataset.motionSpeed || 1);
-    if (target !== null) {
-      const previous = element.scrollLeft;
-      const next = moving()
-        ? flowStep(element.scrollLeft, target, elapsed || 16)
-        : target;
-      element.scrollLeft = next;
-      // Browsers can round away the final eased step; finish instead of stalling.
-      if (Math.abs(target - element.scrollLeft) < 2 || element.scrollLeft === previous) {
-        element.scrollLeft = target;
-        target = null;
-        seeking = false;
+  function layoutLabels(left) {
+    const chosenPerson = position();
+    const viewportWidth = element.clientWidth;
+    const bottom = geometry.lower + 25;
+    labelInset ??= (context?.offsetHeight || 0) + 28;
+    // Read invalidated sizes together before positioning any label.
+    for (const item of labels) {
+      if (item.width === undefined) {
+        const box = item.label.getBoundingClientRect();
+        item.width = box.width;
+        item.height = box.height;
+        item.previewHeight = item.person === chosenPerson && item.preview ? item.preview.offsetHeight : 0;
       }
     }
-    const browsing = geometry.canPan && !seeking && element.dataset.userScrolling === "true";
-    if (browsing) selectVisibleProfile(onPreview);
-    const left = element.scrollLeft,
-      chosenPerson = position();
-    sky.style.transform = `translateX(${left}px)`;
-    const shot = moving()
-      ? shootingStar(clock, element.clientWidth, element.clientHeight)
-      : null;
-    meteor.style.opacity = String(shot?.opacity || 0);
-    meteor.dataset.active = String(Boolean(shot && shot.opacity > 0));
-    if (shot)
-      for (const key of ["x1", "y1", "x2", "y2"]) {
-        meteor.setAttribute(key, shot[key].toFixed(2));
-        meteorTail.setAttribute(key, shot[key].toFixed(2));
-      }
     const candidates = [];
     for (const item of labels) {
       const chosen = item.person === chosenPerson;
       const x = item.person.x - left;
       const width = item.width,
         height = item.height;
-      const bottom = geometry.lower + 25;
       let top = item.person.y + 27;
-      const previewHeight = chosen && item.preview ? item.preview.offsetHeight : 0;
+      const previewHeight = item.previewHeight;
       if (top + height + (previewHeight ? previewHeight + 8 : 0) > bottom)
         top = item.person.y - height - (previewHeight ? 40 : 25);
       top = clamp(top, labelInset, Math.max(labelInset, bottom - height));
       const previewTop = Math.max(item.person.y + 40, top < item.person.y ? 0 : top + height + 8);
       if (chosen && item.preview) item.preview.style.top = `${previewTop - top}px`;
-      const previewBottom = chosen && item.preview ? previewTop + item.preview.offsetHeight : top + height;
+      const previewBottom = chosen && item.preview ? previewTop + previewHeight : top + height;
       const center = clamp(
-        x, width / 2 + 16, element.clientWidth - width / 2 - 16,
+        x, width / 2 + 16, viewportWidth - width / 2 - 16,
       );
       item.label.style.left = `${center + left}px`;
       item.label.style.top = `${top}px`;
       if (
         !geometry.overview &&
-        (chosen || (x >= 12 && x <= element.clientWidth - 12)) &&
+        (chosen || (x >= 12 && x <= viewportWidth - 12)) &&
         center - width / 2 >= 12 &&
-        center + width / 2 <= element.clientWidth - 12
+        center + width / 2 <= viewportWidth - 12
       ) {
         const candidate = {
           id: item.person,
@@ -279,7 +263,7 @@ export function createConstellation({
           bottom: Math.max(top + height, previewBottom),
           minTop: labelInset,
           maxBottom: Math.max(bottom, previewBottom),
-          distance: Math.abs(center - element.clientWidth / 2),
+          distance: Math.abs(center - viewportWidth / 2),
         };
         const alternateTop = clamp(
           top < item.person.y ? item.person.y + 27 : item.person.y - height - 25,
@@ -299,9 +283,19 @@ export function createConstellation({
       if (placement) item.label.style.top = `${placement.top}px`;
       showLabel(item, Boolean(placement));
     });
+  }
+  function animate(motion) {
+    const shot = motion ? shootingStar(clock, sceneWidth, sceneHeight) : null;
+    meteor.style.opacity = String(shot?.opacity || 0);
+    meteor.dataset.active = String(Boolean(shot && shot.opacity > 0));
+    if (shot)
+      for (const key of ["x1", "y1", "x2", "y2"]) {
+        meteor.setAttribute(key, shot[key].toFixed(2));
+        meteorTail.setAttribute(key, shot[key].toFixed(2));
+      }
     stars.forEach((star, index) => {
       star.style.opacity = String(
-        moving()
+        motion
           ? 0.1 + 0.12 * (1 + Math.sin(clock / 1900 + index * 2.4))
           : 0.22,
       );
@@ -316,13 +310,60 @@ export function createConstellation({
       trail.setAttribute("x2", (a.x + (b.x - a.x) * part).toFixed(2));
       trail.setAttribute("y2", (a.y + (b.y - a.y) * part).toFixed(2));
     });
+  }
+  function paint(now) {
+    frame = 0;
+    if (!active()) {
+      last = 0;
+      return;
+    }
+    const elapsed = last ? clamp(now - last, 0, 64) : 0;
+    last = now;
+    const motion = moving();
+    if (motion)
+      clock += elapsed * normalizeMotionSpeed(root.dataset.motionSpeed || 1);
+    if (target !== null) {
+      const previous = element.scrollLeft;
+      const next = motion
+        ? flowStep(element.scrollLeft, target, elapsed || 16)
+        : target;
+      element.scrollLeft = next;
+      // Browsers can round away the final eased step; finish instead of stalling.
+      if (Math.abs(target - element.scrollLeft) < 2 || element.scrollLeft === previous) {
+        element.scrollLeft = target;
+        target = null;
+        seeking = false;
+      }
+    }
+    const left = element.scrollLeft;
+    const scrolled = left !== viewportLeft;
+    const browsing = geometry.canPan && !seeking && element.dataset.userScrolling === "true";
+    // A scroll event can mark browsing after paint has already laid out this offset.
+    if (browsing && left !== browseLeft) {
+      browseLeft = left;
+      selectVisibleProfile(onPreview, true);
+    }
+    if (!browsing) browseLeft = null;
+    if (scrolled) sky.style.transform = `translateX(${left}px)`;
+    if (scrolled || labelsDirty) {
+      layoutLabels(left);
+      scrubber();
+      viewportLeft = left;
+      labelsDirty = false;
+    }
+    const animating = String(motion);
+    if (motion || animationDirty || lastMotion !== motion) {
+      animate(motion);
+      animationDirty = false;
+      lastMotion = motion;
+    }
     if (browsing && target === null && !drag) {
+      browseLeft = null;
       delete element.dataset.userScrolling;
       onSelect(selected);
     }
-    navigator();
-    root.dataset.animating = moving() ? "true" : "false";
-    if (moving() || target !== null) queue();
+    if (root.dataset.animating !== animating) root.dataset.animating = animating;
+    if (motion || target !== null) queue();
     else last = 0;
   }
   function render(nextEvents, identity) {
@@ -330,7 +371,6 @@ export function createConstellation({
     stop();
     wheelZoom = null;
     events = nextEvents;
-    selected = identity;
     sceneWidth = element.clientWidth;
     sceneHeight = element.clientHeight;
     layoutAtZoom = prepareConstellation({
@@ -347,8 +387,16 @@ export function createConstellation({
     }
     element.dataset.canPan = String(geometry.canPan);
     element.classList.toggle("is-grouped", geometry.grouped);
-    keyScope = null;
-    groupHint();
+    // A fresh DOM scene has no valid measurements or last-painted viewport.
+    viewportLeft = browseLeft = labelInset = null;
+    labelsDirty = animationDirty = true;
+    keyScope = undefined;
+    key.hidden = !geometry.grouped;
+    history.max = 1000;
+    zoomControls();
+    const countText =
+      `${personCount} ${personCount === 1 ? "person" : "people"} in ${geometry.grouped ? "saved" : "loaded"} history`;
+    if (peopleCount.textContent !== countText) peopleCount.textContent = countText;
     const background = Array.from(
       { length: 76 },
       (_, index) =>
@@ -358,13 +406,18 @@ export function createConstellation({
     sky = element.querySelector(".constellation-sky");
     meteor = element.querySelector(".shooting-star");
     meteorTail = element.querySelector(".shooting-tail");
-    const peopleByEvent = new Map();
-    for (const person of geometry.people)
-      if (!peopleByEvent.has(person.event.event_id))
-        peopleByEvent.set(person.event.event_id, person);
+    selectionByEvent = new Map();
+    selection = null;
+    let index = 0;
+    for (const person of geometry.people) {
+      for (const event of person.events)
+        if (!selectionByEvent.has(event.event_id))
+          selectionByEvent.set(event.event_id, {person, index});
+      index++;
+    }
     actorButtons = [...element.querySelectorAll("[data-actor]")].map(button => ({
       button, personElement: button.closest(".constellation-person"),
-      person: peopleByEvent.get(button.dataset.event),
+      person: selectionByEvent.get(button.dataset.event)?.person,
     }));
     stars = [...element.querySelectorAll(".sky-star")];
     const labelNodes = element.querySelectorAll("[data-label]");
@@ -382,15 +435,17 @@ export function createConstellation({
       }),
     );
     labels.forEach(({person, label: button}) => {
-      const first = peopleByEvent.get(person.event.event_id);
+      const first = selectionByEvent.get(person.event.event_id)?.person;
       button.addEventListener("click", event => {
         if (ownsScene(renderedVersion, button) && !geometry.overview &&
             !event?.target?.closest?.("a")) clickPerson(first);
       });
     });
     updateMode();
+    applySelection(identity, true);
     anchor();
-    select(identity);
+    scrubber();
+    queue();
   }
   function ownsScene(version, node) {
     return version === sceneVersion && geometry && root.isConnected &&
@@ -433,7 +488,7 @@ export function createConstellation({
         if (!ownsScene(renderedVersion, button) || !geometry.overview) return;
         const group = geometry.groups[index];
         const identity = group.people[0].event.event_id;
-        selected = identity;
+        select(identity);
         setZoom(1);
         seek(events.findIndex(item => item.event_id === identity), "instant");
       });
@@ -486,7 +541,7 @@ export function createConstellation({
     if (!events.length || !geometry) return;
     delete element.dataset.userScrolling;
     const event = events[clamp(index, 0, events.length - 1)];
-    selected = event.event_id;
+    select(event.event_id);
     if (geometry.overview) setZoom(0.8);
     const destination = position();
     if (destination && geometry.canPan) {
@@ -498,7 +553,7 @@ export function createConstellation({
         seeking = false;
       }
     }
-    select(selected);
+    scrubber();
     onSelect(selected);
     queue();
   }
@@ -518,7 +573,10 @@ export function createConstellation({
       button.style.left = `${point.x}px`;
       button.style.top = `${point.y}px`;
     });
-    if (wasOverview !== geometry.overview) updateMode();
+    if (wasOverview !== geometry.overview) {
+      updateMode();
+      groupHint();
+    }
     if (geometry.overview) {
       geometry.groups.forEach((group, index) => {
         groupButtons[index].style.left = `${group.x}px`;
@@ -531,7 +589,10 @@ export function createConstellation({
       });
     }
     anchor();
-    navigator();
+    zoomControls();
+    travelControls();
+    scrubber();
+    labelsDirty = animationDirty = true;
     queue();
   }
   function scrub(progress) {
@@ -541,7 +602,7 @@ export function createConstellation({
     element.scrollLeft = (1 - clamp(progress, 0, 1)) * maximum();
     delete element.dataset.userScrolling;
     selectVisibleProfile();
-    navigator();
+    scrubber();
     queue();
   }
   function travel(delta) {
@@ -657,19 +718,32 @@ export function createConstellation({
   }
   const refresh = () => {
     stop();
-    if (active()) queue();
+    queue();
   };
   const observer = new MutationObserver(refresh);
   observer.observe(root, {
     attributes: true,
     attributeFilter: ["data-route", "data-motion", "data-motion-speed"],
   });
-  const resize = new ResizeObserver(() => {
+  const invalidateLabelSizes = () => {
+    if (!geometry) return;
+    for (const item of labels) item.width = undefined;
+    labelInset = null;
+    labelsDirty = true;
+    queue();
+  };
+  const resize = new ResizeObserver((entries = []) => {
     if (geometry && element.clientWidth && element.clientHeight &&
-        (element.clientWidth !== sceneWidth || element.clientHeight !== sceneHeight))
+        (element.clientWidth !== sceneWidth || element.clientHeight !== sceneHeight)) {
       render(events, selected);
+    } else if (geometry && entries.some(entry => entry.target === context)) {
+      labelInset = null;
+      labelsDirty = true;
+      queue();
+    }
   });
   resize.observe(element);
+  if (context) resize.observe(context);
   const scroll = () => {
     if (!seeking && target === null && element.scrollLeft !== scrollPosition)
       element.dataset.userScrolling = "true";
@@ -697,6 +771,11 @@ export function createConstellation({
     [zoomOut, "click", () => setZoom(zoom - 0.25)],
     [zoomControl, "input", (event) => setZoom(Number(event.target.value))],
   ];
+  if (document.fonts) {
+    listeners.push([document.fonts, "loadingdone", invalidateLabelSizes]);
+    listeners.push([document.fonts, "loadingerror", invalidateLabelSizes]);
+  }
+  if (document.defaultView) listeners.push([document.defaultView, "resize", invalidateLabelSizes]);
   listeners.forEach(([target, type, listener, options]) =>
     target.addEventListener(type, listener, options),
   );
@@ -717,12 +796,14 @@ export function createConstellation({
       render(nextEvents, identity);
     },
     update(nextEvents, identity) {
-      const offset = position() ? position().x - element.scrollLeft : null;
+      const point = position();
+      const offset = point ? point.x - element.scrollLeft : null;
       countDirty = true;
       render(nextEvents, identity);
       if (offset !== null && position())
         element.scrollLeft = clamp(position().x - offset, 0, maximum());
       scrollPosition = element.scrollLeft;
+      scrubber();
     },
     select,
     seek,

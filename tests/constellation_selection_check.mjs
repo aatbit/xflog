@@ -52,6 +52,17 @@ const controls = new Map(),
 let olderLoads = 0;
 let shellQueries = 0, sceneQueries = 0, actorQueries = 0, descendantQueries = 0;
 let parentQueries = 0;
+let labelReads = 0, previewReads = 0, navigationWrites = 0;
+let collisionPasses = 0;
+function countNavigation(control) {
+  const fields = new Set(["disabled", "value", "textContent", "max", "hidden", "innerHTML"]);
+  return new Proxy(control, {
+    set(target, key, value) {
+      if (fields.has(key)) navigationWrites++;
+      return Reflect.set(target, key, value);
+    },
+  });
+}
 const selectedSteps = [];
 const previewSteps = [];
 function button(dataset) {
@@ -68,7 +79,7 @@ function button(dataset) {
       this.markup = value;
       this.identityControl = { tabIndex: 0 };
       this.previewControl = value.includes('class="star-post"')
-        ? { tabIndex: 0, offsetHeight: 24, style: {} } : null;
+        ? { tabIndex: 0, get offsetHeight() { previewReads++; return 24; }, style: {} } : null;
     },
     classList: { toggle() {} },
     setAttribute(k, v) {
@@ -85,6 +96,7 @@ function button(dataset) {
       return parent;
     },
     getBoundingClientRect() {
+      labelReads++;
       return { width: 190, height: 140 };
     },
     querySelectorAll() { descendantQueries++; return [this.identityControl, this.previewControl].filter(Boolean); },
@@ -98,16 +110,16 @@ const root = {
     shellQueries++;
     if (key.startsWith("#") && !controlIds.has(key.slice(1))) return null;
     if (!controls.has(key))
-      controls.set(key, {
+      controls.set(key, countNavigation({
         handlers: {},
         style: { setProperty() {} },
         classList: { toggle() {} },
-        setAttribute() {},
+        setAttribute() { navigationWrites++; },
         addEventListener(type, handler) {
           this.handlers[type] = handler;
         },
         removeEventListener() {},
-      });
+      }));
     return controls.get(key);
   },
 };
@@ -732,7 +744,7 @@ try {
   for (const identity of ["lookup-4", "lookup-17", "lookup-0"]) {
     const before = geometryFinds;
     lookupScene.select(identity);
-    assert.equal(geometryFinds - before, 3, "Only position and navigation search geometry during selection");
+    assert.equal(geometryFinds - before, 0, "Manual selection reuses its indexed geometry entry");
     const selectedNodes = nodes.filter(node => node.attributes["aria-pressed"] === "true");
     assert.deepEqual(selectedNodes.map(node => node.dataset.event), [identity]);
     assert.ok(selectedNodes[0].attributes["aria-label"].includes(`Person ${identity.slice(7)}`));
@@ -743,7 +755,7 @@ try {
   lookupHandlers.scroll();
   frame(20000);
   assert.ok(previews.length > beforePreview, "The frame actually changes the highlighted event");
-  assert.equal(geometryFinds - beforeFrameSearches, 7, "Animation uses only its existing geometry searches");
+  assert.equal(geometryFinds - beforeFrameSearches, 0, "Animation-driven selection does not scan for the selected event");
 
   const large = Array.from({length: 500}, (_, index) => ({
     ...event(`lookup-${index}`, "same-actor", 500 - index, "follow.follow"), name: `Person ${index}`,
@@ -751,7 +763,7 @@ try {
   lookupScene.render(large, "lookup-0");
   geometryFinds = 0;
   lookupScene.select("lookup-4");
-  assert.equal(geometryFinds, 3, "Manual search count stays constant for 500 actor buttons");
+  assert.equal(geometryFinds, 0, "Manual search count stays constant for 500 actor buttons");
   lookupScene.select("lookup-0");
   const beforeLargePreview = previews.length;
   geometryFinds = 0;
@@ -759,14 +771,14 @@ try {
   lookupHandlers.scroll();
   frame(20016);
   assert.ok(previews.length > beforeLargePreview, "The large-scene frame changes the highlighted event");
-  assert.equal(geometryFinds, 7, "Animation search count stays constant for 500 actor buttons");
+  assert.equal(geometryFinds, 0, "Animation search count stays constant for 500 actor buttons");
 
   lookupScene.render(many, "lookup-0");
   lookupScene.select("lookup-0");
   const currentButton = nodes.find(node => node.dataset.event === "lookup-0");
   geometryFinds = 0;
   currentButton.handlers.click();
-  assert.equal(geometryFinds, 1, "A selected actor click only searches for the selected position");
+  assert.equal(geometryFinds, 0, "A selected actor click reuses the selected position");
   assert.equal(lookupOpened.at(-1), "lookup-0", "A current selected actor still opens");
   const nonselectedButton = nodes.find(node => node.dataset.event === "lookup-4");
   nonselectedButton.handlers.click();
@@ -1182,6 +1194,81 @@ try {
   countedScene.destroy();
 } finally {
   Array.prototype.filter = nativeFilter;
+}
+// Collision candidate sorting and label DOM writes identify actual viewport work.
+const nativeSort = Array.prototype.sort;
+const near = {id: Symbol("test"), top: 0, distance: 0};
+const far = {...near, distance: 1};
+Array.prototype.sort = function(compare) {
+  // The initial candidate sort uses distance. Neighbor sorts use vertical position.
+  if (this[0]?.id?.event && "minTop" in this[0] && compare(near, far) === -1)
+    collisionPasses++;
+  return nativeSort.call(this, compare);
+};
+const viewportScene = createConstellation({
+  element, root, escape:String, label:item => item.kind, initials:item => item.actor_id,
+  onSelect() {}, onOpen() {},
+});
+try {
+  root.dataset.motion = "on";
+  viewportScene.render([withPreview, ...events], "preview");
+  frame(40000);
+  assert.ok(collisionPasses > 0 && labelReads > 0 && previewReads > 0 && navigationWrites > 0,
+    "The work counters see initial layout, preview measurement and navigation");
+  const labelWrites = () => labels.reduce((sum, item) => sum + item.attributeWrites, 0);
+  const work = () => ({collisionPasses, labelReads, previewReads, navigationWrites, labelWrites:labelWrites()});
+  const spark = renderedSparks[0];
+  const sparkBefore = spark.attributes.cx;
+  const idle = work();
+  frame(40016);
+  frame(40032);
+  frame(40048);
+  assert.deepEqual(work(), idle, "Ambient-only frames skip all state-driven work");
+  assert.notEqual(spark.attributes.cx, sparkBefore, "The ambient clock and spark keep advancing");
+
+  element.scrollLeft = 0;
+  frame(40050);
+  const beforeDelayedScroll = collisionPasses;
+  handlers.scroll();
+  frame(40052);
+  const leftmost = nodes.reduce((a, b) => parseFloat(a.style.left) < parseFloat(b.style.left) ? a : b);
+  assert.equal(leftmost.attributes["aria-pressed"], "true",
+    "A scroll event arriving after paint still centers the selection");
+  assert.equal(collisionPasses, beforeDelayedScroll + 1, "The new selection invalidates layout at the same offset");
+  viewportScene.seek(0, "instant");
+  frame(40056);
+
+  const previousLeft = element.scrollLeft;
+  viewportScene.seek(1);
+  const afterSelect = work();
+  frame(40064);
+  assert.notEqual(element.scrollLeft, previousLeft, "Smooth navigation advances the viewport");
+  assert.equal(collisionPasses, afterSelect.collisionPasses + 1, "One collision pass for a changed viewport");
+  assert.equal(labelReads - afterSelect.labelReads, 2, "Only the previous and new selection need measurement");
+  const afterScroll = work();
+  frame(40080);
+  assert.equal(collisionPasses, afterScroll.collisionPasses + 1, "Easing keeps layout current");
+  assert.equal(labelReads, afterScroll.labelReads, "Scrolling reuses dimensions");
+  assert.equal(Number(controls.get("#memory-scrubber").value),
+    Math.round((1 - element.scrollLeft / 500) * 1000), "Scrubber tracks the actual eased position");
+
+  root.dataset.motion = "off";
+  frame(40096);
+  assert.equal(pending.size, 0, "Paused motion settles after the final scroll step");
+  const frozen = spark.attributeWrites;
+  const stopped = work();
+  element.scrollLeft = element.scrollLeft ? 0 : 500;
+  handlers.scroll();
+  frame(40112);
+  assert.equal(collisionPasses, stopped.collisionPasses + 1, "A native scroll still updates paused labels");
+  assert.equal(spark.attributeWrites, frozen, "A scroll-only paused frame does not rewrite frozen sparks");
+  assert.equal(pending.size, 0);
+  viewportScene.setZoom(0.9);
+  frame(40128);
+  assert.ok(spark.attributeWrites > frozen, "Paused sparks still rebind to changed geometry");
+} finally {
+  viewportScene.destroy();
+  Array.prototype.sort = nativeSort;
 }
 console.log(
   JSON.stringify({

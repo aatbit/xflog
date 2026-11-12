@@ -405,11 +405,11 @@
     if (!event) return;
     state.selected = identity;
     selectedSignal.render(event, state.groups);
-    $$("[data-event]").forEach((button) =>
+    if (state.layout === "horizontal") scene.select(identity);
+    else $$("[data-event]").forEach((button) =>
       button.setAttribute("aria-pressed", button.dataset.event === identity),
     );
     renderPersonDetail(root, event);
-    if (state.layout === "horizontal") scene.select(identity);
     const index = state.events.findIndex((item) => item.event_id === identity);
     $("#journey-position").textContent =
       `Memory ${index + 1} of ${state.events.length} loaded`;

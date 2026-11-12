@@ -274,6 +274,16 @@ assert.ok(visibleLabels([{...selectedBox,maxBottom:220}],"selected").has("select
 for(const neighbor of neighbors) assert.equal(staggered.get(neighbor.id).top,140);
 assert.equal(visibleLabels([selectedBox,{...selectedBox,id:"crowded"}],"selected").size,1,
   "Labels still hide when no non-overlapping placement is available");
+const scrolledBoxes = [...neighbors, selectedBox].map(box => ({
+  ...box, left: box.left - 35, right: box.right - 35,
+  alternates: box.alternates?.map(alternate => ({
+    ...alternate, left: alternate.left - 35, right: alternate.right - 35,
+  })),
+}));
+const scrolledLabels = visibleLabels(scrolledBoxes, "selected");
+assert.deepEqual([...scrolledLabels].map(([id, box]) => [id, box.top]),
+  [...staggered].map(([id, box]) => [id, box.top]),
+  "Collision placement preserves priority and vertical positions when only the viewport origin shifts");
 const tight = {...neighbors[0],alternates:[{left:165,right:291,top:190,bottom:232}]};
 assert.equal(visibleLabels([selectedBox,tight],"selected").get("left").bottom,190,
   "An alternate can move slightly further above a neighboring label to preserve the safety gap");

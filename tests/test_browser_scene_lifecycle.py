@@ -81,9 +81,9 @@ CONTROLLED_UI = r"""(() => {
   window.enableFrames = () => { controlled = true; };
   window.paintIds = () => [...frames].filter(([, cb]) => cb.name === 'paint').map(([id]) => id);
   window.paintCount = () => window.paintIds().length;
-  window.stepFrames = () => {
+  window.stepFrames = (now = performance.now()) => {
     const callbacks = [...frames.values()]; frames.clear();
-    callbacks.forEach(cb => cb(performance.now()));
+    callbacks.forEach(cb => cb(now));
   };
   window.fetch = (url, options) => {
     const path = String(url);
@@ -256,6 +256,142 @@ def test_detached_actor_click_cannot_act_on_a_reconstructed_scene(offline_page):
         },
         "liveDialog": True,
     }
+
+
+def test_ambient_frames_reuse_label_layout_and_navigation(offline_page):
+    page = offline_page
+
+    def preview_demo(route):
+        response = route.fetch()
+        payload = response.json()
+        for index, event in enumerate(payload["events"]):
+            event.update(
+                kind="interaction.replies",
+                post_id=str(10000 + index),
+                post_text=f"Synthetic preview {index}" + " long text " * (16 if index else 0),
+            )
+        route.fulfill(response=response, json=payload)
+
+    page.route("**/api/demo?*", preview_demo)
+    page.evaluate("document.querySelector('[data-filter=lost]').click()")
+    page.wait_for_function(
+        """() => document.querySelector('.is-selected .star-post')
+        && document.querySelector('#history').getAttribute('aria-busy') === 'false'""",
+        polling=50,
+    )
+    result = page.evaluate("""() => {
+      const history = document.querySelector('#history');
+      const scrubber = document.querySelector('#memory-scrubber');
+      const nav = ['#zoom-value', '#scene-zoom', '#zoom-in', '#zoom-out', '#memory-next',
+        '#memory-previous', '#scene-people-count', '#constellation-key'];
+      const label = () => history.querySelector('.is-selected .star-label');
+      const preview = () => label().querySelector('.star-post');
+      const spark = history.querySelector('.sequence-spark');
+      const observer = new MutationObserver(() => {});
+      for (const selector of nav)
+        observer.observe(document.querySelector(selector), {attributes: true, childList: true, subtree: true});
+      observer.observe(scrubber, {attributes: true});
+      const labels = new MutationObserver(() => {});
+      for (const node of history.querySelectorAll('.star-label'))
+        labels.observe(node, {attributes: true, childList: true, subtree: true});
+      const reads = {boxes: 0, previews: 0};
+      const box = Element.prototype.getBoundingClientRect;
+      const height = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
+      Element.prototype.getBoundingClientRect = function() {
+        if (this.matches('.star-label')) reads.boxes++;
+        return box.call(this);
+      };
+      Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {...height, get() {
+        if (this.matches('.star-post')) reads.previews++;
+        return height.get.call(this);
+      }});
+      let now = 1000;
+      const advance = () => stepFrames(now += 16);
+      const count = () => ({...reads, navigation: observer.takeRecords().length,
+        labels: labels.takeRecords().length});
+      try {
+        advance();
+        count();
+        reads.boxes = reads.previews = 0;
+        const initialSpark = spark.getAttribute('cx');
+        for (let index = 0; index < 6; index++) advance();
+        const idle = {...count(), moving: initialSpark !== spark.getAttribute('cx')};
+
+        const previousLeft = history.scrollLeft;
+        history.scrollLeft += previousLeft > 40 ? -40 : 40;
+        history.dispatchEvent(new Event('scroll'));
+        advance();
+        const expected = Math.round((1 - history.scrollLeft / (history.scrollWidth - history.clientWidth)) * 1000);
+        const scroll = history.scrollLeft !== previousLeft && labels.takeRecords().length > 0
+          && Number(scrubber.value) === expected;
+
+        const originalPreview = preview().textContent, originalHeight = preview().offsetHeight;
+        reads.boxes = reads.previews = 0;
+        const stars = [...history.querySelectorAll('.constellation-star')];
+        const next = stars[0].getAttribute('aria-pressed') === 'true' ? stars[1] : stars[0];
+        next.click();
+        for (let index = 0; index < 64; index++) advance();
+        const selection = preview().textContent !== originalPreview
+          && label().getAttribute('aria-hidden') === 'false'
+          && preview().tabIndex === 0 && preview().style.top !== ''
+          && reads.boxes > 0 && reads.previews > 0 && preview().offsetHeight !== originalHeight;
+        return {idle, scroll, selection};
+      } finally {
+        observer.disconnect();
+        labels.disconnect();
+        Element.prototype.getBoundingClientRect = box;
+        Object.defineProperty(HTMLElement.prototype, 'offsetHeight', height);
+      }
+    }""")
+    assert result == {
+        "idle": {"boxes": 0, "previews": 0, "navigation": 0, "labels": 0, "moving": True},
+        "scroll": True,
+        "selection": True,
+    }
+
+
+def test_reduced_motion_remeasures_labels_after_fonts_and_resize(offline_page):
+    page = offline_page
+    page.emulate_media(reduced_motion="reduce")
+    page.wait_for_function("matchMedia('(prefers-reduced-motion: reduce)').matches", polling=50)
+    page.evaluate("""() => {
+      const nativeBox = Element.prototype.getBoundingClientRect;
+      window.sceneLabelReads = 0;
+      Element.prototype.getBoundingClientRect = function() {
+        if (this.matches('.star-label')) window.sceneLabelReads++;
+        return nativeBox.call(this);
+      };
+      stepFrames();
+      window.sceneLabelReads = 0;
+      window.selectedLabel = document.querySelector('.is-selected .star-label');
+      window.initialLabelHeight = window.selectedLabel.offsetHeight;
+      const style = document.createElement('style');
+      style.textContent = `@font-face {
+        font-family: "XFlog test face";
+        src: url(/static/xf/plex-sans-variable.ttf);
+        size-adjust: 220%;
+      }`;
+      document.head.append(style);
+      window.selectedLabel.style.fontFamily = '"XFlog test face", sans-serif';
+      window.loadedTestFace = false;
+      document.fonts.addEventListener('loadingdone', () => { window.loadedTestFace = true; }, {once:true});
+      void document.fonts.load('20px "XFlog test face"');
+    }""")
+    page.wait_for_function("window.loadedTestFace && paintCount() > 0", polling=50)
+    assert page.evaluate("""() => {
+      stepFrames();
+      return window.selectedLabel.isConnected && window.sceneLabelReads > 0 && paintCount() === 0
+        && window.selectedLabel.offsetHeight !== window.initialLabelHeight;
+    }""")
+
+    page.set_viewport_size({"width": 1000, "height": 800})
+    page.wait_for_function("!window.selectedLabel.isConnected && paintCount() > 0", polling=50)
+    assert page.evaluate("""() => {
+      window.sceneLabelReads = 0;
+      stepFrames();
+      return window.sceneLabelReads > 0 && paintCount() === 0
+        && document.querySelector('.is-selected .star-label').getAttribute('aria-hidden') === 'false';
+    }""")
 
 
 @pytest.mark.parametrize("motion", ["no-preference", "reduce"])
