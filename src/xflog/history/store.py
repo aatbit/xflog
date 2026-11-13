@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS event_account_sequence ON events(account_id, sequence DESC);
 CREATE INDEX IF NOT EXISTS event_actor_sequence ON events(account_id, actor_id, sequence DESC);
 CREATE INDEX IF NOT EXISTS event_account_receipt ON events(account_id, received_at, kind);
+CREATE INDEX IF NOT EXISTS event_timeline_receipt ON events(account_id, received_at, sequence);
+CREATE INDEX IF NOT EXISTS event_actor_receipt ON events(account_id, actor_id, received_at, sequence);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS subscriptions (
  id TEXT PRIMARY KEY, kind TEXT NOT NULL, account_id TEXT NOT NULL,

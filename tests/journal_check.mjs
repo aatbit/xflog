@@ -68,6 +68,42 @@ assert.deepEqual(eventsIn(model(events, "none")), events.map((record) => record.
 assert.deepEqual(model([], "activity").rows, []);
 assert.equal(model([], "none").heights.at(0), -1);
 
+const summary = {
+  groups: [
+    {key:"follow.follow",label:"Followed you",tone:"positive",event_count:9,distinct_actors:4},
+    {key:"follow.unfollow",label:"Unfollowed",tone:"negative",event_count:4,distinct_actors:2},
+  ],
+};
+const partial = createJournalModel([events[0]], {modules, lens:"activity", collapsed, day, aggregate:summary});
+assert.deepEqual(partial.groups.map(group => [group.key, group.eventCount, group.distinctActors, group.events.length]),
+  [["follow.follow", 9, 4, 1], ["follow.unfollow", 4, 2, 0]]);
+assert.equal(partial.rows[partial.groups[1].start].type, "summary");
+assert.deepEqual(eventsIn(partial), ["new-follow"], "Aggregate-only groups add no synthetic event rows.");
+
+const paged = model([], "none");
+const input = Array.from({length: 129}, (_, index) => ({...events[index % events.length],
+  event_id: `paged-${index}`, received_at: `${stamp.slice(0,8)}${index % 2 ? 26 : 25}T12:00:00Z`,
+  provider_at: `${stamp.slice(0,8)}${index % 2 ? 26 : 25}T12:00:00Z`,
+}));
+let cursor = 0;
+for (const pageSize of [1, 2, 4, 8, 16, 32, 64, 2]) {
+  const old = paged.byEvent.get(input[0].event_id);
+  paged.append(input.slice(cursor, cursor + pageSize));
+  cursor += pageSize;
+  if (old) assert.equal(paged.byEvent.get(input[0].event_id), old, "Append retains logical row identity.");
+  const reference = model(input.slice(0, cursor), "none");
+  const identity = ({key, first, last}) => [key, first, last];
+  assert.deepEqual(paged.rows.map(identity), reference.rows.map(identity));
+  reference.heights.update(0, 83.5);
+  paged.heights.update(0, 83.5);
+  for (const [index, row] of paged.rows.entries()) {
+    const top = reference.heights.prefix(index);
+    assert.equal(paged.heights.prefix(index), top);
+    assert.equal(paged.rows[paged.heights.at(top)], row);
+  }
+  assert.equal(paged.heights.total, reference.heights.total, "Appended Fenwick entries retain measured prefix sums.");
+}
+
 for (const module of modules.filter((item) => item.enabled)) {
   const records = module.buckets.map((bucket, index) => ({
     ...events[0],

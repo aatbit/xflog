@@ -14,11 +14,12 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from . import audience_groups
 from .config import ASSETS, Config
 from .errors import SetupError
-from .history.demo import demo_activity, demo_history
+from .history.demo import demo_activity, demo_history, demo_timeline
 from .history.demo import encounter_context as demo_encounter_context
 from .history.filters import valid_filters
 from .history.summary import SUBJECT_TYPES, SUMMARY_PERIODS, activity_window, all_readings, readings
-from .history.timeline import Timeline, decode_cursor
+from .history.timeline import Timeline
+from .history.timeline_cursor import InvalidTimelineRequest
 from .interactions import TYPES, catalog
 from .interactions.history import ThreadOptions
 from .profile_names import ProfileNames
@@ -35,6 +36,19 @@ from .web.models import (
     ThreadRequest,
 )
 from .web.ui import mount_ui as mount_browser_ui
+
+
+def _history_scope(kind, subject, since, limit, lens):
+    if not valid_filters(kind, subject, 0):
+        raise HTTPException(422, "Invalid timeline filter.")
+    if lens != "none" and lens not in audience_groups.MODULES:
+        raise HTTPException(422, "Invalid audience group.")
+    if not 1 <= limit <= 50:
+        raise HTTPException(422, "History page size must be between 1 and 50.")
+    try:
+        return timestamp(since) if since else ""
+    except (ValueError, OverflowError):
+        raise HTTPException(422, "Invalid history range.") from None
 
 
 def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
@@ -207,36 +221,28 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
         since: str = "",
         local_only: bool = False,
         limit: int = 25,
+        lens: str = "none",
+        after_revision: str = "",
+        selected: str = "",
     ):
-        try:
-            decode_cursor(before)
-        except ValueError:
-            raise HTTPException(422, "Invalid timeline cursor.") from None
-        if not valid_filters(kind, subject, 0):
-            raise HTTPException(422, "Invalid timeline filter.")
-        try:
-            since = timestamp(since) if since else ""
-        except (ValueError, OverflowError):
-            raise HTTPException(422, "Invalid history range.") from None
-        if not 1 <= limit <= 50:
-            raise HTTPException(422, "History page size must be between 1 and 50.")
-        account = await store.setting("account")
-        if not account:
-            return {"events": [], "next": None}
+        since = _history_scope(kind, subject, since, limit, lens)
         query = {
             "kind": kind,
             "subject": subject,
             "before": before,
             "since": since,
             "limit": limit,
+            "lens": lens,
+            "after_revision": after_revision,
+            "selected": selected,
         }
-        result = await timeline.history(account["id"], query)
-        if not local_only and await profile_names.ensure(result["events"]):
-            result = await timeline.history(account["id"], query)
-        groups = await store.setting("audience_groups", {})
-        result["events"] = await audience_groups.decorate_history(
-            result["events"], groups, timeline.encounter_context
-        )
+        try:
+            result = await timeline.current_history(query)
+            if before in {"", "0"} and not local_only and result["events"]:
+                if await profile_names.ensure(result["events"]):
+                    result = await timeline.current_history(query)
+        except InvalidTimelineRequest as error:
+            raise HTTPException(422, str(error)) from None
         return result
 
     @app.get("/api/events")
@@ -256,11 +262,40 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
         return result
 
     @app.get("/api/demo")
-    async def demo(kind: str = "all", subject: str = "followers", before: int = 0):
-        if not valid_filters(kind, subject, before):
-            raise HTTPException(422, "Invalid demo filter.")
-        result = demo_history({"kind": kind, "subject": subject, "before": before})
+    async def demo(
+        kind: str = "all",
+        subject: str = "followers",
+        before: str = "0",
+        since: str = "",
+        limit: int | None = None,
+        lens: str = "none",
+    ):
+        since = _history_scope(kind, subject, since, 25 if limit is None else limit, lens)
         groups = await store.setting("audience_groups", {})
+        if (
+            limit is not None
+            or since
+            or lens != "none"
+            or not before.isascii()
+            or not before.isdecimal()
+        ):
+            try:
+                return await demo_timeline(
+                    {
+                        "kind": kind,
+                        "subject": subject,
+                        "before": before,
+                        "since": since,
+                        "limit": 25 if limit is None else limit,
+                        "lens": lens,
+                    },
+                    groups,
+                )
+            except InvalidTimelineRequest as error:
+                raise HTTPException(422, str(error)) from None
+        if len(before) > 19:
+            raise HTTPException(422, "Invalid demo cursor.")
+        result = demo_history({"kind": kind, "subject": subject, "before": int(before)})
         result["events"] = await audience_groups.decorate_history(
             result["events"], groups, demo_encounter_context
         )

@@ -15,7 +15,9 @@ CREATE TABLE IF NOT EXISTS interactions (
  UNIQUE(account_id,event_id,person_id)
 );
 CREATE INDEX IF NOT EXISTS interaction_person ON interactions(account_id,person_id,sequence DESC);
+CREATE INDEX IF NOT EXISTS interaction_account_sequence ON interactions(account_id,sequence DESC);
 CREATE INDEX IF NOT EXISTS interaction_receipt ON interactions(account_id,received_at,sequence);
+CREATE INDEX IF NOT EXISTS interaction_actor_receipt ON interactions(account_id,person_id,received_at,sequence);
 CREATE TABLE IF NOT EXISTS thread_snapshots (
  account_id TEXT NOT NULL, conversation_id TEXT NOT NULL, checked_at TEXT NOT NULL,
  next_token TEXT, PRIMARY KEY(account_id,conversation_id)

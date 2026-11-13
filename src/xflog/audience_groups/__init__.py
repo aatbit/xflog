@@ -77,19 +77,29 @@ def capture(source: dict, saved=None) -> dict:
     return captured
 
 
+def bucket_for(module: AudienceGroup, event: dict) -> Bucket:
+    return _resolve_bucket(module, module.assign(event))
+
+
+def _resolve_bucket(module: AudienceGroup, value: str | Bucket) -> Bucket:
+    if module.dynamic_buckets and isinstance(value, Bucket):
+        return value
+    return next(
+        (bucket for bucket in module.buckets if bucket.key == value),
+        next(bucket for bucket in module.buckets if bucket.key == "unknown"),
+    )
+
+
 def decorate(event: dict, saved=None) -> dict:
     enabled = preferences(saved)
     groups, descriptors = {}, {}
     for key, module in MODULES.items():
         if enabled[key]:
-            bucket = module.assign(event)
-            if module.dynamic_buckets and isinstance(bucket, Bucket):
-                groups[key] = bucket.key
+            value = module.assign(event)
+            bucket = _resolve_bucket(module, value)
+            groups[key] = bucket.key
+            if module.dynamic_buckets and isinstance(value, Bucket):
                 descriptors[key] = asdict(bucket)
-            else:
-                groups[key] = (
-                    bucket if bucket in {item.key for item in module.buckets} else "unknown"
-                )
     return {**event, "audience_groups": groups, "audience_group_buckets": descriptors}
 
 

@@ -9,6 +9,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.error import URLError
+from urllib.parse import parse_qs, urljoin, urlsplit
 from urllib.request import urlopen
 
 import pytest
@@ -195,24 +196,28 @@ def test_loading_error_retry_and_layout_clear_the_parent_owned_scene(offline_pag
     assert unmount == {"transform": "translateX(777777px)", "pending": 0}
 
 
-def test_error_fallback_clears_scene_when_initial_load_kept_existing_history(offline_page):
+def test_scope_change_discards_stale_failure_before_current_error(offline_page):
     page = offline_page
-    page.evaluate("window.holdApi.demo = true; document.querySelector('#lens-trigger').click()")
-    page.get_by_role("menuitemradio", name="Activity", exact=True).click()
-    page.wait_for_function("window.heldCount('demo') === 1 && window.paintCount() > 0", polling=50)
     page.evaluate("""() => {
       window.oldSky = document.querySelector('.constellation-sky');
+      window.holdApi.demo = true;
+      document.querySelector('#lens-trigger').click();
+    }""")
+    page.get_by_role("menuitemradio", name="Activity", exact=True).click()
+    page.wait_for_function("window.heldCount('demo') === 1", polling=50)
+    page.evaluate("""() => {
       window.holdApi.hud = true;
       document.querySelector('[data-subject="subscriptions"]').click();
     }""")
     page.wait_for_function("window.heldCount('hud') === 1", polling=50)
     page.evaluate("window.failHeld('demo')")
-    page.wait_for_selector("#history [data-retry]")
-    result = page.evaluate("""() => {
+    result = page.evaluate("""async () => {
+      await new Promise(resolve => setTimeout(resolve, 0));
       window.oldSky.style.transform = 'translateX(456789px)';
       const before = window.paintCount(); window.stepFrames();
       return {detached:!window.oldSky.isConnected, before, after:window.paintCount(),
-        transform:window.oldSky.style.transform, animating:document.querySelector('#xf').dataset.animating};
+        transform:window.oldSky.style.transform, animating:document.querySelector('#xf').dataset.animating,
+        loading: Boolean(document.querySelector('#history .loading-state'))};
     }""")
     assert result == {
         "detached": True,
@@ -220,11 +225,13 @@ def test_error_fallback_clears_scene_when_initial_load_kept_existing_history(off
         "after": 0,
         "transform": "translateX(456789px)",
         "animating": "false",
+        "loading": True,
     }
-    page.evaluate("window.holdApi.hud = false; window.holdApi.demo = false; window.failHeld('hud')")
-    page.wait_for_function(
-        "document.querySelector('#history').getAttribute('aria-busy') === 'false'", polling=50
-    )
+    page.evaluate("window.holdApi.hud = false; window.failHeld('hud')")
+    page.wait_for_function("window.heldCount('demo') === 1", polling=50)
+    page.evaluate("window.failHeld('demo')")
+    page.wait_for_selector("#history [data-retry]")
+    assert page.evaluate("window.paintCount()") == 0
 
 
 def test_detached_actor_click_cannot_act_on_a_reconstructed_scene(offline_page):
@@ -869,6 +876,323 @@ def journal_events(size):
     return events
 
 
+@pytest.fixture
+def paged_history(offline_page):
+    page = offline_page
+    events = journal_events(114)
+    page.evaluate(
+        """events => {
+          const fetchOriginal = window.fetch;
+          const requests = [];
+          const history = document.querySelector('#history');
+          const byKind = kind => events.filter(event => event.kind === kind);
+          const actors = events => new Set(events.map(event => event.actor_id)).size;
+          window.fetch = (path, options) => {
+            const url = new URL(path, location.href);
+            if (url.pathname !== '/api/demo') return fetchOriginal(path, options);
+            return new Promise(resolve => requests.push({url, signal:options?.signal, resolve}));
+          };
+          window.paged = {
+            requests: () => requests.map(({url, signal}) => ({...Object.fromEntries(url.searchParams),
+              aborted: signal?.aborted ?? false})),
+            send(index, mode) {
+              const {url, resolve} = requests[index];
+              const before = url.searchParams.get('before');
+              const scope = Object.fromEntries(url.searchParams);
+              const offset = before === '0' ? 0 : Number(before.split('-').at(-1));
+              const limit = Math.min(50, Number(url.searchParams.get('limit') || 25));
+              const scopedRows = scope.kind === 'lost' ? byKind('follow.unfollow') : events;
+              const groups = ['follow.follow', 'follow.unfollow'].map((key, index) => ({
+                key, label: index ? 'Unfollowed' : 'Followed you', tone: index ? 'negative' : 'positive',
+                event_count: byKind(key).length, distinct_actors: actors(byKind(key)),
+              }));
+              const end = Math.min(offset + limit, scopedRows.length);
+              const payload = mode === 'fail' ? {detail: 'Synthetic older-page failure'} : {
+                events: scopedRows.slice(offset, end),
+                next: mode === 'repeat' ? before : end < scopedRows.length ? 'page-' + end : null,
+                aggregate: !offset ? {total_events: scopedRows.length, distinct_actors: actors(scopedRows),
+                  groups: scope.lens === 'activity' ? groups : [], kinds: {}, revision: 'fixture', scope} : null,
+              };
+              // Resolve even after abort to challenge the caller's generation guard.
+              resolve(new Response(JSON.stringify(payload), {status: mode === 'fail' ? 503 : 200,
+                headers: {'content-type': 'application/json'}}));
+            },
+            journalEnd() {
+              history.scrollTop = history.scrollHeight;
+              for (let index = 0; index < 4; index++) history.dispatchEvent(new Event('scroll'));
+              stepFrames();
+            },
+            constellationEnd() {
+              history.scrollLeft = 0;
+              history.dispatchEvent(new WheelEvent('wheel', {deltaX: -120, bubbles:true, cancelable:true}));
+              stepFrames();
+            },
+          };
+        }""",
+        events,
+    )
+    return page
+
+
+def receive_history_page(page, index, mode=None):
+    page.wait_for_function("index => paged.requests().length === index + 1", arg=index, polling=20)
+    page.evaluate("([index, mode]) => paged.send(index, mode)", [index, mode])
+    if mode in {"fail", "repeat"}:
+        page.wait_for_function(
+            "document.querySelector('#history-more').textContent === 'Retry older activity'",
+            polling=20,
+        )
+        assert page.evaluate(
+            """index => {
+          paged.journalEnd();
+          return paged.requests().length === index + 1 &&
+            document.querySelector('#history').getAttribute('aria-busy') === 'false';
+        }""",
+            index,
+        ), "A near-end scroll must leave the failed cursor available for explicit retry"
+        return
+    page.wait_for_function(
+        "document.querySelector('#history').getAttribute('aria-busy') === 'false'", polling=20
+    )
+
+
+def test_constellation_scrubber_requests_older_once_on_commit(paged_history):
+    page = paged_history
+    page.evaluate("document.querySelector('[data-filter=all]').click()")
+    receive_history_page(page, 0)
+    scrubber = page.locator("#memory-scrubber")
+    scrubber.evaluate("input => { input.value = '1000'; }")
+    scrubber.dispatch_event("input")
+    assert page.evaluate("paged.requests().length") == 1
+    scrubber.dispatch_event("change")
+    receive_history_page(page, 1, "fail")
+    assert page.evaluate("paged.requests().length") == 2
+    assert page.locator("#history-more").inner_text() == "Retry older activity"
+
+
+def test_journal_pages_coalesce_retry_and_preserve_anchor_focus(paged_history):
+    page = paged_history
+    page.evaluate("""() => {
+      document.querySelector('[data-layout=vertical]').click();
+      document.querySelector('[data-filter=all]').click();
+    }""")
+    receive_history_page(page, 0)
+    initial = page.evaluate("Number(document.querySelector('#memory-scrubber').max) + 1")
+    assert 1 < initial <= 50
+    assert page.evaluate("paged.requests().map(request => request.before)") == ["0"]
+    assert "114" in page.locator("#scene-people-count").text_content()
+    page.evaluate("""() => {
+      window.journalTrackBefore = document.querySelector('.journal-window');
+      window.focusedHistoryRow = document.querySelector('.event-button');
+      focusedHistoryRow.focus({preventScroll:true});
+      paged.journalEnd();
+    }""")
+    page.wait_for_function("paged.requests().length === 2", polling=20)
+    assert "Loading" in page.locator("#history-page-status").text_content()
+    assert page.evaluate("paged.requests().at(-1).before") == f"page-{initial}"
+    receive_history_page(page, 1, "fail")
+    assert page.locator("#history-more").is_visible()
+    assert page.locator("#history-more").inner_text() == "Retry older activity"
+    assert page.evaluate(
+        "document.activeElement === focusedHistoryRow && journalTrackBefore.isConnected"
+    )
+    page.evaluate("document.querySelector('#history-more').click()")
+    receive_history_page(page, 2, "repeat")
+    assert page.evaluate("paged.requests().at(-1).before") == f"page-{initial}"
+    assert page.evaluate("Number(document.querySelector('#memory-scrubber').max) + 1") == initial
+    page.evaluate("document.querySelector('#history-more').click()")
+    page.wait_for_function("paged.requests().length === 4", polling=20)
+    page.evaluate("""() => {
+      stepFrames();
+      const history = document.querySelector('#history');
+      const top = history.getBoundingClientRect().top;
+      window.anchorBeforeAppend = [...history.querySelectorAll('.event-button')].find(node =>
+        node.getBoundingClientRect().bottom > top);
+      window.anchorOffsetBeforeAppend = anchorBeforeAppend.getBoundingClientRect().top - top;
+      window.selectedBeforeAppend = document.querySelector('#journey-position').textContent;
+    }""")
+    receive_history_page(page, 3)
+    assert page.evaluate("paged.requests().at(-1).before") == f"page-{initial}"
+    restored = page.evaluate("""() => ({focus: document.activeElement === focusedHistoryRow,
+      track: journalTrackBefore.isConnected, anchor: anchorBeforeAppend.isConnected,
+      offset: anchorBeforeAppend.getBoundingClientRect().top - document.querySelector('#history').getBoundingClientRect().top - anchorOffsetBeforeAppend,
+      selected: document.querySelector('#journey-position').textContent.split(' of ')[0] === selectedBeforeAppend.split(' of ')[0]})""")
+    assert restored == {
+        "focus": True,
+        "track": True,
+        "anchor": True,
+        "offset": pytest.approx(0, abs=2),
+        "selected": True,
+    }
+    assert (
+        page.evaluate("Number(document.querySelector('#memory-scrubber').max) + 1") == initial * 2
+    )
+    page.evaluate("document.querySelector('[data-layout=horizontal]').click()")
+    assert page.locator("#history .constellation-star").count() == initial * 2
+    assert page.evaluate("paged.requests().length") == 4
+
+
+def test_constellation_pages_preserve_selection_and_show_full_group_counts(paged_history):
+    page = paged_history
+    page.locator("#lens-trigger").click()
+    page.get_by_role("menuitemradio", name="Activity", exact=True).click()
+    receive_history_page(page, 0)
+    initial = page.locator("#history .constellation-star").count()
+    assert 1 < initial <= 50
+    assert "114" in page.locator("#scene-people-count").text_content()
+    page.evaluate("""() => {
+      const zoom = document.querySelector('#scene-zoom');
+      zoom.value = '0'; zoom.dispatchEvent(new Event('input', {bubbles:true})); stepFrames();
+    }""")
+    assert page.locator("#history .constellation-group .cluster-count").all_text_contents() == [
+        "85"
+    ]
+    assert "1 group with no events loaded" in page.locator("#constellation-key").text_content()
+    assert page.locator("#history .constellation-star").count() == initial
+    page.evaluate("document.querySelector('[data-layout=vertical]').click()")
+    assert "85 events" in page.locator('#history [data-group="follow.follow"] summary').inner_text()
+    page.evaluate("""() => {
+      const history = document.querySelector('#history');
+      history.scrollTop = history.scrollHeight - history.clientHeight - 180;
+      history.dispatchEvent(new Event('scroll'));
+      stepFrames();
+    }""")
+    summary = page.locator('#history [data-group="follow.unfollow"] .journal-group-summary')
+    assert "29 events saved · 0 loaded" in summary.text_content()
+    assert summary.locator("button, a").count() == 0
+    assert page.evaluate("paged.requests().length") == 1
+    page.evaluate("document.querySelector('[data-layout=horizontal]').click()")
+    page.evaluate("""() => {
+      const zoom = document.querySelector('#scene-zoom');
+      zoom.value = '1'; zoom.dispatchEvent(new Event('input', {bubbles:true})); stepFrames();
+      paged.constellationEnd();
+      const selected = document.querySelector('#history [aria-pressed=true][data-actor]');
+      window.selectedStarBefore = {id:selected.dataset.event, x:selected.getBoundingClientRect().x};
+    }""")
+    receive_history_page(page, 1)
+    assert page.locator("#history .constellation-star").count() == 2 * initial
+    assert page.evaluate("""() => {
+      const selected = document.querySelector('#history [aria-pressed=true][data-actor]');
+      return selected.dataset.event === selectedStarBefore.id
+        && Math.abs(selected.getBoundingClientRect().x - selectedStarBefore.x) <= 2;
+    }""")
+    while page.locator("#history .constellation-star").count() < 114:
+        count = page.evaluate("paged.requests().length")
+        assert count < 6
+        page.evaluate("paged.constellationEnd()")
+        receive_history_page(page, count)
+    assert page.locator("#history .constellation-star").count() == 114
+    assert "All matching activity loaded" in page.locator("#history-page-status").text_content()
+    count = page.evaluate("paged.requests().length")
+    page.evaluate("paged.constellationEnd()")
+    assert page.evaluate("paged.requests().length") == count
+
+
+def test_grouped_journal_replaces_unloaded_summary_in_row_order(paged_history):
+    page = paged_history
+    page.evaluate("document.querySelector('[data-layout=vertical]').click()")
+    page.locator("#lens-trigger").click()
+    page.get_by_role("menuitemradio", name="Activity", exact=True).click()
+    receive_history_page(page, 0)
+    page.evaluate("""() => {
+      window.groupHeader = document.querySelector('[data-group="follow.follow"] summary');
+      groupHeader.focus({preventScroll: true});
+      paged.journalEnd();
+    }""")
+    assert (
+        page.locator('#history [data-group="follow.unfollow"] .journal-group-summary').count() == 1
+    )
+    receive_history_page(page, 1)
+    assert (
+        page.locator('#history [data-group="follow.unfollow"] .journal-group-summary').count() == 0
+    )
+    assert page.evaluate("document.activeElement === groupHeader && groupHeader.isConnected")
+    page.evaluate("paged.journalEnd()")
+    receive_history_page(page, 2)
+    assert page.locator('#history [data-group="follow.unfollow"] summary').count() == 1
+    assert page.locator("#history .journal-window > [data-group]").evaluate_all(
+        "groups => groups.map(group => group.dataset.group)"
+    ) == ["follow.follow", "follow.unfollow"]
+    assert page.evaluate("document.activeElement === groupHeader && groupHeader.isConnected")
+
+
+def test_stale_older_page_cannot_cross_filter_scope(paged_history):
+    page = paged_history
+    page.evaluate("document.querySelector('[data-filter=all]').click()")
+    receive_history_page(page, 0)
+    page.evaluate("document.querySelector('#history-more').click()")
+    page.wait_for_function("paged.requests().length === 2", polling=20)
+    page.evaluate("document.querySelector('[data-filter=lost]').click()")
+    receive_history_page(page, 2)
+    assert page.evaluate("paged.requests().map(request => request.before)[2]") == "0"
+    assert page.evaluate("paged.requests()[1].aborted")
+    page.evaluate(
+        """async () => { paged.send(1); await new Promise(resolve => setTimeout(resolve, 0)); }"""
+    )
+    limit = page.evaluate("Number(paged.requests()[2].limit || 25)")
+    assert page.locator("#history .constellation-star").count() == min(29, limit)
+    assert all(
+        "Unfollowed" in label
+        for label in page.locator("#history .constellation-star").evaluate_all(
+            "stars => stars.map(star => star.getAttribute('aria-label'))"
+        )
+    )
+
+
+def test_parent_unmount_aborts_older_page_and_ignores_late_response(paged_history):
+    page = paged_history
+    page.evaluate("document.querySelector('[data-filter=all]').click()")
+    receive_history_page(page, 0)
+    page.evaluate("document.querySelector('#history-more').click()")
+    page.wait_for_function("paged.requests().length === 2", polling=20)
+    page.evaluate("""() => {
+      window.detachedRoot = document.querySelector('#xf');
+      detachedRoot.remove();
+    }""")
+    page.wait_for_function("paged.requests()[1].aborted", polling=20)
+    assert page.evaluate("""async () => {
+      const before = detachedRoot.outerHTML;
+      paged.send(1);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      stepFrames();
+      return !detachedRoot.isConnected && detachedRoot.outerHTML === before && paintCount() === 0;
+    }""")
+
+
+def test_real_demo_timeline_pages_through_the_shared_range(offline_page):
+    page = offline_page
+    requests = []
+    page.on(
+        "request",
+        lambda request: requests.append(request.url) if "/api/demo?" in request.url else None,
+    )
+    page.locator("#group-range-trigger").click()
+    page.get_by_role("menuitemradio", name="All saved", exact=True).click()
+    page.wait_for_function(
+        """() => document.querySelectorAll('#history .constellation-star').length === 50
+      && document.querySelector('#history').getAttribute('aria-busy') === 'false'""",
+        polling=20,
+    )
+    assert len(requests) == 1
+    assert "66 events" in page.locator("#scene-people-count").text_content()
+    page.locator("#history-more").press("Enter")
+    page.wait_for_function(
+        "document.querySelectorAll('#history .constellation-star').length === 66", polling=20
+    )
+    assert len(requests) == 2
+    assert page.locator("#history-more").is_hidden()
+    assert (
+        len(
+            set(
+                page.locator("#history [data-actor]").evaluate_all(
+                    "stars => stars.map(star => star.dataset.event)"
+                )
+            )
+        )
+        == 66
+    )
+
+
 JOURNAL_CONTROLS = """() => {
   const history = document.querySelector('#history');
   const viewport = () => history.getBoundingClientRect();
@@ -962,7 +1286,7 @@ def test_journal_mounts_bounded_rows_and_reveals_a_record_after_a_jump(journal_p
     assert result["initialHeadings"] > 0 and result["nearDate"] > 0
     assert result["middle"] and all(1000 < index < 1400 for index in result["middle"])
     assert result["oldRemoved"] and result["last"] == "journal-2399"
-    assert result["pressed"] == "true" and result["ordinal"] == "Event 602 of 2400"
+    assert result["pressed"] == "true" and result["ordinal"] == "Event 602 of 2400 loaded"
     assert result["unmountedSelection"]
     page.evaluate("journalTest.reveal(601)")
     assert (
@@ -1148,25 +1472,49 @@ def test_journal_live_history_keeps_the_anchor_and_offscreen_focus(offline_page)
             "sequence": 851 + index,
             "received_at": (first_arrival + timedelta(seconds=index + 1)).isoformat(),
         }
-        for index in range(25)
+        for index in range(175)
     ]
-    appended = [
-        {
-            **records[-1],
-            "event_id": f"old-{index}",
-            "sequence": -index - 1,
-            "received_at": (first_arrival - timedelta(seconds=1000 + index)).isoformat(),
-        }
-        for index in range(12)
-    ]
-    revision = "initial"
+    revision = "850:0::"
+    requests = []
 
     def history(route):
-        route.fulfill(json={"events": records, "next": None})
+        params = {
+            key: value[0] for key, value in parse_qs(urlsplit(route.request.url).query).items()
+        }
+        requests.append(params)
+        before = params.get("before", "0")
+        after = params.get("after_revision")
+        if after:
+            assert int(after.split(":")[0]) == 850
+            candidates = inserted[::-1]
+            prefix = "delta-"
+        else:
+            candidates = (
+                records if revision == "850:0::" or before != "0" else inserted[::-1] + records
+            )
+            prefix = "older-"
+        limit = int(params.get("limit", 25))
+        offset = 0 if before == "0" else int(before.removeprefix(prefix))
+        end = offset + limit
+        payload = {
+            "events": candidates[offset:end],
+            "next": f"{prefix}{end}" if end < len(candidates) else None,
+        }
+        if not offset:
+            payload["aggregate"] = {
+                "total_events": int(revision.split(":")[0]),
+                "distinct_actors": 31,
+                "kinds": {},
+                "groups": [],
+                "scope": {},
+                "revision": revision,
+            }
+        route.fulfill(json=payload)
 
     def status(route):
         response = route.fetch()
         payload = response.json()
+        payload["account"] = {"id": "demo", "name": "Offline fixture"}
         payload["timeline_revision"] = revision
         route.fulfill(response=response, json=payload)
 
@@ -1182,7 +1530,7 @@ def test_journal_live_history_keeps_the_anchor_and_offscreen_focus(offline_page)
         return nativeTimeout(callback, delay, ...args);
       };
     })()""")
-    page.goto(page.url.split("/#", 1)[0], wait_until="networkidle")
+    page.goto(urljoin(page.url, "/"), wait_until="networkidle")
     assert page.evaluate("typeof window.runJournalPoll") == "function", page.locator(
         "#notice"
     ).text_content()
@@ -1191,7 +1539,7 @@ def test_journal_live_history_keeps_the_anchor_and_offscreen_focus(offline_page)
     page.evaluate("""async () => {
       await journalTest.scroll(0);
       journalTest.buttons()[0].focus({preventScroll: true});
-      await journalTest.scroll(journalTest.history.scrollHeight * 0.55);
+      await journalTest.scroll(journalTest.history.scrollHeight * 0.45);
     }""")
     assert page.evaluate("document.activeElement.dataset.event") == "journal-0"
     anchor = page.evaluate("""() => {
@@ -1199,9 +1547,9 @@ def test_journal_live_history_keeps_the_anchor_and_offscreen_focus(offline_page)
       return {identity: row.dataset.event, offset: row.getBoundingClientRect().top};
     }""")
 
-    records[:0] = inserted
-    records.extend(appended)
-    revision = "updated"
+    older_page = f"older-{int(requests[0].get('limit', 25))}"
+    assert [request.get("before", "0") for request in requests] == ["0"]
+    revision = "1025:0::"
     result = page.evaluate("""async () => {
       await runJournalPoll();
       await journalTest.settle();
@@ -1214,5 +1562,28 @@ def test_journal_live_history_keeps_the_anchor_and_offscreen_focus(offline_page)
     assert abs(result["offset"] - anchor["offset"]) <= 2
     assert result["focus"] == "journal-0"
     assert result["count"] < 35
+    delta = [request for request in requests if request.get("after_revision")]
+    assert len(delta) == 3
+    assert all(
+        request.get("before", "0") == "0" or request["before"].startswith("delta-")
+        for request in delta
+    )
+    assert "Catching up on new activity" in page.locator("#history-page-status").text_content()
     page.evaluate("journalTest.scroll(journalTest.history.scrollHeight)")
-    assert page.evaluate("journalTest.visible().at(-1).dataset.event") == "old-11"
+    page.wait_for_function(
+        "document.querySelector('#history').getAttribute('aria-busy') === 'false'", polling=20
+    )
+    assert requests[-1].get("before") == older_page and not requests[-1].get("after_revision")
+    assert "Catching up on new activity" in page.locator("#history-page-status").text_content()
+    pending_polls = 0
+    while "Catching up on new activity" in page.locator("#history-page-status").text_content():
+        pending_polls += 1
+        assert pending_polls <= 3
+        before = len(requests)
+        page.evaluate("runJournalPoll()")
+        assert 0 < len(requests) - before <= 3
+        assert all(request["before"].startswith("delta-") for request in requests[before:])
+    assert "Catching up on new activity" not in page.locator("#history-page-status").text_content()
+    assert page.evaluate("Number(document.querySelector('#memory-scrubber').max) + 1") == (
+        int(older_page.removeprefix("older-")) * 2 + len(inserted)
+    )

@@ -16,6 +16,7 @@ export function createJournal({
   let track, model, events, options, selected, frame = 0;
   let savedAnchor = null, inset = 0, width = 0;
   let revealRow = null, revealScrollTop = 0;
+  let renderedScrollTop = null;
   let measured = new Map();
   const mounted = new Map(), groups = new Map(), observed = new Map();
   const observer = new ResizeObserver(measure);
@@ -24,22 +25,38 @@ export function createJournal({
     const event = row.event;
     const tone = eventTone(event);
     const lost = tone === "negative";
-    return `<article aria-label="Event ${row.position} of ${events.length}" class="event ${row.group && row.last ? "journal-last-event " : ""}${lost ? "lost" : tone === "positive" ? "gain" : "neutral"}"><span class="event-dot" aria-hidden="true"></span><button type="button" class="event-button" data-event="${esc(event.event_id)}" aria-pressed="${selected === event.event_id}"><span class="avatar" aria-hidden="true">${esc(initials(event))}</span><span class="event-identity"><span class="event-name">${esc(event.name || event.handle || "X account")}</span><span class="event-handle">${esc(event.handle ? "@" + event.handle : "ID " + event.actor_id)}</span></span><span class="event-meta"><span class="event-kind"><span aria-hidden="true">${lost ? "↘" : tone === "neutral" ? "·" : "↗"}</span>${esc(label(event))}</span><span class="event-time">${esc(time.format(displayDate(event)))}${event.provider_at ? "" : " · received"}</span></span></button></article>`;
+    return `<article aria-label="${eventPosition(row)}" class="event ${row.group && row.last ? "journal-last-event " : ""}${lost ? "lost" : tone === "positive" ? "gain" : "neutral"}"><span class="event-dot" aria-hidden="true"></span><button type="button" class="event-button" data-event="${esc(event.event_id)}" aria-pressed="${selected === event.event_id}"><span class="avatar" aria-hidden="true">${esc(initials(event))}</span><span class="event-identity"><span class="event-name">${esc(event.name || event.handle || "X account")}</span><span class="event-handle">${esc(event.handle ? "@" + event.handle : "ID " + event.actor_id)}</span></span><span class="event-meta"><span class="event-kind"><span aria-hidden="true">${lost ? "↘" : tone === "neutral" ? "·" : "↗"}</span>${esc(label(event))}</span><span class="event-time">${esc(time.format(displayDate(event)))}${event.provider_at ? "" : " · received"}</span></span></button></article>`;
+  }
+
+  const eventPosition = row => `Event ${row.position} of ${events.length} loaded`;
+
+  function groupCount(group) {
+    const total = group.eventCount ?? group.events.length;
+    const loaded = total === group.events.length ? "" : ` saved · ${group.events.length} loaded`;
+    const actors = group.distinctActors === undefined ? "" :
+      `<span class="sr-only"> · ${group.distinctActors} ${group.distinctActors === 1 ? "person" : "people"}</span>`;
+    return `${total} ${total === 1 ? "event" : "events"}${loaded}${actors}`;
   }
 
   function mountGroup(group) {
-    const node = document.createElement("details");
+    const summary = !group.events.length;
+    const node = document.createElement(summary ? "div" : "details");
     node.className = `journal-group ${group.tone || ""}`;
     node.dataset.group = group.key;
-    node.open = group.open;
-    node.innerHTML = `<summary><span class="journal-group-name">${esc(group.label)}</span> <span class="journal-group-count">${group.events.length} ${group.events.length === 1 ? "event" : "events"}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></summary><div class="journal-group-content"></div>`;
+    if (!summary) node.open = group.open;
+    const title = `<span class="journal-group-name">${esc(group.label)}</span> <span class="journal-group-count">${groupCount(group)}</span>`;
+    node.innerHTML = summary
+      ? `<div class="journal-group-summary">${title}</div>`
+      : `<summary>${title}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></summary><div class="journal-group-content"></div>`;
     groups.set(group, node);
     return node;
   }
 
+  const isHeader = row => row.type === "group" || row.type === "summary";
+
   function mountRow(row) {
     let node;
-    if (row.type === "group") {
+    if (isHeader(row)) {
       node = groups.get(row.group).firstElementChild;
     } else if (row.type === "date") {
       node = document.createElement("div");
@@ -61,7 +78,7 @@ export function createJournal({
     observer.unobserve(node);
     observed.delete(node);
     mounted.delete(row);
-    if (row.type !== "group") node.remove();
+    if (!isHeader(row)) node.remove();
   }
 
   function locate(key) {
@@ -106,7 +123,7 @@ export function createJournal({
       node.style.height = `${model.heights.prefix(group.end) - top - 20}px`;
     }
     for (const [row, node] of mounted) {
-      if (row.type === "group") continue;
+      if (isHeader(row)) continue;
       const base = row.group ? model.heights.prefix(row.group.start) + 1 : 0;
       setTop(node, model.heights.prefix(row.index) - base);
     }
@@ -147,8 +164,8 @@ export function createJournal({
       let groupNode;
       if (row.group) groupNode = groups.get(row.group) ?? mountGroup(row.group);
       const node = mounted.get(row) ?? mountRow(row);
-      const parent = row.group && row.type !== "group" ? groupNode.lastElementChild : track;
-      const child = row.type === "group" ? groupNode : node;
+      const parent = row.group && !isHeader(row) ? groupNode.lastElementChild : track;
+      const child = isHeader(row) ? groupNode : node;
       if (child.parentNode !== parent) parent.insertBefore(child, tails.get(parent) ?? null);
       tails.set(parent, child);
     }
@@ -185,7 +202,7 @@ export function createJournal({
       if (!row || !track.contains(entry.target)) continue;
       const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.target.offsetHeight;
       if (!height) continue;
-      const occupied = height + (row.type === "event" ? 12 : row.type === "group" ? 1 : 0);
+      const occupied = height + (row.type === "event" ? 12 : isHeader(row) ? 1 : 0);
       measured.set(row.key, {row, height: occupied});
       if (model.heights.height(row.index) !== occupied) {
         model.heights.update(row.index, occupied);
@@ -197,6 +214,7 @@ export function createJournal({
       placeMounted();
       if (keepRevealed) alignRow(revealRow);
       else restoreAnchor(previous);
+      renderedScrollTop = element.scrollTop;
       queue();
     }
   }
@@ -210,6 +228,7 @@ export function createJournal({
     observed.clear();
     track?.remove();
     track = model = events = options = revealRow = null;
+    renderedScrollTop = null;
     measured.clear();
   }
 
@@ -227,12 +246,83 @@ export function createJournal({
       const fields = ["name", "handle", "actor_id", "kind", "received_at", "provider_at"];
       return row.event === next.event || fields.every(field => row.event[field] === next.event[field]);
     }
-    if (row.type === "group")
-      return row.group.label === next.group.label && row.group.events.length === next.group.events.length;
+    if (isHeader(row))
+      return row.type === next.type && row.group.label === next.group.label && groupCount(row.group) === groupCount(next.group);
     return row.first === next.first;
   }
 
+  function buildModel() {
+    return createJournalModel(events, {...options, collapsed, day: event => date.format(displayDate(event))});
+  }
+
+  function updateMountedEvent(row, node) {
+    node.setAttribute("aria-label", eventPosition(row));
+    node.classList.toggle("journal-last-event", Boolean(row.group && row.last));
+    node.querySelector("button").setAttribute("aria-pressed", String(row.event.event_id === selected));
+  }
+
+  function append(nextEvents, nextOptions) {
+    const previous = anchor();
+    const focused = locate(document.activeElement);
+    const priorLength = events.length;
+    events = nextEvents;
+    options = nextOptions;
+    selected = options.selected;
+    if (model.append) {
+      model.append(events.slice(priorLength));
+      for (const [row, node] of mounted)
+        if (row.type === "event") updateMountedEvent(row, node);
+    } else {
+      const previousHeights = measured;
+      measured = new Map();
+      model = buildModel();
+      restoreMeasurements(previousHeights);
+      for (const [group, node] of [...groups]) {
+        const header = node.firstElementChild;
+        const row = observed.get(header);
+        const replacement = model.byKey.get(row.key);
+        groups.delete(group);
+        if (replacement?.type !== row.type) {
+          unmountRow(row, header);
+          node.remove();
+          continue;
+        }
+        groups.set(replacement.group, node);
+        if (replacement.group.label !== group.label)
+          header.querySelector(".journal-group-name").textContent = replacement.group.label;
+        const count = groupCount(replacement.group);
+        if (count !== groupCount(group)) header.querySelector(".journal-group-count").innerHTML = count;
+      }
+      for (const [row, node] of [...mounted]) {
+        const replacement = model.byKey.get(row.key);
+        if (replacement?.type !== row.type || replacement.index < 0 ||
+            (row.type === "event" && !sameHeightInputs(row, replacement)) ||
+            (row.type === "date" && row.first !== replacement.first)) {
+          unmountRow(row, node);
+          continue;
+        }
+        mounted.delete(row);
+        mounted.set(replacement, node);
+        observed.set(node, replacement);
+        if (row.type === "event") updateMountedEvent(replacement, node);
+      }
+    }
+    revealRow = null;
+    track.style.height = `${model.heights.total}px`;
+    restoreAnchor(previous);
+    renderedScrollTop = element.scrollTop;
+    const pinned = focused && model.byKey.get(focused.key);
+    renderWindow(pinned);
+    if (focused && !locate(document.activeElement)) (control(pinned) ?? element).focus({preventScroll: true});
+  }
+
   function render(nextEvents, nextOptions) {
+    if (nextOptions.append && track?.isConnected && nextOptions.lens === options.lens &&
+        nextEvents.length >= events.length && nextEvents[0] === events[0] &&
+        nextEvents[events.length - 1] === events.at(-1)) {
+      append(nextEvents, nextOptions);
+      return;
+    }
     const previous = anchor() ?? savedAnchor;
     const focused = locate(document.activeElement);
     const previousWidth = width;
@@ -243,7 +333,7 @@ export function createJournal({
     events = nextEvents;
     options = nextOptions;
     selected = options.selected;
-    model = createJournalModel(events, {...options, collapsed, day: event => date.format(displayDate(event))});
+    model = buildModel();
     track = document.createElement("div");
     track.className = "journal-window";
     element.replaceChildren(track);
@@ -253,6 +343,7 @@ export function createJournal({
     track.style.height = `${model.heights.total}px`;
     restoreAnchor(previous);
     if (!previous) element.scrollTop = 0;
+    renderedScrollTop = element.scrollTop;
     observer.observe(element);
     const row = focused && (model.byKey.get(focused.key) ?? model.byEvent.get(focused.event?.event_id));
     renderWindow(row);
@@ -284,7 +375,7 @@ export function createJournal({
     if (!row) return;
     if (row.index < 0) {
       collapsed.delete(`${options.lens}:${row.group.key}`);
-      render(events, {...options, selected});
+      render(events, {...options, selected, append:false});
       row = model.byEvent.get(identity);
     }
     scrollToRow(row);
@@ -295,7 +386,7 @@ export function createJournal({
     if (open) collapsed.delete(key);
     else collapsed.add(key);
     const inGroup = model.byKey.get(anchor()?.key)?.group === row.group;
-    render(events, {...options, selected});
+    render(events, {...options, selected, append:false});
     if (!open && inGroup) scrollToRow(model.byKey.get(row.key));
   }
 
@@ -319,7 +410,7 @@ export function createJournal({
 
   function control(row) {
     const node = mounted.get(row);
-    return row?.type === "event" ? node?.querySelector("button") : node;
+    return row?.type === "event" ? node?.querySelector("button") : row?.type === "group" ? node : null;
   }
 
   function keydown(event) {
@@ -340,6 +431,8 @@ export function createJournal({
   function scroll() {
     if (!track?.isConnected) return;
     queue();
+    if (renderedScrollTop === element.scrollTop) return;
+    renderedScrollTop = null;
     if (element.scrollTop + element.clientHeight >= element.scrollHeight - 80) onNearEnd();
   }
 

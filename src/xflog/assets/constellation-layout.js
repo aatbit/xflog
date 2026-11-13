@@ -113,6 +113,7 @@ export function prepareConstellation({
   height,
   modules,
   lens,
+  aggregate,
 }) {
   const people = entriesFromEvents(events);
   const upper = Math.min(90, height * 0.14);
@@ -122,28 +123,24 @@ export function prepareConstellation({
     1,
     Math.floor((height - upper - Math.max(80, upper + 1)) / rowHeight),
   );
-  let rawBuckets = groupEvents(events, modules, lens);
+  const totals = aggregate?.groups;
+  const rawBuckets = groupEvents(events, modules, lens, {totals});
   const module = modules.find(module => module.key === lens && module.enabled);
-  if (rawBuckets) rawBuckets = colorGroups(rawBuckets, module);
-  const buckets = rawBuckets;
-  const groups = buckets
-    ? buckets.map(({ events, ...bucket }) => ({
+  const groups = rawBuckets
+    ? colorGroups(rawBuckets, module).map(({ events, ...bucket }) => ({
         ...bucket,
         people: entriesFromEvents(events),
         personCount: peopleFromEvents(events).length,
       }))
     : [{ key: "all", label: "Loaded audience", tone: "neutral", people }];
-  const occupied = colorGroups(
-    groups.filter((group) => group.people.length),
-    module,
-  );
+  const occupied = groups.filter(group => group.people.length);
   const positions = new Map();
   occupied.forEach((group, groupIndex) => {
     group.people.forEach((person, member) => {
       positions.set(person, { group, member, groupIndex });
     });
   });
-  const ordered = buckets ? [...occupied].reverse().flatMap(group => group.people) : people;
+  const ordered = rawBuckets ? [...occupied].reverse().flatMap(group => group.people) : people;
   const placements = ordered.map(person => {
     const { group, member, groupIndex } = positions.get(person);
     const angle = member * 2.399963229728653;
@@ -162,7 +159,8 @@ export function prepareConstellation({
       return {...person, group: group.key, tone: group.tone, color: group.color};
     }),
     groups: occupied,
-    grouped: buckets !== null,
+    grouped: rawBuckets !== null,
+    unloadedGroups: rawBuckets && totals ? totals.length - rawBuckets.filter(bucket => bucket.eventCount !== undefined).length : 0,
     upper,
   };
   const grouped = geometry.grouped;

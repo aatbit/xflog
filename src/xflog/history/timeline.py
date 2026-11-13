@@ -1,156 +1,197 @@
 """A local, paginated view over recorded audience and interaction events."""
 
-import base64
-import binascii
 import json
+from contextlib import asynccontextmanager
+from pathlib import Path
 
+import aiosqlite
+
+from .. import audience_groups
+from ..audience_groups.previous_encounters import KEY as ENCOUNTERS_KEY
 from ..interactions import choices
-from ..tracking.events import FOLLOW_TYPES, SUBSCRIPTION_TYPES, Event, timestamp
+from ..tracking.events import Event
+from .timeline_aggregate import aggregate_records, empty_aggregate, encounter_from_row
+from .timeline_cursor import (
+    MAX_SEQUENCE,
+    Cursor,
+    InvalidTimelineRequest,
+    decode_cursor,
+    revision_watermarks,
+    scope_key,
+    selected_position,
+)
+from .timeline_queries import ENCOUNTERS, REVISION_SQL, TimelineQuery, page_sql
+
+_CURRENT_ACCOUNT = object()
 
 
-def decode_cursor(value: str) -> tuple:
-    if value in {"", "0"}:
-        return ()
-    try:
-        if len(value) > 256:
-            raise ValueError
-        result = json.loads(base64.urlsafe_b64decode(value.encode() + b"=" * (-len(value) % 4)))
-        if (
-            not isinstance(result, list)
-            or len(result) != 3
-            or not isinstance(result[0], str)
-            or timestamp(result[0]) != result[0]
-            or type(result[1]) is not int
-            or result[1] not in {0, 1}
-            or type(result[2]) is not int
-            or not 0 < result[2] <= 9223372036854775807
-        ):
-            raise ValueError
-        return tuple(result)
-    except (ValueError, TypeError, binascii.Error, UnicodeError):
-        raise ValueError("Invalid timeline cursor.") from None
+async def _revision(db, account):
+    async with db.execute(REVISION_SQL, {"account": account}) as cursor:
+        return tuple(await cursor.fetchone())
 
 
-def encode_cursor(row) -> str:
-    value = [row["received_at"], row["source"], row["position"]]
-    return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
+def _sequence(row):
+    return row["position"] if row["source"] else -row["position"]
+
+
+def _event(row):
+    sequence = _sequence(row)
+    actor_id = row["actor_id"]
+    handle, name = row["handle"], row["name"]
+    return {
+        **Event(
+            f"timeline:{'event' if sequence > 0 else 'interaction'}:{abs(sequence)}",
+            row["kind"],
+            row["account_id"],
+            actor_id,
+            handle,
+            name if handle or name else f"Account {actor_id}",
+            row["provider_at"],
+            row["received_at"],
+            json.loads(row["group_data"]),
+        ).public(),
+        "sequence": sequence,
+        **({"post_id": row["post_id"], "post_text": row["post_text"]} if sequence < 0 else {}),
+    }
+
+
+async def _decorate(rows, groups):
+    async def encounters(_):
+        return {_sequence(row): encounter_from_row(row) for row in rows}
+
+    return await audience_groups.decorate_history([_event(row) for row in rows], groups, encounters)
 
 
 class Timeline:
     def __init__(self, store):
         self.store = store
 
-    async def revision(self, account: str) -> str:
-        async with self.store.db.execute(
-            """SELECT (SELECT COALESCE(MAX(sequence),0) FROM events WHERE account_id=?),
-            (SELECT COALESCE(MAX(sequence),0) FROM interactions WHERE account_id=?),
-            (SELECT COALESCE(MAX(observed_at),'') FROM known_profiles WHERE account_id=?),
-            (SELECT COALESCE(MAX(checked_at),'') FROM thread_snapshots WHERE account_id=?)""",
-            (account, account, account, account),
-        ) as cursor:
-            return ":".join(map(str, await cursor.fetchone()))
+    @asynccontextmanager
+    async def _snapshot(self):
+        # A WAL reader can hold a consistent snapshot while ingestion commits on Store's connection.
+        address = Path(self.store.path).resolve().as_uri() + "?mode=ro"
+        async with aiosqlite.connect(address, uri=True) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute("BEGIN")
+            yield db
 
-    async def history(self, account: str, query: dict) -> dict:
+    async def revision(self, account: str) -> str:
+        return ":".join(map(str, await _revision(self.store.db, account)))
+
+    async def current_history(self, query: dict) -> dict:
+        return await self.history(_CURRENT_ACCOUNT, query)
+
+    async def history(self, account, query: dict) -> dict:
         before = decode_cursor(query.get("before", "0"))
-        subject, kind = query.get("subject", "followers"), query.get("kind", "all")
-        types = SUBSCRIPTION_TYPES if subject == "subscriptions" else FOLLOW_TYPES
-        if kind != "all":
-            types = types[:1] if kind == "gained" else types[1:]
-        enabled = choices(await self.store.setting("selection", {}))
-        interactions = (
-            [key for key, on in enabled.items() if on]
-            if subject == "followers" and kind == "all"
-            else []
+        after = (
+            revision_watermarks(query["after_revision"]) if query.get("after_revision") else None
         )
-        event_slots = ",".join("?" for _ in types)
-        interaction_slots = ",".join("?" for _ in interactions) or "NULL"
-        sql = f"""WITH activity AS (
-          SELECT sequence AS position, 1 AS source, event_id, kind, account_id, actor_id,
-          handle,name,provider_at,received_at,group_data,NULL AS post_id,NULL AS post_text FROM events
-          WHERE account_id=? AND kind IN ({event_slots})
-          UNION ALL
-          SELECT i.sequence, 0, 'interaction:'||i.sequence, 'interaction.'||i.kind,
-          i.account_id,i.person_id,
-          COALESCE(json_extract(i.profile_data,'$.handle'),
-            (SELECT e.handle FROM events e WHERE e.account_id=i.account_id AND e.actor_id=i.person_id
-             AND e.handle IS NOT NULL ORDER BY e.sequence DESC LIMIT 1)),
-          COALESCE(json_extract(i.profile_data,'$.name'),
-            (SELECT e.name FROM events e WHERE e.account_id=i.account_id AND e.actor_id=i.person_id
-             AND e.name IS NOT NULL ORDER BY e.sequence DESC LIMIT 1)),
-          i.provider_at,i.received_at,COALESCE(json_extract(i.profile_data,'$.group_data'),'{{}}'),
-          i.post_id,substr(post.text,1,281)
-          FROM interactions i LEFT JOIN interaction_posts post
-            ON post.account_id=i.account_id AND post.id=i.post_id
-          WHERE i.account_id=? AND i.kind IN ({interaction_slots})
-        ) SELECT activity.*,p.name AS cached_name,p.handle AS cached_handle FROM activity
-          LEFT JOIN known_profiles p ON p.account_id=activity.account_id AND p.actor_id=activity.actor_id"""
-        params = (account, *types, account, *interactions)
-        if before:
-            sql += " WHERE (received_at,source,position)<(?,?,?)"
-            params += before
-        if since := query.get("since"):
-            sql += (" AND" if before else " WHERE") + " received_at>=?"
-            params += (since,)
+        selected = selected_position(query["selected"]) if query.get("selected") else None
+        if before and selected:
+            raise InvalidTimelineRequest("Select a timeline event on the first page.")
+        subject, kind = query.get("subject", "followers"), query.get("kind", "all")
+        lens, since = query.get("lens", "none"), query.get("since", "")
+        if lens != "none" and lens not in audience_groups.MODULES:
+            raise InvalidTimelineRequest("Invalid audience group.")
         limit = min(50, max(1, int(query.get("limit", 25))))
-        sql += " ORDER BY received_at DESC,source DESC,position DESC LIMIT ?"
-        async with self.store.db.execute(sql, (*params, limit + 1)) as cursor:
-            rows = await cursor.fetchall()
-        events = []
-        for row in rows[:limit]:
-            values = dict(row)
-            source, position = values.pop("source"), values.pop("position")
-            post_id, post_text = values.pop("post_id"), values.pop("post_text")
-            values["name"] = values.pop("cached_name") or values["name"]
-            values["handle"] = values.pop("cached_handle") or values["handle"]
-            values["event_id"] = f"timeline:{'event' if source else 'interaction'}:{position}"
-            values["group_data"] = json.loads(values["group_data"])
-            if not values["name"] and not values["handle"]:
-                values["name"] = f"Account {values['actor_id']}"
-            events.append(
-                {
-                    **Event(**values).public(),
-                    "sequence": position if source else -position,
-                    **({"post_id": post_id, "post_text": post_text} if not source else {}),
-                }
+        async with self._snapshot() as db:
+            async with db.execute(
+                "SELECT key,value FROM settings WHERE key IN ('account','selection','audience_groups')"
+            ) as cursor:
+                settings = {row[0]: json.loads(row[1]) async for row in cursor}
+            if account is _CURRENT_ACCOUNT:
+                account = (settings.get("account") or {}).get("id")
+            groups = audience_groups.preferences(settings.get("audience_groups"))
+            module = audience_groups.MODULES.get(lens) if groups.get(lens) else None
+            enabled = choices(settings.get("selection", {}))
+            interactions = (
+                tuple(key for key, on in enabled.items() if on)
+                if subject == "followers" and kind == "all"
+                else ()
             )
-        return {
-            "events": events,
-            "next": encode_cursor(rows[limit - 1]) if len(rows) > limit else None,
-        }
+            scope = scope_key((account, subject, kind, since, lens, interactions, groups))
+            cursor_scope = scope_key((scope, after))
+            if before and before.scope != cursor_scope:
+                raise InvalidTimelineRequest("Timeline cursor does not match this history scope.")
+            if account is None:
+                result = {"events": [], "next": None, "aggregate": empty_aggregate(scope, "0:0")}
+                if selected:
+                    result["selected_event"] = None
+                return result
+            if before:
+                watermarks = before.watermarks
+            else:
+                marks = await _revision(db, account)
+                watermarks = marks[:2]
+            if after and any(mark > upper for mark, upper in zip(after, watermarks, strict=True)):
+                raise InvalidTimelineRequest(
+                    "Timeline revision belongs to an unavailable snapshot."
+                )
+            scope_query = TimelineQuery(account, subject, kind, since, interactions, watermarks)
+            result = await self._page(db, scope_query, groups, before, after, selected, limit)
+            if result["next"] is not None:
+                result["next"] = Cursor(result["next"], watermarks, cursor_scope).encode()
+            if not before:
+                result["aggregate"] = {
+                    **await aggregate_records(db, scope_query, module),
+                    "revision": ":".join(map(str, marks)),
+                    "profile_revision": marks[2],
+                    "scope": scope,
+                }
+            return result
+
+    async def _page(self, db, query, groups, before, after, selected, limit):
+        needs_context = groups[ENCOUNTERS_KEY]
+        sql, params = query.records(
+            before=before.key if before else None, after=after, page_size=limit + 1
+        )
+        async with db.execute(
+            page_sql(sql, encounters=needs_context), {**params, "limit": limit + 1}
+        ) as cursor:
+            rows = await cursor.fetchall()
+        boundary = None
+        if len(rows) > limit:
+            last = rows[limit - 1]
+            boundary = (last["received_at"], last["source"], last["position"])
+        rows = rows[:limit]
+        selected_rows = []
+        if selected and not any((row["source"], row["position"]) == selected for row in rows):
+            sql, params = query.records(selected=selected, page_size=1)
+            if sql:
+                async with db.execute(
+                    page_sql(sql, encounters=needs_context), {**params, "limit": 1}
+                ) as cursor:
+                    selected_rows = await cursor.fetchall()
+        events = await _decorate(rows + selected_rows, groups)
+        result = {"events": events[: len(rows)], "next": boundary}
+        if selected:
+            sequence = selected[1] if selected[0] else -selected[1]
+            result["selected_event"] = next(
+                (event for event in events if event["sequence"] == sequence),
+                None,
+            )
+        return result
 
     async def encounter_context(self, events: list[dict]) -> dict:
-        result = {}
-        for event in events:
-            account, person, received = event["account_id"], event["actor_id"], event["received_at"]
-            sequence = event["sequence"]
-            async with self.store.db.execute(
-                """SELECT EXISTS(
-                  SELECT 1 FROM events WHERE account_id=? AND actor_id=?
-                    AND (received_at,1,sequence)<(?,?,?)
-                  UNION ALL SELECT 1 FROM interactions WHERE account_id=? AND person_id=?
-                    AND (received_at,0,sequence)<(?,?,?)
-                ), (SELECT kind FROM events WHERE account_id=? AND actor_id=?
-                  AND kind IN ('follow.follow','follow.unfollow')
-                  AND (received_at,1,sequence)<(?,?,?)
-                  ORDER BY received_at DESC,sequence DESC LIMIT 1)""",
-                (
-                    account,
-                    person,
-                    received,
-                    int(sequence > 0),
-                    abs(sequence),
-                    account,
-                    person,
-                    received,
-                    int(sequence > 0),
-                    abs(sequence),
-                    account,
-                    person,
-                    received,
-                    int(sequence > 0),
-                    abs(sequence),
-                ),
-            ) as cursor:
-                seen, previous = await cursor.fetchone()
-            result[sequence] = {"seen_before": bool(seen), "previous_follow_kind": previous}
-        return result
+        if not events:
+            return {}
+        account = events[0]["account_id"]
+        if any(event["account_id"] != account for event in events):
+            raise ValueError("History context must belong to one account.")
+        params = {"account": account, "event_max": MAX_SEQUENCE, "interaction_max": MAX_SEQUENCE}
+        for index, event in enumerate(events):
+            seq = event["sequence"]
+            params.update(
+                {
+                    f"p{index}": abs(seq),
+                    f"s{index}": int(seq > 0),
+                    f"a{index}": event["actor_id"],
+                    f"r{index}": event["received_at"],
+                }
+            )
+        slots = ",".join(f"(:p{i},:s{i},:a{i},:r{i})" for i in range(len(events)))
+        # The legacy helper has no paging snapshot. It describes the current account history.
+        sql = f"""WITH wanted(position,source,actor_id,received_at) AS (VALUES {slots})
+        SELECT r.position,r.source,{ENCOUNTERS} FROM wanted r"""
+        async with self.store.db.execute(sql, params) as cursor:
+            return {_sequence(row): encounter_from_row(row) async for row in cursor}

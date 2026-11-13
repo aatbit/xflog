@@ -13,6 +13,7 @@ import { createViewportIndex, overscan } from "./constellation-viewport.js";
 import { createShootingStar } from "./shooting-star.js";
 import { verificationBadge } from "./verification-badge.js";
 import { groupKey, groupDescription } from "./constellation-colors.js";
+import { historyCount } from "./audience-groups.js";
 
 export function createConstellation({
   element,
@@ -37,12 +38,14 @@ export function createConstellation({
     selected = null,
     modules = [],
     lens = "none",
+    aggregate = null,
     geometry = null,
     layoutAtZoom = null;
   let selectionByEvent = null, selection = null, bindingsByEvent = null;
   let viewportIndex = null, viewportLabels = [], activeSparks = [],
     positionedLabels = new Set(), labelsByNode = null;
   let sceneVersion = 0;
+  let restoringFocus = false;
   // History is deduplicated by event ID before grouping, so only data changes alter membership.
   let personCount = 0, countDirty = true;
   let zoom = 0.8,
@@ -74,6 +77,7 @@ export function createConstellation({
     !document.hidden;
   const moving = () => !reduced.matches && root.dataset.motion !== "off";
   const maximum = () => Math.max(0, element.scrollWidth - element.clientWidth);
+  const singletonCanLoad = () => Boolean(geometry?.people.length === 1 && hasOlder());
   const position = () => selection?.person;
   const selectedProfileIndex = () => selection?.index ?? -1;
   function personLabel(person, event = person.event) {
@@ -137,8 +141,10 @@ export function createConstellation({
     const scope = geometry.overview ? "overview" : group;
     if (keyScope === scope) return;
     keyScope = scope;
+    const unloaded = geometry.unloadedGroups;
+    const overview = unloaded ? `Loaded constellations · ${unloaded} ${unloaded === 1 ? "group" : "groups"} with no events loaded` : "All constellations";
     key.innerHTML = geometry.grouped
-      ? geometry.overview ? '<span class="constellation-key-item">All constellations</span>'
+      ? geometry.overview ? `<span class="constellation-key-item">${overview}</span>`
         : groupKey(group ? [group] : [], esc)
       : "";
     key.setAttribute("aria-label", geometry.overview ? "Constellation groups" : "Current constellation");
@@ -161,7 +167,8 @@ export function createConstellation({
     for (const [button, available] of [
       [
         next,
-        canPan && (index < geometry.people.length - 1 || hasOlder()),
+        (canPan && (index < geometry.people.length - 1 || hasOlder())) ||
+          singletonCanLoad(),
       ],
       [previous, canPan && index > 0],
     ]) {
@@ -243,10 +250,10 @@ export function createConstellation({
     activeSparks = next;
     return true;
   }
-  function layoutLabels(left) {
+  function layoutLabels(left, focusedControl = document.activeElement) {
     const chosenPerson = position();
     const chosenLabel = labels[selectedProfileIndex()];
-    const focusedLabel = labelsByNode.get(document.activeElement?.closest("[data-label]"));
+    const focusedLabel = labelsByNode.get(focusedControl?.closest("[data-label]"));
     const relevant = new Set(viewportLabels);
     if (chosenLabel) relevant.add(chosenLabel);
     if (focusedLabel) relevant.add(focusedLabel);
@@ -260,7 +267,7 @@ export function createConstellation({
     // Read invalidated sizes together before positioning any label.
     for (const item of relevant) {
       const previewShown = item.preview &&
-        (item === chosenLabel || item.preview === document.activeElement);
+        (item === chosenLabel || item.preview === focusedControl);
       if (item.width === undefined || item.previewShown !== previewShown) {
         item.previewShown = previewShown;
         const box = item.label.getBoundingClientRect();
@@ -455,6 +462,7 @@ export function createConstellation({
       height: sceneHeight,
       modules,
       lens,
+      aggregate,
     });
     geometry = layoutAtZoom(zoom);
     if (countDirty) {
@@ -470,8 +478,9 @@ export function createConstellation({
     key.hidden = !geometry.grouped;
     history.max = 1000;
     zoomControls();
-    const countText =
-      `${personCount} ${personCount === 1 ? "person" : "people"} in ${geometry.grouped ? "saved" : "loaded"} history`;
+    const countText = aggregate
+      ? historyCount(events.length, personCount, aggregate)
+      : `${personCount} ${personCount === 1 ? "person" : "people"} in loaded history`;
     if (peopleCount.textContent !== countText) peopleCount.textContent = countText;
     const background = Array.from(
       { length: 76 },
@@ -570,7 +579,7 @@ export function createConstellation({
   }
   function prepareGroupButtons() {
     const renderedVersion = sceneVersion;
-    groupLayer.innerHTML = geometry.groups.map((group) => `<button type="button" class="constellation-group ${esc(group.tone)}" style="--group-color:${group.color};left:${group.x}px;top:${group.y}px" data-group="${esc(group.key)}" title="${esc(groupDescription(group))}" aria-label="Explore ${esc(group.label)}, ${esc(groupDescription(group))}"><span class="cluster-count">${group.people.length}</span><strong title="${esc(group.label)}">${esc(group.label)}</strong></button>`).join("");
+    groupLayer.innerHTML = geometry.groups.map((group) => `<button type="button" class="constellation-group ${esc(group.tone)}" style="--group-color:${group.color};left:${group.x}px;top:${group.y}px" data-group="${esc(group.key)}" title="${esc(groupDescription(group))}" aria-label="Explore ${esc(group.label)}, ${esc(groupDescription(group))}"><span class="cluster-count">${group.eventCount ?? group.people.length}</span><strong title="${esc(group.label)}">${esc(group.label)}</strong></button>`).join("");
     groupButtons = [...groupLayer.querySelectorAll("[data-group]")];
     groupButtons.forEach((button, index) => {
       button.addEventListener("click", () => {
@@ -701,13 +710,16 @@ export function createConstellation({
     queue();
   }
   function travel(delta) {
-    if (!geometry?.canPan) return;
+    if (!geometry?.canPan) {
+      if (delta > 0 && singletonCanLoad()) onOlder();
+      return;
+    }
     const index = selectedProfileIndex();
     if (index < 0) return;
     const next = geometry.people[index + Math.sign(delta)];
     if (next)
       seek(events.findIndex((event) => event.event_id === next.event.event_id));
-    else if (delta > 0) onOlder();
+    else if (delta > 0 && hasOlder()) onOlder();
   }
   function onWheel(event) {
     if (!(event.buttons & 4) || event.ctrlKey || event.metaKey) wheelZoom = null;
@@ -853,7 +865,7 @@ export function createConstellation({
   const focus = (event) => {
     labelFocus(event);
     const button = event.target.closest("[data-actor]");
-    if (button?.matches(":focus-visible"))
+    if (!restoringFocus && button?.matches(":focus-visible"))
       seek(events.findIndex((item) => item.event_id === button.dataset.event));
   };
   const listeners = [
@@ -893,19 +905,52 @@ export function createConstellation({
   reduced.addEventListener("change", preference);
   preference();
   return {
-    render(nextEvents, identity) {
+    render(nextEvents, identity, nextAggregate = null) {
+      aggregate = nextAggregate;
       countDirty = true;
       render(nextEvents, identity);
     },
-    update(nextEvents, identity) {
-      const point = position();
-      const offset = point ? point.x - element.scrollLeft : null;
+    update(nextEvents, identity, nextAggregate = null) {
+      const activeElement = document.activeElement;
+      const focused = activeElement && element.contains(activeElement) ? activeElement : null;
+      const star = focused?.closest("[data-actor]");
+      const label = labelsByNode?.get(focused?.closest("[data-label]"));
+      const group = focused?.closest("[data-group]");
+      const left = element.scrollLeft, right = left + element.clientWidth;
+      const chosen = position();
+      const point = !geometry?.overview && chosen?.x >= left && chosen.x <= right
+        ? chosen : viewportIndex?.nearest((left + right) / 2);
+      const offset = point ? point.x - left : null;
+      aggregate = nextAggregate;
       countDirty = true;
       render(nextEvents, identity);
-      if (offset !== null && position())
-        element.scrollLeft = clamp(position().x - offset, 0, maximum());
+      const anchor = point && selectionByEvent.get(point.event.event_id)?.person;
+      if (anchor) element.scrollLeft = clamp(anchor.x - offset, 0, maximum());
       scrollPosition = element.scrollLeft;
       scrubber();
+      if (group || (geometry.overview && (star || label))) {
+        const button = geometry.overview && groupButtons.find(item => item.dataset.group === group?.dataset.group);
+        (button || element).focus({preventScroll: true});
+      } else if (star || label) {
+        const replacement = selectionByEvent.get(star?.dataset.event ?? label.person.event.event_id);
+        const index = replacement?.index;
+        const nextLabel = labels[index];
+        const wasPreview = label?.preview === focused;
+        const control = star ? actorButtons[index]?.button
+          : wasPreview && nextLabel === labels[selectedProfileIndex()] && nextLabel?.preview
+            ? nextLabel.preview : nextLabel?.controls[0];
+        if (!star && control) {
+          // Position the control before restoring focus; the next frame pins it if needed.
+          updateViewport(element.scrollLeft);
+          layoutLabels(element.scrollLeft, control);
+        }
+        restoringFocus = true;
+        try {
+          (control ?? element).focus({preventScroll: true});
+        } finally {
+          restoringFocus = false;
+        }
+      }
     },
     select,
     seek,
@@ -913,6 +958,7 @@ export function createConstellation({
     setZoom,
     travel,
     configure: (nextModules, nextLens) => {
+      if (lens !== nextLens) aggregate = null;
       modules = nextModules;
       lens = nextLens;
       if (geometry) render(events, selected);
@@ -920,6 +966,7 @@ export function createConstellation({
     clear: () => {
       stop();
       geometry = null;
+      aggregate = null;
       events = [];
       releaseScene();
       personCount = 0;
@@ -933,6 +980,7 @@ export function createConstellation({
     destroy: () => {
       stop();
       geometry = null;
+      aggregate = null;
       events = [];
       releaseScene();
       observer.disconnect();

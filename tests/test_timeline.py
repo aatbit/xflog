@@ -156,11 +156,13 @@ async def test_grouped_pages_include_older_audience_changes_without_x_reads(inst
         "/api/timeline", params={"local_only": True, "limit": 50, "since": "2026-11-06T00:00:00Z"}
     )
     assert {row["kind"] for row in recent.json()["events"]} == {"interaction.replies"}
-    assert (
+    empty = (
         await browser.get(
             "/api/timeline", params={"local_only": True, "since": "2026-11-07T00:00:00Z"}
         )
-    ).json() == {"events": [], "next": None}
+    ).json()
+    assert (empty["events"], empty["next"]) == ([], None)
+    assert empty["aggregate"]["total_events"] == 0
     assert len(provider.calls) == calls
 
 

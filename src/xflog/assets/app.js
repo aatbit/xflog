@@ -9,11 +9,10 @@
     layout: "horizontal",
     events: [],
     next: null,
+    aggregate: null,
     selected: null,
     status: null,
     csrf: "",
-    generation: 0,
-    loading: false,
     groups: [],
     lens: "none",
     groupRange: "24h",
@@ -94,7 +93,7 @@
     label: eventLabel,
     initials,
     onOpen: (identity) => selectEvent(identity, true),
-    onNearEnd: requestOlder,
+    onNearEnd: () => requestOlder(false),
   });
   const { createActivityHud } = await import("/static/xf/activity-hud.js");
   const activityHud = createActivityHud({
@@ -140,17 +139,59 @@
   const { createNotice, statusNotice } = await import("/static/xf/notice.js");
   const notices = createNotice($("#notice"));
   const notice = (message, tone = "info") => notices.show(message, tone);
-  const { historyPages, groupSince, mergeHistory, createLiveHistory, updatedSelection } = await import("/static/xf/live-history.js");
+  const { createLiveHistory, historyScope } = await import("/static/xf/live-history.js");
+  const { historyCount } = await import("/static/xf/audience-groups.js");
+  const historyMore = $("#history-more");
+  const historyStatus = $("#history-page-status");
+  let historyPhase;
+  let historyError;
   const liveHistory = createLiveHistory({
-    api,
-    read: () => ({ ...state }),
-    apply: (events, next) => {
-      state.selected = updatedSelection(state.events, state.selected, events);
+    api: (path, signal) => api(path, undefined, signal),
+    read: () => state,
+    connected: () => root.isConnected,
+    clear: clearHistory,
+    apply: ({events, next, aggregate}, reason) => {
+      if (historyError && notices.message === historyError) notice("");
+      historyError = null;
+      const olderControl = document.activeElement === $("#memory-next");
+      if (!events.some(event => event.event_id === state.selected))
+        state.selected = events[Math.min(reason === "initial" ? 2 : 0, events.length - 1)]?.event_id || null;
       state.events = events;
       state.next = next;
+      state.aggregate = aggregate;
       if (root.dataset.route === "timeline") {
-        renderEvents(scene.update);
-        if (state.selected) selectEvent(state.selected, false, followControls.update);
+        renderEvents(reason === "initial" ? scene.render : scene.update, reason === "older");
+        if (state.selected)
+          selectEvent(state.selected, false, reason === "initial" ? followControls.select : followControls.update);
+        if (olderControl && $("#memory-next").disabled) $("#history").focus({preventScroll:true});
+      }
+    },
+    change: ({phase, catchingUp, olderError}) => {
+      historyPhase = phase;
+      $("#history").setAttribute("aria-busy", String(phase === "initial" || phase === "older"));
+      const hideOlder = !state.next || phase === "initial";
+      if (hideOlder && document.activeElement === historyMore)
+        $("#history").focus({preventScroll:true});
+      historyMore.hidden = hideOlder;
+      historyMore.setAttribute("aria-disabled", String(phase === "older"));
+      const buttonLabel = olderError ? "Retry older activity" : "Load older activity";
+      if (historyMore.textContent !== buttonLabel) historyMore.textContent = buttonLabel;
+      const message = phase === "older" ? "Loading older activity…"
+        : olderError ? "Older activity couldn’t be loaded."
+        : catchingUp ? "Catching up on new activity…"
+        : !phase && !state.next && state.events.length ? "All matching activity loaded" : "";
+      if (historyStatus.textContent !== message) historyStatus.textContent = message;
+    },
+    failure: (error, phase) => {
+      historyError = error.message;
+      notice(error.message, "error");
+      if (phase === "initial") {
+        $("#history").innerHTML =
+          '<div class="empty-state"><h2>History couldn’t be loaded.</h2><p>Check your local database and connection, then refresh to retry.</p><button class="button" type="button" data-retry>Retry</button></div>';
+        $("#history [data-retry]").addEventListener("click", () => {
+          $("#history").focus({preventScroll:true});
+          void liveHistory.load();
+        });
       }
     },
     refreshInteractions: () => interactionControls.refresh(),
@@ -204,7 +245,10 @@
     }
   }
   function view(name) {
-    if (name !== "timeline") journal.clear({remember: true});
+    if (name !== "timeline") {
+      liveHistory.cancel();
+      journal.clear({remember: true});
+    }
     for (const page of ["timeline", "profile", "about"])
       $(`#${page}-view`).hidden = page !== name;
     $$("[data-nav]").forEach((button) => {
@@ -227,9 +271,12 @@
         : null,
     );
     if (name === "timeline") {
-      renderEvents(scene.update);
-      if (state.selected) selectEvent(state.selected);
-      activityHud.refresh();
+      if (liveHistory.needsLoad()) void liveHistory.load(activityHud.refresh);
+      else {
+        renderEvents(scene.update);
+        if (state.selected) selectEvent(state.selected);
+        void activityHud.refresh();
+      }
     }
     $(".back-button").hidden = name === "timeline";
     if ($("#explore-dialog").open) $("#explore-dialog").close();
@@ -238,6 +285,7 @@
   }
   function renderStatus(status) {
     const previous = state.status;
+    const scope = historyScope(state);
     state.status = status;
     state.csrf = status.csrf;
     followControls.configure(status, state.demo);
@@ -298,8 +346,16 @@
       notice(status.message, "warning");
     if (!$("#profile-view").hidden) profileControls.renderStatus(status);
     renderAudienceGroups(status.audience_groups || []);
+    if (previous && historyScope(state) !== scope) {
+      if (root.dataset.route === "timeline") void liveHistory.load();
+      else {
+        liveHistory.cancel();
+        clearHistory();
+      }
+      return;
+    }
     if (
-      previous && !state.events.length &&
+      previous && !state.events.length && !historyPhase &&
       (previous.state !== status.state || previous.connected !== status.connected ||
         previous.selection.subscriptions !== status.selection.subscriptions)
     ) renderEvents();
@@ -313,7 +369,7 @@
             enabled: { [group.key]: toggle.checked },
           });
           renderAudienceGroups(result.audience_groups);
-          await load();
+          await liveHistory.load();
           announce("Audience groups saved. No extra X requests are made.");
         } catch (error) {
           toggle.checked = group.enabled;
@@ -323,17 +379,14 @@
     onLens: (lens) => {
       state.lens = lens;
       groupControls.render(state.groups, lens, state.groupRange);
-      scene.configure(state.groups, lens);
-      if (state.layout === "vertical") renderEvents();
-      void load();
+      void liveHistory.load();
     },
     onRange: setTimeRange,
   });
   async function setTimeRange(range) {
     state.groupRange = range;
     groupControls.render(state.groups, state.lens, range);
-    await activityHud.refresh();
-    if (state.groupRange === range) await load();
+    await liveHistory.load(activityHud.refresh);
   }
   function renderAudienceGroups(groups) {
     const signature = JSON.stringify(groups);
@@ -342,14 +395,8 @@
     state.lens = resolveLens(groups, state.lens);
     state.groups = groups;
     groupControls.render(groups, state.lens, state.groupRange);
-    scene.configure(groups, state.lens);
-    selectedSignal.render(
-      state.events.find((event) => event.event_id === state.selected),
-      groups,
-    );
-    if (state.layout === "vertical") renderEvents();
   }
-  function renderEvents(renderScene = scene.render) {
+  function renderEvents(renderScene = scene.render, append = false) {
     if ($("#timeline-view").hidden) return;
     const list = $("#history");
     $(".scene-context").hidden = !state.events.length && state.lens === "none";
@@ -365,7 +412,7 @@
       selectedSignal.render(null);
       followControls.select(null);
       scene.clear();
-      $("#scene-people-count").textContent = state.lens === "none" ? "" : "0 people in saved history";
+      $("#scene-people-count").textContent = state.lens === "none" ? "" : historyCount(0, 0, state.aggregate);
       list.innerHTML = state.lens === "none" ? emptyHistory(state) : '<div class="empty-state"><h2>No activity in this range.</h2></div>';
       list
         .querySelector("[data-empty-action]")
@@ -376,16 +423,18 @@
           else setDemo(true);
         });
     } else if (state.layout === "horizontal") {
-      renderScene(state.events, state.selected);
+      renderScene(state.events, state.selected, state.aggregate);
     } else {
       scene.clear();
       journal.render(state.events, {
         selected: state.selected,
         modules: state.groups,
         lens: state.lens,
+        aggregate: state.aggregate,
+        append,
       });
       $("#scene-people-count").textContent =
-        `${state.events.length} ${state.events.length === 1 ? "event" : "events"} in ${state.lens === "none" ? "loaded" : "saved"} history`;
+        historyCount(state.events.length, new Set(state.events.map(event => event.actor_id)).size, state.aggregate);
     }
     if (state.layout === "vertical") {
       $("#memory-scrubber").max = Math.max(0, state.events.length - 1);
@@ -426,71 +475,23 @@
     updateFollow(event);
     interactionControls.select(event);
   }
-  function requestOlder() {
-    if (
-      !state.next ||
-      root.dataset.route !== "timeline" ||
-      $("#history").getAttribute("aria-busy") === "true"
-    )
-      return;
-    load(true);
+  function requestOlder(retry = true) {
+    if (root.dataset.route === "timeline") void liveHistory.older(retry);
   }
-  let historyLoad = null;
-  async function load(append = false) {
-    historyLoad?.abort();
-    const controller = new AbortController();
-    historyLoad = controller;
-    const generation = ++state.generation;
-    state.loading = true;
-    const demo = state.demo;
-    const snapshot = {...state, since: groupSince(state)};
-    if (!append && !state.events.length) {
-      selectedSignal.render(null);
-      followControls.select(null);
-      scene.clear();
-      journal.clear();
-      $("#history").innerHTML =
-        '<div class="loading-state"><span class="loading-dot" aria-hidden="true"></span>Loading local history…</div>';
-    }
-    $("#history").setAttribute("aria-busy", "true");
-    try {
-      const rows = [];
-      let result;
-      const readPage = path => api(path, undefined, controller.signal);
-      for await (result of historyPages(readPage, snapshot, append ? state.next : "0")) {
-        if (generation !== state.generation) return;
-        rows.push(...result.events);
-        if (state.lens !== "none") $("#scene-people-count").textContent = `Loading saved history · ${rows.length} records`;
-      }
-      if (generation !== state.generation) return;
-      state.events = mergeHistory([...rows, ...(append ? state.events : [])])
-        .filter(event => !snapshot.since || Date.parse(event.received_at) >= Date.parse(snapshot.since));
-      state.next = result.next;
-      if (!state.events.some((event) => event.event_id === state.selected))
-        state.selected =
-          state.events[Math.min(2, state.events.length - 1)]?.event_id || null;
-      renderEvents();
-      if (state.selected) selectEvent(state.selected);
-      if (!append) void interactionControls.refresh();
-      announce(
-        `${rows.length} ${state.subject} events ${append ? "added" : "loaded"}.`,
-      );
-    } catch (error) {
-      if (generation !== state.generation) return;
-      notice(error.message, "error");
-      if (!state.events.length) {
-        scene.clear();
-        journal.clear();
-        $("#history").innerHTML =
-          '<div class="empty-state"><h2>History couldn’t be loaded.</h2><p>Check your local database and connection, then refresh to retry.</p><button class="button" type="button" data-retry>Retry</button></div>';
-        $("#history [data-retry]").addEventListener("click", () => load());
-      }
-    } finally {
-      if (generation === state.generation) {
-        state.loading = false;
-        $("#history").setAttribute("aria-busy", "false");
-      }
-    }
+  historyMore.addEventListener("click", () => requestOlder());
+  function clearHistory() {
+    state.events = [];
+    state.next = state.selected = state.aggregate = null;
+    scene.clear();
+    scene.configure(state.groups, state.lens);
+    journal.clear();
+    selectedSignal.render(null);
+    followControls.select(null);
+    interactionControls.select(null);
+    $("#scene-people-count").textContent = "";
+    $("#journey-position").textContent = "Loading local history";
+    $("#history").innerHTML =
+      '<div class="loading-state"><span class="loading-dot" aria-hidden="true"></span>Loading local history…</div>';
   }
   async function setDemo(enabled) {
     const address = new URL(location.href);
@@ -498,17 +499,13 @@
     else address.searchParams.delete("demo");
     history.replaceState(null, "", address);
     state.demo = enabled;
-    state.events = [];
-    state.selected = null;
-    state.next = null;
     $("#demo-toggle").textContent = enabled
       ? "Leave demo ↗"
       : "Explore demo ↗";
     notice("");
     if (state.status) renderStatus(state.status);
-    view("timeline");
-    await activityHud.refresh();
-    await load();
+    if (root.dataset.route === "timeline") await liveHistory.load(activityHud.refresh);
+    else view("timeline");
   }
   function dialog(html) {
     if ($("#explore-dialog").open) $("#explore-dialog").close();
@@ -559,21 +556,16 @@
       $$("[data-filter]").forEach((item) =>
         item.setAttribute("aria-pressed", item === button),
       );
-      state.events = [];
-      state.selected = null;
-      load();
+      void liveHistory.load();
     }),
   );
   $$("[data-subject]").forEach((button) =>
-    button.addEventListener("click", async () => {
+    button.addEventListener("click", () => {
       state.subject = button.dataset.subject;
       $$("[data-subject]").forEach((item) =>
         item.setAttribute("aria-pressed", item === button),
       );
-      state.events = [];
-      state.selected = null;
-      await activityHud.refresh();
-      load();
+      void liveHistory.load(activityHud.refresh);
     }),
   );
   $$("[data-layout]").forEach((button) =>
@@ -582,7 +574,7 @@
       $$("[data-layout]").forEach((item) =>
         item.setAttribute("aria-pressed", item === button),
       );
-      renderEvents();
+      if (historyPhase !== "initial") renderEvents();
       announce(`${state.layout} timeline selected.`);
     }),
   );
@@ -606,7 +598,7 @@
         : Promise.resolve(null);
       const result = await api("/api/preferences", selection);
       renderStatus(await api("/api/status"));
-      await liveHistory.refresh();
+      if (root.dataset.route === "timeline") await liveHistory.refresh();
       if (!result.saved) fillProfile();
       notice(
         result.message,
@@ -669,41 +661,76 @@
       ? "Ambient motion on"
       : "Ambient motion paused";
   });
+  let pollTimer;
+  let pageActive = true;
+  function stopHistory() {
+    pageActive = false;
+    clearTimeout(pollTimer);
+    liveHistory.cancel();
+  }
+  const unmount = new MutationObserver(() => {
+    if (!root.isConnected) dispose();
+  });
+  // Gradio can remove the workspace node or replace its outer host.
+  for (let node = root; node; ) {
+    const parent = node.parentNode;
+    if (parent) {
+      unmount.observe(parent, {childList: true});
+      node = parent;
+    } else node = node.host;
+  }
+  function dispose() {
+    stopHistory();
+    unmount.disconnect();
+    window.removeEventListener("pagehide", stopHistory);
+    window.removeEventListener("pageshow", resumeHistory);
+    scene.destroy();
+    journal.destroy();
+    groupControls.destroy();
+    activityHud.destroy();
+    selectedSignal.destroy();
+    followControls.destroy();
+    interactionControls.destroy();
+    notices.destroy();
+  }
+  window.addEventListener("pagehide", stopHistory);
+  window.addEventListener("pageshow", resumeHistory);
+  function resumeHistory(event) {
+    if (event.persisted) {
+      pageActive = true;
+      void poll();
+    }
+  }
   async function poll() {
     if (!root.isConnected) {
-      historyLoad?.abort();
-      scene.destroy();
-      journal.destroy();
-      groupControls.destroy();
-      activityHud.destroy();
-      selectedSignal.destroy();
-      followControls.destroy();
-      interactionControls.destroy();
-      notices.destroy();
+      dispose();
       return;
     }
     if (!document.hidden || state.status?.selection.notifications) {
       try {
-        renderStatus(await api("/api/status"));
-        if (root.dataset.route === "timeline") await activityHud.refresh();
-        await liveHistory.refresh();
+        const status = await api("/api/status");
+        if (!pageActive) return;
+        renderStatus(status);
+        if (root.dataset.route === "timeline") {
+          await activityHud.refresh();
+          if (pageActive && root.dataset.route === "timeline") await liveHistory.refresh();
+        }
       } catch (error) {
         notices.update({ message: error.message, tone: "error" });
       }
     }
-    setTimeout(poll, 10000);
+    if (pageActive) pollTimer = setTimeout(poll, 10000);
   }
   try {
-    renderStatus(await api("/api/status"));
+    const status = await api("/api/status");
+    if (!pageActive) return;
+    renderStatus(status);
     if (new URLSearchParams(location.search).get("demo") === "1")
       await setDemo(true);
-    else {
-      await activityHud.refresh();
-      await load();
-    }
+    else await liveHistory.load(activityHud.refresh);
     const hash = location.hash.slice(1);
     if (["profile", "about"].includes(hash)) view(hash);
-    setTimeout(poll, 10000);
+    if (pageActive) pollTimer = setTimeout(poll, 10000);
   } catch (error) {
     notice(error.message, "error");
   }

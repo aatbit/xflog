@@ -2,227 +2,218 @@ import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
 
 const base = pathToFileURL(process.argv[2] + "/");
-const { createLiveHistory, historyPath, updatedSelection, historyPages, groupSince, mergeHistory } = await import(new URL("live-history.js", base));
+const { createLiveHistory, historyPath, groupSince, mergeHistory } = await import(new URL("live-history.js", base));
 const { eventLabel, eventTone } = await import(new URL("format.js", base));
 const { peopleFromEvents } = await import(new URL("constellation-layout.js", base));
-const event = id => ({ event_id: String(id), kind: "interaction.replies", actor_id: "222", sequence: -id });
-let state = {
-  demo: false, subject: "followers", filter: "all", generation: 1,
-  events: [event(4),event(3),event(2),event(1)], next: "older", selected: "2",
-  status: { account: {id:"111"}, timeline_revision: "0:6", selection: {notifications:false,interactions:{replies:true}} },
-};
-const calls = [];
-let refreshes = 0;
-let blocked = null;
-let fail = false;
-const pages = {
-  "0": {events:[event(8),event(7),event(6)],next:"page2"},
-  page2: {events:[event(5),event(4),event(3)],next:"page3"},
-  page3: {events:[event(2),event(1)],next:null},
-};
-const feed = createLiveHistory({
-  read: () => ({...state}),
-  api: async path => {
-    calls.push(path);
-    if(fail) throw new Error("Local database unavailable");
-    if(blocked) await blocked.promise;
-    return pages[new URL(path,"http://local").searchParams.get("before")];
-  },
-  apply: (events,next) => {state.events=events;state.next=next;},
-  refreshInteractions: async () => refreshes++,
+
+const event = (id, received_at = new Date(Date.UTC(2026, 10, 5, 10, 0, id)).toISOString()) => ({
+  event_id: `timeline:interaction:${id}`, kind: "interaction.replies", actor_id: "222",
+  sequence: -id, received_at,
 });
-assert.match(historyPath(state),/^\/api\/timeline\?/);
-assert.match(historyPath({...state,demo:true}),/^\/api\/demo\?/);
-await feed.refresh();
-assert.deepEqual(state.events.map(e=>e.event_id),["8","7","6","5","4","3","2","1"]);
-assert.equal(state.selected,"2");
-assert.equal(state.next,"older","Keep older pages already loaded");
-assert.equal(calls.length,3,"Read through a burst and refresh the older selected record");
-assert.equal(refreshes,1);
-await feed.refresh();
-assert.equal(calls.length,3,"Unchanged revision performs no history reads");
+const ids = rows => rows.map(item => -item.sequence);
+const scope = {
+  demo: false, subject: "followers", filter: "all", lens: "none", groupRange: "all",
+  status: { account: {id:"111"}, timeline_revision: "0:10::", selection: {interactions:{replies:true}} },
+};
+const aggregate = (revision, total_events, oldest_received_at, profile_revision = "") =>
+  ({revision, total_events, oldest_received_at, profile_revision, distinct_actors: 1, groups: []});
+function fixture(respond) {
+  const state = {...scope, events: [], next: null, aggregate: null, selected: null};
+  const calls = [], errors = [];
+  let status, refreshed = 0;
+  const feed = createLiveHistory({
+    read: () => state, connected: () => state.connected !== false,
+    api: (path, signal) => {
+      const params = new URL(path, "http://local").searchParams;
+      calls.push({params, signal});
+      return respond(params);
+    },
+    clear: () => Object.assign(state, {events: [], next: null, aggregate: null, selected: null}),
+    apply: result => Object.assign(state, result),
+    change: value => { status = value; },
+    failure: (error, phase) => errors.push([error.message, phase]),
+    refreshInteractions: async () => { refreshed++; },
+  });
+  return {
+    feed, state, calls, errors, get status() { return status; }, get refreshed() { return refreshed; },
+    revision: timeline_revision => { state.status = {...state.status, timeline_revision}; },
+  };
+}
+function deferred() {
+  let resolve;
+  const promise = new Promise(accept => { resolve = accept; });
+  return {promise, resolve};
+}
 
-state.status={...state.status,timeline_revision:"0:9"};
-blocked={};blocked.promise=new Promise(resolve=>blocked.resolve=resolve);
-const pending=feed.refresh();
-await Promise.resolve();
-state.generation++;
-const prior=state.events;
-blocked.resolve();
+const initial = {events: [event(10), event(9)], next: "old-a", aggregate: aggregate("0:10::", 5, event(6).received_at)};
+const held = deferred();
+let olderReply = held.promise;
+const manual = fixture(params => params.get("before") === "0" ? initial : olderReply);
+await manual.feed.load();
+assert.equal(manual.calls.length, 1, "First render accepts one page");
+assert.deepEqual(ids(manual.state.events), [10, 9]);
+assert.equal(manual.state.aggregate.total_events, 5);
+assert.equal(manual.state.next, "old-a");
+manual.state.selected = event(9).event_id;
+const older = manual.feed.older();
+await manual.feed.older();
+await manual.feed.refresh();
+assert.equal(manual.calls.length, 2, "Near-end and poll cannot duplicate an active older request");
+assert.equal(manual.status.phase, "older");
+held.resolve({events: [event(9), event(8)], next: "old-b"});
+await older;
+assert.deepEqual(ids(manual.state.events), [10, 9, 8]);
+assert.equal(manual.state.selected, event(9).event_id);
+assert.equal(manual.state.next, "old-b");
+assert.equal(manual.calls[1].params.get("local_only"), "true");
+olderReply = {events: [event(7)], next: "old-a"};
+await manual.feed.older();
+assert.match(manual.errors.at(-1)[0], /did not advance/);
+assert.equal(manual.state.next, "old-b", "A cycle cannot consume the accepted continuation");
+assert.deepEqual(ids(manual.state.events), [10, 9, 8]);
+olderReply = {events: [event(7), event(6)], next: null};
+const beforeRetry = manual.calls.length;
+await manual.feed.older(false);
+assert.equal(manual.calls.length, beforeRetry, "A near-end signal cannot retry a failed page by itself");
+await manual.feed.older();
+assert.equal(manual.state.next, null);
+assert.deepEqual(ids(manual.state.events), [10, 9, 8, 7, 6]);
+assert.equal(manual.status.olderError, false);
+
+for (const update of [
+  {filter:"lost"}, {subject:"subscriptions"}, {lens:"activity"}, {groupRange:"24h"},
+  {demo:true}, {groupSignature:"new"}, {status:{...scope.status, account:{id:"333"}}},
+  {status:{...scope.status, selection:{interactions:{replies:false}}}},
+]) {
+  const old = deferred();
+  const race = fixture(params => params.get("before") === "old-a" ? old.promise
+    : { ...initial, events: initial.events.map(row => ({...row, received_at: new Date().toISOString()})) });
+  await race.feed.load();
+  const request = race.feed.older();
+  Object.assign(race.state, update);
+  await race.feed.load();
+  assert.equal(race.calls[1].signal.aborted, true);
+  old.resolve({events:[event(8)],next:null});
+  await request;
+  assert.deepEqual(ids(race.state.events), [10, 9]);
+}
+
+const burst = Array.from({length: 7}, (_, index) => event(17 - index));
+let rejectBatch = true, profileOnly = false, expire = false;
+const live = fixture(params => {
+  const before = params.get("before");
+  if (!params.has("after_revision") && before === "0") return profileOnly
+    ? { ...initial, events: initial.events.map(row => ({...row, name:"Maya",handle:"maya",profile_url:"https://x.com/maya"})) }
+    : initial;
+  if (before === "old-a") return {events:[event(8),event(7)],next:"old-b"};
+  if (profileOnly || expire) return {
+    events: [], next: null, selected_event: profileOnly ? {...event(9),post_text:"Newly saved thread text"} : null,
+    aggregate: aggregate(profileOnly ? "0:17:profile:thread" : "0:17::", expire ? 0 : 12, null,
+      profileOnly ? "profile" : ""),
+  };
+  assert.equal(params.get("after_revision"), "0:10::");
+  const offset = before === "0" ? 0 : Number(before.slice(6));
+  if (offset === 4 && rejectBatch) throw new Error("Local database unavailable");
+  const events = burst.slice(offset, offset + 2);
+  return {
+    events, next: offset + 2 < burst.length ? `delta-${offset+2}` : null,
+    aggregate: offset === 0 ? aggregate("0:17::", 12, event(6).received_at) : null,
+  };
+});
+await live.feed.refresh();
+assert.equal(live.calls.length, 1, "Live initialization is bounded too");
+assert.equal(live.state.next, "old-a");
+live.revision("0:17::");
+await live.feed.refresh();
+assert.equal(live.calls.length, 4);
+assert.deepEqual(ids(live.state.events), [10, 9], "Failure does not commit part of a live batch");
+assert.equal(live.errors.at(-1)[1], "live");
+rejectBatch = false;
+await live.feed.refresh();
+assert.equal(live.calls.length, 7);
+assert.equal(live.status.catchingUp, true);
+assert.deepEqual(ids(live.state.events), [17,16,15,14,13,12,10,9]);
+await live.feed.older();
+assert.equal(live.state.next, "old-b");
+assert.equal(live.calls.at(-1).params.get("after_revision"), null);
+await live.feed.refresh();
+assert.equal(live.calls.at(-1).params.get("before"), "delta-6");
+assert.equal(live.status.catchingUp, false);
+assert.equal(live.state.next, "old-b", "Live catch-up preserves the latest accepted older cursor");
+assert.deepEqual(ids(live.state.events), [17,16,15,14,13,12,11,10,9,8,7]);
+assert.equal(live.state.aggregate.total_events, 12);
+const callCount = live.calls.length;
+await live.feed.refresh();
+assert.equal(live.calls.length, callCount, "Unchanged revision does no history work");
+live.state.selected = event(9).event_id;
+profileOnly = true;
+live.revision("0:17:profile:thread");
+await live.feed.refresh();
+assert.equal(live.calls.at(-2).params.get("selected"), live.state.selected);
+assert.equal(live.calls.at(-1).params.get("local_only"), "true");
+assert.equal(live.state.events.find(row => row.event_id === live.state.selected).post_text, "Newly saved thread text");
+assert.ok(live.state.events.every(row => row.handle === "maya"), "Cached names update previously loaded rows");
+live.state.demo = true;
+await live.feed.refresh();
+assert.equal(live.refreshed, 3, "Live history leaves demo rows alone");
+
+const liveHold = deferred();
+const priority = fixture(params => params.has("after_revision") ? liveHold.promise
+  : params.get("before") === "0" ? initial : {events:[event(8)],next:null});
+await priority.feed.load();
+priority.revision("0:11::");
+const pending = priority.feed.refresh();
+await priority.feed.older();
+assert.equal(priority.calls[1].signal.aborted, true, "Manual older navigation can preempt a live read");
+liveHold.resolve({events:[event(11)],next:null});
 await pending;
-assert.equal(state.events,prior,"An old response cannot replace a newer view");
-blocked=null;
-fail=true;
-await assert.rejects(feed.refresh(),/Local database unavailable/);
-fail=false;
-await feed.refresh();
-assert.equal(refreshes,2,"Failed or stale requests remain retryable");
+assert.deepEqual(ids(priority.state.events), [10,9,8]);
 
-state.status={...state.status,timeline_revision:"0:10"};
-blocked={};blocked.promise=new Promise(resolve=>blocked.resolve=resolve);
-const selectionRace=feed.refresh();
-await Promise.resolve();
-const rowsBeforeDisable=state.events;
-state.status={...state.status,selection:{notifications:false,interactions:{replies:false}}};
-blocked.resolve();
-await selectionRace;
-blocked=null;
-assert.equal(state.events,rowsBeforeDisable,"A response from a disabled selection is discarded");
-pages["0"]={events:[],next:null};
-await feed.refresh();
-assert.equal(state.events.length,0,"Disabling a type removes its visible rows, not its saved data");
-state.demo=true;
-const count=calls.length;
-await feed.refresh();
-assert.equal(calls.length,count,"Live history never replaces demo examples");
+const range = fixture(params => params.has("after_revision")
+  ? {events:[],next:null,aggregate:aggregate("0:10::",0,null)}
+  : {events:[event(10)],next:"expired-cursor",aggregate:aggregate("0:10::",2,event(9).received_at)});
+range.state.groupRange = "24h";
+range.state.rangeWindow = {period:"24h",subject:"followers",demo:false,start:"2026-11-05T10:00:00Z"};
+await range.feed.load();
+range.state.rangeWindow.start = "2026-11-05T10:00:05Z";
+await range.feed.refresh();
+assert.equal(range.calls.length, 1, "A moving cutoff before the oldest match does not re-count history");
+range.state.rangeWindow.start = "2026-11-05T10:01:00Z";
+await range.feed.refresh();
+assert.equal(range.state.events.length, 0, "Expired rows disappear even without a new timeline revision");
+assert.equal(range.state.next, null, "An exact empty aggregate exhausts the expired continuation");
 
-state.demo=false;
-state.events=[event(4),event(3),event(2),event(1)];
-state.status={...state.status,timeline_revision:"0:11:profile-update",
-  selection:{interactions:{replies:true},profile_names:true}};
-pages["0"]={events:[{...event(4),name:"Maya",handle:"maya",profile_url:"https://x.com/maya"}],next:null};
-await feed.refresh();
-assert.equal(state.events.length,1,"Changing name resolution resets the visible history scope");
-state.events.push(event(3),event(2),event(1));
-state.status={...state.status,timeline_revision:"0:12:profile-update"};
-await feed.refresh();
-assert.ok(state.events.every(row=>row.name==="Maya" && row.handle==="maya" && row.profile_url==="https://x.com/maya"),
-  "A newly cached identity also updates the same person in previously loaded pages");
+const disconnected = deferred();
+const detached = fixture(() => disconnected.promise);
+const loading = detached.feed.load();
+detached.state.connected = false;
+detached.feed.cancel();
+disconnected.resolve(initial);
+await loading;
+assert.deepEqual(detached.state.events, []);
+assert.equal(detached.calls[0].signal.aborted, true);
 
-assert.equal(eventLabel(event(1)),"Replied to you");
-assert.equal(eventLabel({...event(1),kind:"interaction.likes_given"}),"You liked their post");
-assert.equal(eventTone(event(1)),"neutral");
-assert.equal(eventTone({kind:"follow.unfollow"}),"negative");
-const people=peopleFromEvents([
-  {event_id:"old-follow",actor_id:"222",sequence:100,received_at:"2026-11-04T10:00:00+00:00"},
-  {event_id:"new-reply",actor_id:"222",sequence:-1,received_at:"2026-11-04T11:00:00+00:00"},
-]);
-assert.equal(people[0].event.event_id,"new-reply","Mixed sources select the latest receipt, not the largest table ID");
-assert.equal(updatedSelection([event(4),event(3)],"4",[event(5),event(4),event(3)]),"4");
-assert.equal(updatedSelection([event(4),event(3)],"3",[event(5),event(4),event(3)]),"3","Explicit older records stay selected");
-
-const follows = {event_id:"follow",actor_id:"222",kind:"follow.follow",sequence:1,received_at:"2026-11-04T10:00:00Z"};
-const unfollows = {...follows,event_id:"unfollow",actor_id:"333",kind:"follow.unfollow",sequence:2};
-const newest = Array.from({length:25},(_,i)=>({...event(30-i),received_at:"2026-11-05T10:00:00Z"}));
-const groupedState = {...state,lens:"activity",groupRange:"all",filter:"all",subject:"followers"};
-const burstCalls=[];
-const savedPages={"0":{events:newest,next:"older"},older:{events:[follows,unfollows],next:null}};
-const savedApi=async path=>{
-  const params=new URL(path,"http://local").searchParams;
-  burstCalls.push(Object.fromEntries(params));
-  return savedPages[params.get("before")];
-};
-const all=[];
-for await(const page of historyPages(savedApi,groupedState)) all.push(...page.events);
-assert.equal(all.length,27,"Grouped reads include all saved pages, not just the latest interaction page");
-assert.deepEqual(all.slice(-2).map(row=>row.kind),["follow.follow","follow.unfollow"]);
-assert.ok(burstCalls.every(call=>call.local_only==="true" && call.limit==="50"),"Grouped history reads never trigger profile requests");
-assert.ok(!new URL(historyPath({...state,lens:"none"}),"http://local").searchParams.has("local_only"),"Ungrouped keeps its usual request");
-const cutoff=groupSince({...groupedState,groupRange:"24h"},Date.parse("2026-11-06T10:00:59Z"));
-assert.equal(cutoff,"2026-11-05T10:00:00.000Z");
-assert.equal(groupSince(groupedState),"");
-for (const [range, hours] of [["1h",1],["6h",6],["12h",12],["3d",72]]) {
+assert.match(historyPath(scope), /^\/api\/timeline\?/);
+assert.match(historyPath({...scope,demo:true}), /^\/api\/demo\?/);
+const query = state => new URL(historyPath(state), "http://local").searchParams;
+assert.equal(query(scope).has("local_only"), false);
+assert.equal(query({...scope,lens:"activity"}).get("local_only"), "true");
+assert.equal(query({...scope,lens:"activity"}).get("lens"), "activity");
+assert.equal(query(scope).get("limit"), "50");
+for (const [range, hours] of [["1h",1],["6h",6],["12h",12],["3d",72],["24h",24]]) {
   const end = Date.parse("2026-11-06T10:00:00Z");
-  assert.equal(Date.parse(groupSince({...groupedState,lens:"none",groupRange:range},end)), end-hours*3600000);
+  assert.equal(Date.parse(groupSince({...scope,groupRange:range},end)), end-hours*3600000);
 }
-
-assert.equal(new URL(historyPath({...groupedState,since:cutoff}),"http://local").searchParams.get("since"),cutoff);
-assert.equal(mergeHistory([...all,unfollows]).length,27,"Repeated delivery does not duplicate saved records");
-let activityState={...groupedState,generation:1,events:[],next:null,status:{...state.status,timeline_revision:"activity-initial"}};
-const activityFeed=createLiveHistory({read:()=>({...activityState}),api:savedApi,
-  apply:(events,next)=>{activityState.events=events;activityState.next=next;},refreshInteractions:async()=>{}});
-activityState.loading=true;
-const callsDuringLoad=burstCalls.length;
-await activityFeed.refresh();
-assert.equal(burstCalls.length,callsDuringLoad,"A background refresh waits for the active history load instead of replacing it with a partial snapshot");
-activityState.loading=false;
-await activityFeed.refresh();
-assert.equal(activityState.events.length,27,"Live grouped initialization also completes all saved pages");
-assert.equal(activityState.next,null);
-savedPages["0"]={events:[{...event(40),received_at:"2026-11-06T10:00:00Z"},...newest],next:"older"};
-activityState.status={...activityState.status,timeline_revision:"activity-new"};
-burstCalls.length=0;
-await activityFeed.refresh();
-assert.equal(burstCalls.length,1,"Once complete, live updates stop at overlap without rereading all history");
-assert.equal(activityState.events.length,28);
-activityState.selected = "follow";
-savedPages.older.events = [{...follows, post_id:"900", post_text:"Newly saved thread text"}, unfollows];
-activityState.status = {...activityState.status, timeline_revision:"thread-saved"};
-burstCalls.length = 0;
-await activityFeed.refresh();
-assert.equal(burstCalls.length, 2, "Refresh reaches an older selected record after a thread save");
-assert.equal(activityState.events.find(row=>row.event_id === "follow").post_text, "Newly saved thread text");
-await assert.rejects(async()=>{for await(const page of historyPages(async()=>({events:[],next:"0"}),groupedState)) {}},/did not advance/);
-
-const realNow=Date.now;
-let now=Date.parse("2026-11-06T10:00:00Z");
-Date.now=()=>now;
-try {
-  const recent={...event(60),received_at:"2026-11-05T10:01:00Z"};
-  const older={...follows,received_at:"2026-11-03T10:00:00Z"};
-  let ranged={...groupedState,generation:1,events:[],next:null};
-  const rangeRequests=[];
-  const rangeFeed=createLiveHistory({read:()=>({...ranged}),
-    api:async path=>{rangeRequests.push(path);return {events:[recent,older],next:null};},
-    apply:(events,next)=>{ranged.events=events;ranged.next=next;},refreshInteractions:async()=>{}});
-  await rangeFeed.refresh();
-  assert.equal(ranged.events.length,2);
-  ranged.groupRange="24h";
-  await rangeFeed.refresh();
-  assert.deepEqual(ranged.events.map(row=>row.event_id),["60"],"Narrowing a range removes older saved records");
-  now+=2*60000;
-  await rangeFeed.refresh();
-  assert.equal(ranged.events.length,0,"A rolling range expires old activity even without a new event revision");
-  ranged.groupRange="all";
-  await rangeFeed.refresh();
-  assert.equal(ranged.events.length,2,"Returning to All saved restores records outside the former range");
-  assert.ok(rangeRequests.every(path=>new URL(path,"http://local").searchParams.get("local_only")==="true"));
-} finally {
-  Date.now=realNow;
-}
-
-const lookupState = {...groupedState,lens:"none",since:cutoff};
-assert.equal(new URL(historyPath(lookupState),"http://local").searchParams.has("local_only"),false,"Initial ungrouped page keeps opt-in name resolution");
-assert.equal(new URL(historyPath(lookupState,"older"),"http://local").searchParams.get("local_only"),"true","Extra range pages stay local-only");
-let emptyRange={...lookupState,groupRange:"24h",selected:null,events:[],next:null,loading:false,status:{...state.status,timeline_revision:"new-burst"}};
-let rangeReads=0;
-const freshRows=Array.from({length:51},(_,i)=>({...event(i+1),received_at:new Date().toISOString()}));
-const emptyFeed=createLiveHistory({read:()=>({...emptyRange}),api:async path=>{rangeReads++;return new URL(path,"http://local").searchParams.get("before")==="0"?{events:freshRows.slice(0,50),next:"older"}:{events:freshRows.slice(50),next:null};},apply:(events,next)=>{emptyRange.events=events;emptyRange.next=next;},refreshInteractions:async()=>{}});
-await emptyFeed.refresh();
-await emptyFeed.refresh();
-assert.equal(emptyRange.events.length,51,"An empty ranged timeline receives the whole burst");
-assert.equal(rangeReads,2);
-
-const serverStart = "2026-11-06T09:00:59.000Z";
-assert.equal(groupSince({...groupedState,groupRange:"1h",demo:false,rangeWindow:{period:"1h",subject:"followers",demo:false,start:serverStart}},Date.parse("2026-11-06T10:00:00Z")),serverStart,"Use the same server cutoff as HUD even if the browser clock differs");
-
-const totalRows = Array.from({length:195},(_,i)=>({...event(1000+i),actor_id:String(i%88),received_at:new Date(Date.now()-(i<176?3600000:172800000)).toISOString()}));
-const rangeCalls=[];
-const rangeApi=async path=>{
-  const q=new URL(path,"http://local").searchParams;
-  rangeCalls.push(q);
-  const rows=totalRows.filter(row=>!q.get("since") || row.received_at>=q.get("since"));
-  const start=Number(q.get("before"));
-  return {events:rows.slice(start,start+25),next:start+25<rows.length?String(start+25):null};
-};
-const allState={...groupedState,lens:"none",groupRange:"all",since:"",events:[],selected:null,next:null,status:{...state.status,timeline_revision:"all-first"}};
-const savedAll=[];
-for await(const page of historyPages(rangeApi,allState)) savedAll.push(...page.events);
-const day=[];
-for await(const page of historyPages(rangeApi,{...allState,since:new Date(Date.now()-86400000).toISOString()})) day.push(...page.events);
-assert.equal(savedAll.length,195);
-assert.equal(day.length,176);
-assert.ok(day.every(row=>savedAll.some(saved=>saved.event_id===row.event_id)),"All saved is a superset of the same 24h filter");
-assert.ok(rangeCalls.filter(q=>q.get("before")!=="0").every(q=>q.get("local_only")==="true"),"Completing all saved pages never triggers extra profile lookups");
-let allLive={...allState};
-const allFeed=createLiveHistory({read:()=>({...allLive}),api:rangeApi,apply:(events,next)=>{allLive.events=events;allLive.next=next;},refreshInteractions:async()=>{}});
-await allFeed.refresh();
-assert.equal(allLive.events.length,195,"An empty All saved live refresh must also read beyond page one");
-assert.equal(allLive.next,null);
-
-let retryAll={...allState,events:day,next:null,selected:day[2].event_id};
-const retryFeed=createLiveHistory({read:()=>({...retryAll}),api:rangeApi,apply:(events,next)=>{retryAll.events=events;retryAll.next=next;},refreshInteractions:async()=>{}});
-await retryFeed.refresh();
-assert.equal(retryAll.events.length,195,"A first live pass must complete All saved even when a failed range load left older 24h rows in the view");
-await retryFeed.refresh();
-assert.equal(retryAll.events.length,195);
+assert.equal(groupSince(scope), "");
+const follow = {...event(1),event_id:"timeline:event:1",sequence:1,kind:"follow.follow"};
+const reply = event(1);
+assert.deepEqual(mergeHistory([reply,follow,reply]), [follow,reply], "Mixed ties keep source order and deduplicate");
+const wholeSecond = event(1, "2026-11-05T10:00:01+00:00");
+const fraction = event(2, "2026-11-05T10:00:01.100000+00:00");
+assert.deepEqual(mergeHistory([wholeSecond,fraction]), [fraction,wholeSecond],
+  "Client ordering matches the SQLite receipt key across optional fractional seconds");
+assert.equal(peopleFromEvents([follow,event(2)])[0].event.sequence, -2);
+assert.equal(eventLabel(reply), "Replied to you");
+assert.equal(eventLabel({...reply,kind:"interaction.likes_given"}), "You liked their post");
+assert.equal(eventTone(reply), "neutral");
+assert.equal(eventTone({kind:"follow.unfollow"}), "negative");

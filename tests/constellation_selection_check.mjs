@@ -127,7 +127,7 @@ const root = {
 let nodes = [],
   labels = [],
   paths = [];
-let renderedLinks = [], renderedTrails = [], renderedSparks = [], groupNodes = [];
+let renderedLinks = [], renderedTrails = [], renderedSparks = [], groupNodes = [], groupMarkup = "";
 let historyWrites = 0, linkWrites = 0, groupWrites = 0, listenerWrites = 0;
 let beforeMarkup = false, measureRenderWork = false;
 let sceneParts = {};
@@ -205,6 +205,7 @@ const element = {
       contains(node) { return groupNodes.includes(node); },
       set innerHTML(markup) {
         groupWrites++;
+        groupMarkup = markup;
         groupNodes = [...markup.matchAll(/data-group="([^"]*)"/g)].map(([, group]) => button({group}));
       },
       querySelectorAll() { return groupNodes; },
@@ -556,9 +557,9 @@ try {
   expectCount("2 people in loaded history");
   const beforeConfigure = actorScans;
   scene.configure(groupModules, "activity");
-  expectCount("2 people in saved history");
+  expectCount("2 people in loaded history");
   scene.configure(groupModules, "region");
-  expectCount("2 people in saved history");
+  expectCount("2 people in loaded history");
   scene.configure(groupModules, "none");
   expectCount("2 people in loaded history");
   assert.equal(actorScans, beforeConfigure, "Changing grouping lenses reuses the actor count");
@@ -567,7 +568,29 @@ try {
   const beforeSeek = actorScans;
   scene.seek(0, "instant");
   assert.equal(actorScans, beforeSeek, "Leaving the grouped overview reuses the actor count");
-  expectCount("2 people in saved history");
+  expectCount("2 people in loaded history");
+
+  const aggregate = {
+    total_events: 17, distinct_actors: 6,
+    groups: [
+      {key:"follow.follow",label:"Followed you",tone:"positive",event_count:12,distinct_actors:5},
+      {key:"follow.unfollow",label:"Unfollowed",tone:"negative",event_count:2,distinct_actors:1},
+      {key:"unknown",label:"Unknown",tone:"neutral",event_count:3,distinct_actors:2},
+    ],
+  };
+  scene.render(groupedRecords, "follow-A", aggregate);
+  expectCount("3 events · 2 people loaded · 17 events · 6 people saved");
+  scene.setZoom(0.25);
+  assert.equal(nodes.length, 3, "Only fetched records have star geometry");
+  assert.equal(groupNodes.length, 2, "Groups without fetched records stay outside the interactive scene");
+  assert.match(groupMarkup, /12 actions · 5 people saved · 2 actions loaded/);
+  assert.match(groupMarkup, /class="cluster-count">12</);
+  assert.match(controls.get("#constellation-key").innerHTML, /1 group with no events loaded/);
+  scene.setZoom(0.8);
+  assert.match(controls.get("#constellation-key").innerHTML, /12 actions · 5 people saved · 2 actions loaded/);
+  const beforeOldest = olderLoads;
+  scene.scrub(1);
+  assert.equal(olderLoads, beforeOldest, "Moving the scrubber previews history until the change is committed");
   scene.configure(groupModules, "none");
   scene.clear();
   scene.render([record("solo", "Z", 0, "follow.follow")], "solo");
