@@ -1,6 +1,8 @@
 import { TIME_RANGES } from "./time-range.js";
 import { compareEvents } from "./format.js";
 
+export const HISTORY_PAGE_SIZE = 50;
+
 export function groupSince(state, now = Date.now()) {
   if (!state.groupRange || state.groupRange === "all") return "";
   const window = state.rangeWindow;
@@ -13,7 +15,7 @@ export function groupSince(state, now = Date.now()) {
 export function historyPath(state, before = "0", options = {}) {
   const params = new URLSearchParams({
     kind: state.filter, subject: state.subject, before: String(before || "0"),
-    lens: state.lens || "none", limit: "50",
+    lens: state.lens || "none", limit: String(HISTORY_PAGE_SIZE),
   });
   if (before !== "0" || options.localOnly || state.lens && state.lens !== "none")
     params.set("local_only", "true");
@@ -118,11 +120,12 @@ export function createLiveHistory({ api, read, clear, apply, change, failure, re
       }
     }
   }
-  async function load(prepare) {
+  async function load(prepare, preview) {
     accepted = catchup = null;
     olderError = liveError = false;
-    const ticket = start("initial");
-    clear();
+    const ticket = start(preview ? "older" : "initial");
+    if (preview) apply({...preview, next: null}, "initial");
+    else clear();
     await run(ticket, async () => {
       if (prepare) await prepare();
       if (!owns(ticket)) return;
@@ -134,7 +137,8 @@ export function createLiveHistory({ api, read, clear, apply, change, failure, re
       if (!state.demo && !revision)
         throw new Error("Saved history snapshot revision is missing. Try again.");
       const events = inRange(mergeHistory(result.events), since);
-      apply({...result, events}, "initial");
+      // The preview may come from an older snapshot. Only the scoped response owns the cursor.
+      apply({...result, events}, preview ? "update" : "initial");
       accepted = {
         scope: ticket.scope, since, revision, initialRevision: revision, lastSince: since,
         cursors: new Set(result.next ? [result.next] : []),
@@ -143,8 +147,13 @@ export function createLiveHistory({ api, read, clear, apply, change, failure, re
   }
   async function older(retry = true) {
     const state = read();
-    if (!state.next || accepted?.scope !== historyScope(state) ||
-        active?.phase === "initial" || active?.phase === "older" || (olderError && !retry)) return;
+    if (active?.phase === "initial" || active?.phase === "older" || (olderError && !retry)) return;
+    if (accepted?.scope !== historyScope(state)) {
+      if (olderError && state.activityKind && state.events.length)
+        return load(undefined, {events: state.events, aggregate: state.aggregate});
+      return;
+    }
+    if (!state.next) return;
     const ticket = start("older");
     await run(ticket, async () => {
       const revision = state.aggregate?.revision;
@@ -173,7 +182,10 @@ export function createLiveHistory({ api, read, clear, apply, change, failure, re
   async function refresh() {
     const state = read();
     if (active || !connected() || state.demo || !state.status) return;
-    if (accepted?.scope !== historyScope(state)) return load();
+    if (accepted?.scope !== historyScope(state)) {
+      if (!olderError) return load();
+      return;
+    }
     const since = groupSince(state);
     const version = state.status.timeline_revision;
     const oldest = state.aggregate?.oldest_received_at;
@@ -264,6 +276,6 @@ export function createLiveHistory({ api, read, clear, apply, change, failure, re
   }
   return { load, older, refresh, cancel, needsLoad: () => {
     const scope = historyScope(read());
-    return accepted?.scope !== scope && !(active?.phase === "initial" && active.scope === scope);
+    return accepted?.scope !== scope && active?.scope !== scope;
   }};
 }

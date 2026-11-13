@@ -3,6 +3,13 @@
 Each tagged release has an automatically generated list of merged pull requests
 and contributors on the [GitHub releases page](https://github.com/aatbit/xflog/releases).
 
+## 1.0.15 — 2026-11-13
+
+### Fixed
+
+- Open loaded Activity groups immediately and fetch older events within the
+  selected group.
+
 ## 1.0.14 — 2026-11-13
 
 ### Fixed

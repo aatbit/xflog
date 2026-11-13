@@ -822,7 +822,7 @@ def test_zoom_reuses_grouped_scene_and_rebinds_animation(offline_page, motion):
     )
 
     page.evaluate("setZoomInput(0.2)")
-    page.locator(".constellation-group:visible").first.click()
+    page.evaluate("setZoomInput(1); stepFrames()")
     assert float(slider.input_value()) == 1
     assert page.evaluate("zoomProbe.unchanged()")
     assert page.evaluate("""() => {
@@ -879,9 +879,13 @@ def journal_events(size):
 
 
 @pytest.fixture
-def paged_history(offline_page):
+def paged_history(offline_page, request):
     page = offline_page
     events = journal_events(114)
+    if getattr(request, "param", False):
+        events[0]["kind"], events[-1]["kind"] = events[-1]["kind"], events[0]["kind"]
+        events[0]["audience_groups"]["activity"] = events[0]["kind"]
+        events[-1]["audience_groups"]["activity"] = events[-1]["kind"]
     page.evaluate(
         """events => {
           const fetchOriginal = window.fetch;
@@ -1132,6 +1136,7 @@ def test_activity_card_loads_its_own_page_and_can_return_to_overview(paged_histo
     assert card.is_visible()
 
 
+@pytest.mark.parametrize("paged_history", [False, True], indirect=True)
 def test_returning_to_overview_discards_inflight_activity_page(paged_history):
     page = paged_history
     page.locator("#lens-trigger").click()
@@ -1153,6 +1158,43 @@ def test_returning_to_overview_discards_inflight_activity_page(paged_history):
         && document.querySelector('#activity-group-back').hidden;
     }""")
     assert card.is_visible()
+
+
+@pytest.mark.parametrize("paged_history", [True], indirect=True)
+def test_loaded_activity_card_opens_immediately_and_pages_only_its_group(paged_history):
+    page = paged_history
+    page.locator("#lens-trigger").click()
+    page.get_by_role("menuitemradio", name="Activity", exact=True).click()
+    receive_history_page(page, 0)
+    page.locator("#scene-zoom").evaluate(
+        "zoom => {zoom.value = '0'; zoom.dispatchEvent(new Event('input', {bubbles:true}));}"
+    )
+    page.get_by_role("button", name="Explore Followed you", exact=False).press("Enter")
+    stars = page.locator("#history [data-actor]")
+    selected = page.locator("#history [data-actor][aria-pressed=true]")
+    assert stars.count() == 49
+    identity = selected.get_attribute("data-event")
+    assert identity and page.locator("#scene-lens-label").inner_text() == "Followed you"
+    assert page.locator("#scene-zoom").input_value() == "1"
+    page.wait_for_function("paged.requests().length === 2")
+    assert page.evaluate("paged.requests()[1].activity_kind") == "follow.follow"
+    receive_history_page(page, 1, "fail")
+    assert stars.count() == 49 and selected.get_attribute("data-event") == identity
+    page.locator("#history-more").click()
+    receive_history_page(page, 2)
+    assert stars.count() == 50
+    assert selected.get_attribute("data-event") == identity
+    page.locator("#history-more").click()
+    receive_history_page(page, 3)
+    assert stars.count() == 85
+    assert selected.get_attribute("data-event") == identity
+    assert not page.locator("#history-more").is_visible()
+    assert page.evaluate("""() => paged.requests().slice(1).map(({before, activity_kind}) =>
+      [before, activity_kind])""") == [
+        ["0", "follow.follow"],
+        ["0", "follow.follow"],
+        ["page-50", "follow.follow"],
+    ]
 
 
 def test_grouped_journal_replaces_unloaded_summary_in_row_order(paged_history):
@@ -1705,8 +1747,13 @@ def encounter_fixture(offline_browser_app):
             db.executemany("INSERT INTO settings (key,value) VALUES (?,?)", settings.items())
 
 
-@pytest.mark.parametrize(("kind", "label"), [("mentions", "Mentions"), ("quotes", "Quotes")])
-def test_real_activity_drilldown_finds_older_activity(encounter_fixture, offline_page, kind, label):
+@pytest.mark.parametrize(
+    ("kind", "label", "loaded"),
+    [("mentions", "Mentions", False), ("quotes", "Quotes", False), ("mentions", "Mentions", True)],
+)
+def test_real_activity_drilldown_finds_older_activity(
+    encounter_fixture, offline_page, kind, label, loaded
+):
     page = offline_page
     database, events, _ = encounter_fixture
     account = events[0][2]
@@ -1718,11 +1765,20 @@ def test_real_activity_drilldown_finds_older_activity(encounter_fixture, offline
             "INSERT OR REPLACE INTO settings VALUES ('selection',?)",
             (json.dumps({**saved, "interactions": {kind: True}}),),
         )
-        db.execute(
+        db.executemany(
             """INSERT INTO interactions
                (account_id,event_id,person_id,kind,post_id,provider_at,received_at)
                VALUES (?,?,?,?,?,?,?)""",
-            (account, f"old-{kind}", "777", kind, "123", receipt, receipt),
+            [(account, f"old-{kind}", "777", kind, "123", receipt, receipt)]
+            + (
+                [(account, "new-mention", "777", kind, "124", events[0][4], events[0][4])]
+                + [
+                    (account, f"older-{index}", "777", kind, str(1000 + index), receipt, receipt)
+                    for index in range(50)
+                ]
+                if loaded
+                else []
+            ),
         )
     try:
         page.goto(urljoin(page.url, "/"), wait_until="networkidle")
@@ -1733,12 +1789,26 @@ def test_real_activity_drilldown_finds_older_activity(encounter_fixture, offline
             "zoom => {zoom.value = '0'; zoom.dispatchEvent(new Event('input', {bubbles:true}));}"
         )
         card = page.get_by_role("button", name=f"Explore {label}", exact=False)
-        assert "0 actions loaded" in card.get_attribute("title")
+        assert ("1 action loaded" if loaded else "0 actions loaded") in card.get_attribute("title")
         with page.expect_response(lambda r: f"activity_kind=interaction.{kind}" in r.url) as hit:
             card.click()
-        assert [event["post_id"] for event in hit.value.json()["events"]] == ["123"]
+        first = hit.value.json()
+        if loaded:
+            assert len(first["events"]) == 50
+            assert first["events"][0]["post_id"] == "124"
+            assert first["next"]
+            with page.expect_response(
+                lambda r: "activity_kind=interaction.mentions" in r.url
+            ) as older:
+                page.locator("#history-more").click()
+            assert [event["post_id"] for event in older.value.json()["events"]] == ["1000", "123"]
+            page.wait_for_function(
+                "document.querySelectorAll('#history [data-actor]').length === 52"
+            )
+        else:
+            assert [event["post_id"] for event in first["events"]] == ["123"]
+            assert page.locator("#history [data-actor]").count() <= 1
         page.wait_for_selector("#history [data-actor='777'][aria-pressed=true]")
-        assert page.locator("#history [data-actor]").count() == 1
         assert page.locator("#scene-lens-label").inner_text() == label
     finally:
         with sqlite3.connect(database) as db:

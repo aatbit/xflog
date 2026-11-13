@@ -82,9 +82,25 @@
     onPreview: (identity) => selectEvent(identity, false, followControls.update),
     onOpen: (identity) => selectEvent(identity, true),
     onGroup: (kind) => {
+      if (kind === state.activityKind) {
+        scene.setZoom(1);
+        return;
+      }
+      const events = state.events.filter(event => event.kind === kind).slice(0, HISTORY_PAGE_SIZE);
+      const group = state.aggregate?.groups.find(group => group.key === kind);
       setActivityKind(kind);
-      void liveHistory.load();
-      scene.setZoom(1);
+      if (events.length && group) {
+        const aggregate = {
+          total_events: group.event_count, distinct_actors: group.distinct_actors, groups: [group],
+        };
+        state.selected = events[0].event_id;
+        scene.clear();
+        scene.setZoom(1);
+        void liveHistory.load(undefined, {events, aggregate});
+      } else {
+        void liveHistory.load();
+        scene.setZoom(1);
+      }
       $("#activity-group-back").focus({preventScroll:true});
     },
     hasOlder: () => Boolean(state.next),
@@ -146,7 +162,7 @@
   const { createNotice, statusNotice } = await import("/static/xf/notice.js");
   const notices = createNotice($("#notice"));
   const notice = (message, tone = "info") => notices.show(message, tone);
-  const { createLiveHistory, historyScope } = await import("/static/xf/live-history.js");
+  const { createLiveHistory, historyScope, HISTORY_PAGE_SIZE } = await import("/static/xf/live-history.js");
   const { historyCount } = await import("/static/xf/audience-groups.js");
   const historyMore = $("#history-more");
   const historyStatus = $("#history-page-status");
@@ -176,7 +192,7 @@
     change: ({phase, catchingUp, olderError}) => {
       historyPhase = phase;
       $("#history").setAttribute("aria-busy", String(phase === "initial" || phase === "older"));
-      const hideOlder = !state.next || phase === "initial";
+      const hideOlder = (!state.next && !olderError) || phase === "initial";
       if (hideOlder && document.activeElement === historyMore)
         $("#history").focus({preventScroll:true});
       historyMore.hidden = hideOlder;
