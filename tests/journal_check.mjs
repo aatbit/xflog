@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
 const base = pathToFileURL(process.argv[2] + "/");
 const { groupEvents } = await import(new URL("audience-groups.js", base));
-const { createJournal } = await import(new URL("journal.js", base));
+const { createJournalModel } = await import(new URL("journal-model.js", base));
 const modules = JSON.parse(process.argv[3]);
 const stamp = "2026-10-26T12:00:00Z";
 const event = (event_id, actor_id, sequence, kind, size) => ({
@@ -56,132 +56,119 @@ assert.equal(
   "New catalog modules require no journal-specific logic.",
 );
 
-const esc = (value) =>
-  String(value ?? "").replace(
-    /[&<>"']/g,
-    (character) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
-        character
-      ],
-  );
-const opened = [];
-let scrolled = null;
-const element = {
-  html: "",
-  groups: [],
-  buttons: [],
-  set innerHTML(html) {
-    this.html = html;
-    this.groups = [];
-    this.buttons = [];
-    const buttons = (markup, parent) => {
-      for (const [, id] of markup.matchAll(/data-event="([^"]+)"/g)) {
-        this.buttons.push({
-          dataset: { event: id },
-          handlers: {},
-          addEventListener(type, callback) {
-            this.handlers[type] = callback;
-          },
-          closest() {
-            return parent;
-          },
-          scrollIntoView() {
-            scrolled = id;
-          },
-        });
-      }
-    };
-    for (const [, attributes, key, body] of html.matchAll(
-      /<details([^>]*data-group="([^"]+)"[^>]*)>([\s\S]*?)<\/details>/g,
-    )) {
-      const group = {
-        dataset: { group: key },
-        open: /\sopen(?:\s|$)/.test(attributes),
-        handlers: {},
-        addEventListener(type, callback) {
-          this.handlers[type] = callback;
-        },
-      };
-      this.groups.push(group);
-      buttons(body, group);
-    }
-    if (!this.groups.length) buttons(html, null);
-  },
-  querySelectorAll(selector) {
-    return selector === "details[data-group]" ? this.groups : this.buttons;
-  },
+const day = (record) => (record.provider_at || record.received_at).slice(0, 10);
+const collapsed = new Set();
+const model = (records, lens = "activity") =>
+  createJournalModel(records, {modules, lens, collapsed, day});
+const eventsIn = (journal) =>
+  journal.rows.filter((row) => row.type === "event").map((row) => row.event.event_id);
+
+assert.deepEqual(eventsIn(model(events)), ["new-follow", "old-follow", "unknown-size", "new-lost"]);
+assert.deepEqual(eventsIn(model(events, "none")), events.map((record) => record.event_id));
+assert.deepEqual(model([], "activity").rows, []);
+assert.equal(model([], "none").heights.at(0), -1);
+
+const summary = {
+  groups: [
+    {key:"follow.follow",label:"Followed you",tone:"positive",event_count:9,distinct_actors:4},
+    {key:"follow.unfollow",label:"Unfollowed",tone:"negative",event_count:4,distinct_actors:2},
+  ],
 };
-const journal = createJournal({
-  element,
-  escape: esc,
-  date: new Intl.DateTimeFormat("en"),
-  time: new Intl.DateTimeFormat("en"),
-  displayDate: (event) => new Date(event.provider_at || event.received_at),
-  gained: (event) => event.kind === "follow.follow",
-  label: (event) => event.kind,
-  initials: () => "P",
-  onOpen: (id) => opened.push(id),
-});
-const options = { modules, lens: "activity", selected: "new-lost" };
-journal.render(events, options);
-assert.equal(element.groups.length, 2);
-assert.ok(
-  element.html.includes("3 events") && element.html.includes("1 event"),
-);
-assert.ok(element.html.includes('data-event="new-lost" aria-pressed="true"'));
-element.buttons
-  .find((button) => button.dataset.event === "new-lost")
-  .handlers.click();
-assert.deepEqual(opened, ["new-lost"]);
-element.groups[0].open = false;
-element.groups[0].handlers.toggle();
-const appended = [
-  ...events,
-  event("older", "4", 0, "follow.follow", "under-100"),
-];
-journal.render(appended, options);
-assert.equal(
-  element.groups[0].open,
-  false,
-  "Pagination preserves collapsed groups.",
-);
-assert.equal(element.buttons.length, 5);
-journal.reveal("new-follow");
-assert.equal(
-  element.groups[0].open,
-  true,
-  "Latest can reveal an event inside a collapsed group.",
-);
-assert.equal(scrolled, "new-follow");
-journal.render(appended, options);
-assert.equal(element.groups[0].open, true);
-journal.reveal("new-lost");
-assert.equal(
-  scrolled,
-  "new-lost",
-  "Navigation finds the selected record across bucket order.",
-);
-journal.render(events, { ...options, lens: "none" });
-assert.equal(element.groups.length, 0);
-assert.deepEqual(
-  element.buttons.map((button) => button.dataset.event),
-  events.map((event) => event.event_id),
-  "Ungrouped retains the full input order.",
-);
-for (const module of modules.filter((module) => module.enabled)) {
+const partial = createJournalModel([events[0]], {modules, lens:"activity", collapsed, day, aggregate:summary});
+assert.deepEqual(partial.groups.map(group => [group.key, group.eventCount, group.distinctActors, group.events.length]),
+  [["follow.follow", 9, 4, 1], ["follow.unfollow", 4, 2, 0]]);
+assert.equal(partial.rows[partial.groups[1].start].type, "summary");
+assert.deepEqual(eventsIn(partial), ["new-follow"], "Aggregate-only groups add no synthetic event rows.");
+
+const paged = model([], "none");
+const input = Array.from({length: 129}, (_, index) => ({...events[index % events.length],
+  event_id: `paged-${index}`, received_at: `${stamp.slice(0,8)}${index % 2 ? 26 : 25}T12:00:00Z`,
+  provider_at: `${stamp.slice(0,8)}${index % 2 ? 26 : 25}T12:00:00Z`,
+}));
+let cursor = 0;
+for (const pageSize of [1, 2, 4, 8, 16, 32, 64, 2]) {
+  const old = paged.byEvent.get(input[0].event_id);
+  paged.append(input.slice(cursor, cursor + pageSize));
+  cursor += pageSize;
+  if (old) assert.equal(paged.byEvent.get(input[0].event_id), old, "Append retains logical row identity.");
+  const reference = model(input.slice(0, cursor), "none");
+  const identity = ({key, first, last}) => [key, first, last];
+  assert.deepEqual(paged.rows.map(identity), reference.rows.map(identity));
+  reference.heights.update(0, 83.5);
+  paged.heights.update(0, 83.5);
+  for (const [index, row] of paged.rows.entries()) {
+    const top = reference.heights.prefix(index);
+    assert.equal(paged.heights.prefix(index), top);
+    assert.equal(paged.rows[paged.heights.at(top)], row);
+  }
+  assert.equal(paged.heights.total, reference.heights.total, "Appended Fenwick entries retain measured prefix sums.");
+}
+
+for (const module of modules.filter((item) => item.enabled)) {
   const records = module.buckets.map((bucket, index) => ({
     ...events[0],
     event_id: `${module.key}-${index}`,
     audience_groups: { [module.key]: bucket.key },
   }));
-  journal.render(records, { ...options, lens: module.key });
-  assert.equal(element.groups.length, module.buckets.length);
-  assert.deepEqual(
-    element.buttons.map((button) => button.dataset.event),
-    records.map((event) => event.event_id),
-    `${module.label} renders all registered buckets and keeps every record.`,
-  );
+  const journal = model(records, module.key);
+  assert.deepEqual(journal.groups.map((group) => group.key), module.buckets.map((bucket) => bucket.key));
+  assert.deepEqual(eventsIn(journal), records.map((record) => record.event_id));
 }
+
+const dateChanges = [
+  {...events[0], event_id:"first"},
+  {...events[1], event_id:"next", provider_at:"2026-10-25T00:00:00Z"},
+  {...events[2], event_id:"earlier-again"},
+  {...events[3], event_id:"same-day"},
+];
+const ungroupedDates = model(dateChanges, "none").rows;
+assert.deepEqual(
+  ungroupedDates.map((row) => row.type === "date" ? row.text : row.event.event_id),
+  ["2026-10-26", "first", "2026-10-25", "next", "2026-10-26", "earlier-again", "same-day"],
+  "Each change in the input date creates one heading, including a repeated nonconsecutive day.",
+);
+const groupedDates = model(dateChanges);
+assert.deepEqual(groupedDates.rows.filter((row) => row.type === "date").map(({text, first}) => [text, first]),
+  [["2026-10-26", true], ["2026-10-25", true]],
+  "Each group starts its own date heading.");
+
+const groupedBefore = model(events);
+const oldEventKey = groupedBefore.byEvent.get("old-follow").key;
+const oldDateKey = groupedBefore.rows.find((row) => row.type === "date").key;
+collapsed.add("activity:follow.follow");
+const appended = [...events, event("older", "4", 0, "follow.follow", "under-100")];
+const closedJournal = model(appended);
+const closedGroup = closedJournal.groups[0];
+assert.equal(closedGroup.events.length, 4);
+assert.equal(closedGroup.open, false);
+assert.deepEqual(
+  closedJournal.rows.slice(closedGroup.start, closedGroup.end).map((row) => row.type),
+  ["group", "gap"],
+);
+assert.deepEqual(eventsIn(closedJournal), ["new-lost"]);
+assert.equal(closedJournal.byEvent.get("older").index, -1, "Collapsed records retain logical lookup.");
+assert.equal(closedJournal.byEvent.get("new-lost").position, 5, "Logical positions include collapsed events.");
+assert.equal(closedJournal.byKey.get(oldEventKey), closedJournal.byEvent.get("old-follow"));
+assert.equal(closedJournal.byKey.get(oldDateKey).index, -1);
+assert.equal(model(appended, "account-size").groups[0].open, true, "Collapse is scoped to its lens.");
+collapsed.delete("activity:follow.follow");
+const reopened = model(appended);
+assert.equal(reopened.rows[reopened.byEvent.get("older").index].event, appended.at(-1));
+assert.deepEqual(eventsIn(reopened), ["new-follow", "old-follow", "unknown-size", "older", "new-lost"]);
+
+const prepended = model([{...events[0], event_id:"latest"}, ...events]);
+assert.equal(prepended.byKey.get(oldEventKey).event, events[2]);
+assert.equal(prepended.byKey.get(oldDateKey).text, "2026-10-26");
+
+const duplicate = {...events[0], name:"Second record with the same ID"};
+const duplicateAcrossGroup = {...events[1], event_id:duplicate.event_id};
+const duplicates = model([events[0], duplicate, duplicateAcrossGroup]);
+const duplicateRows = duplicates.rows.filter((row) => row.type === "event");
+assert.equal(new Set(duplicateRows.map((row) => row.key)).size, 3);
+assert.deepEqual(duplicateRows.map((row) => row.event), [events[0], duplicate, duplicateAcrossGroup]);
+assert.equal(duplicates.byEvent.get(duplicate.event_id), duplicateRows[0], "Reveal resolves the first match.");
+assert.ok(duplicateRows.every((row) => duplicates.byKey.get(row.key) === row));
+
 const locations = modules.find((module) => module.key === "profile-location");
 assert.equal(locations.dynamic_buckets, true);
 const locationRecord = (index, label) => ({
@@ -212,23 +199,11 @@ assert.deepEqual(
     ["Unknown", 1],
   ],
 );
-journal.render(locationRows, { ...options, lens: locations.key });
-assert.equal(element.groups.length, 3);
-element.groups[0].open = false;
-element.groups[0].handlers.toggle();
-journal.reveal("location-3");
-assert.equal(element.groups[0].open, true);
-assert.equal(scrolled, "location-3");
-const manyLocations = Array.from({ length: 30 }, (_, index) =>
-  locationRecord(index, `City ${index}`),
-);
-journal.render(manyLocations, { ...options, lens: locations.key });
-assert.equal(
-  element.groups.length,
-  30,
-  "Journal retains every named location.",
-);
-assert.equal(element.buttons.length, 30);
+const locationsJournal = model(locationRows, locations.key);
+assert.deepEqual(locationsJournal.groups.map((group) => [group.label, group.events.length]),
+  [["London", 2], ["New York City", 1], ["Unknown", 1]]);
+assert.deepEqual(eventsIn(locationsJournal), ["location-1", "location-3", "location-2", "unknown-location"]);
+
 for (const descriptor of [
   null,
   {},
@@ -256,17 +231,38 @@ assert.equal(
   )[0].key,
   "location-1",
 );
-journal.render([locationRecord(1, '<img src=x onerror="bad()">')], {
-  ...options,
-  lens: locations.key,
-});
-assert.ok(element.html.includes("&lt;img"));
-assert.ok(!element.html.includes("<img"));
-journal.render([{ ...events[0], name: '<img src=x onerror="bad()">' }], {
-  ...options,
-  modules: [extension],
-  lens: "future",
-});
-assert.ok(element.html.includes("&lt;Future&gt;"));
-assert.ok(element.html.includes("&lt;img"));
-assert.ok(!element.html.includes("<img"));
+
+function checkHeights(journal) {
+  const {heights, rows} = journal;
+  const sizes = rows.map((_, index) => heights.height(index));
+  for (const index of [1, rows.length - 1, 0, 2, 1]) {
+    const measured = 1.25 * (index + 1) + 12.5;
+    sizes[index] = measured;
+    heights.update(index, measured);
+    let top = 0;
+    sizes.forEach((size, row) => {
+      assert.equal(heights.prefix(row), top, "Incremental correction equals a direct sum.");
+      assert.equal(heights.at(top), row, "A row starts at its exact prefix.");
+      assert.equal(heights.at(top + size / 2), row, "Offsets inside a row retain their logical index.");
+      top += size;
+    });
+    assert.equal(heights.total, top);
+    assert.equal(heights.at(top), rows.length - 1);
+    assert.equal(heights.at(-20), 0);
+  }
+}
+checkHeights(reopened);
+
+const manyLocations = Array.from({length: 5000}, (_, index) =>
+  locationRecord(index, `City ${String(index).padStart(4, "0")}`));
+const largeJournal = model(manyLocations, locations.key);
+assert.equal(largeJournal.groups.length, 5000);
+assert.equal(largeJournal.byEvent.size, 5000);
+for (const index of [0, 1, 2499, 4901, 4999]) {
+  const row = largeJournal.byEvent.get(`location-${index}`);
+  const top = largeJournal.heights.prefix(row.index);
+  assert.equal(largeJournal.rows[largeJournal.heights.at(top + 1)], row);
+  const first = largeJournal.heights.at(Math.max(0, top - 480));
+  const last = largeJournal.heights.at(top + 1100);
+  assert.ok(last - first < 40, "A fixed viewport and overscan find a bounded slice among many group headers.");
+}

@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 const base = pathToFileURL(process.argv[2] + "/");
 const {
   constellationLayout,
+  prepareConstellation,
   peopleFromEvents,
   entriesFromEvents,
   visibleLabels,
@@ -13,6 +14,7 @@ const {
   normalizeMotionSpeed,
 } = await import(new URL("constellation-layout.js", base));
 const { createConstellation } = await import(new URL("constellation.js", base));
+const { createViewportIndex, overscan } = await import(new URL("constellation-viewport.js", base));
 const { resolveLens } = await import(new URL("audience-ui.js", base));
 const { groupKey, groupDescription } = await import(new URL("constellation-colors.js", base));
 const { groupEvents } = await import(new URL("audience-groups.js", base));
@@ -56,6 +58,33 @@ for (const width of [320, 390, 798, 1440])
       );
       assert.ok(layout.center < height / 2);
     }
+const points = [160, 0, 160, 320, 80, 640].map((x, index) => ({
+  person: {x, event: {event_id: index === 2 ? "0" : String(index)}},
+}));
+const segments = [
+  {a:{x:-500}, b:{x:700}},
+  {a:{x:480}, b:{x:320}},
+  {a:{x:80}, b:{x:80}},
+  {a:{x:1200}, b:{x:1400}},
+];
+const indexed = createViewportIndex(points, segments);
+assert.equal(createViewportIndex([], []).nearest(40), undefined);
+assert.equal(createViewportIndex(points.slice(0, 1), []).nearest(-100), points[0].person);
+for (const center of [-100, 0, 40, 80, 120, 160, 240, 480, 640, 1000]) {
+  const expected = points.reduce((best, item) =>
+    Math.abs(item.person.x - center) < Math.abs(best.person.x - center) ? item : best);
+  assert.equal(indexed.nearest(center), expected.person, "Nearest selection keeps original tie priority");
+}
+for (const [left, width] of [[0, 64], [100, 128], [320, 390], [900, 1200], [2500, 1600]]) {
+  const start = left - overscan, end = left + width + overscan;
+  const {labels, connections} = indexed.range(start, end);
+  assert.deepEqual(labels, points.filter(({person}) => start <= person.x && person.x <= end));
+  assert.deepEqual(new Set(connections), new Set(segments.filter(({a,b}) =>
+    Math.min(a.x, b.x) <= end && Math.max(a.x, b.x) >= start)));
+}
+assert.ok(indexed.range(200, 220).connections.includes(segments[0]),
+  "A connection spanning the viewport is active with neither endpoint in range");
+
 const inactive = modules.map((module) => ({ ...module, enabled: false }));
 assert.equal(
   resolveLens(modules, "none"),
@@ -273,6 +302,16 @@ assert.ok(visibleLabels([{...selectedBox,maxBottom:220}],"selected").has("select
 for(const neighbor of neighbors) assert.equal(staggered.get(neighbor.id).top,140);
 assert.equal(visibleLabels([selectedBox,{...selectedBox,id:"crowded"}],"selected").size,1,
   "Labels still hide when no non-overlapping placement is available");
+const scrolledBoxes = [...neighbors, selectedBox].map(box => ({
+  ...box, left: box.left - 35, right: box.right - 35,
+  alternates: box.alternates?.map(alternate => ({
+    ...alternate, left: alternate.left - 35, right: alternate.right - 35,
+  })),
+}));
+const scrolledLabels = visibleLabels(scrolledBoxes, "selected");
+assert.deepEqual([...scrolledLabels].map(([id, box]) => [id, box.top]),
+  [...staggered].map(([id, box]) => [id, box.top]),
+  "Collision placement preserves priority and vertical positions when only the viewport origin shifts");
 const tight = {...neighbors[0],alternates:[{left:165,right:291,top:190,bottom:232}]};
 assert.equal(visibleLabels([selectedBox,tight],"selected").get("left").bottom,190,
   "An alternate can move slightly further above a neighboring label to preserve the safety gap");
@@ -372,6 +411,7 @@ function exercise(refreshRate, speed = 1, duration = 1000) {
       return controls.get(selector);
     },
   };
+  const linkLayer = {style: {}, querySelectorAll: () => []};
   const element = {
     isConnected: true,
     dataset: {},
@@ -380,7 +420,8 @@ function exercise(refreshRate, speed = 1, duration = 1000) {
     scrollWidth: 800,
     scrollLeft: 0,
     classList: { contains: () => true, toggle() {} },
-    querySelector: (selector) => (selector === ".shooting-star" ? meteor : sky),
+    querySelector: (selector) => selector === ".shooting-star" ? meteor
+      : selector === ".constellation-links" ? linkLayer : sky,
     querySelectorAll: (selector) => (selector === ".sky-star" ? [star] : []),
     addEventListener() {},
     removeEventListener() {},
@@ -545,6 +586,21 @@ function seedReference(value) {
 const geometryDigest = createHash("sha256").update(JSON.stringify(baselineGeometry)).digest("hex");
 assert.equal(geometryDigest, "140fd1844b9614ca831c59b28ff1912b55f2789983d6c3638827166f71041ebb",
   "Group ordering, colors and geometry match the original layout at e283194");
+for (const records of lookupFixtures)
+  for (const lens of ["none", "activity", "profile-location"])
+    for (const width of [390, 1024]) {
+      const options = {events: records, width, height: 772, modules, lens};
+      const atZoom = prepareConstellation(options);
+      const original = atZoom(0.8), points = [...original.people], groups = [...original.groups];
+      for (const zoom of [0, 0.05, 0.2, 0.25, 0.250001, 0.3, 0.55, 0.8, 1, 1.5, 2, 0]) {
+        const layout = atZoom(zoom);
+        assert.equal(layout, original, "Zoom keeps the geometry bindings live");
+        assert.ok(layout.people.every((point, i) => point === points[i]));
+        assert.ok(layout.groups.every((group, i) => group === groups[i]));
+        assert.deepEqual(layout, constellationLayout({...options, zoom}),
+          "Repeated in-place layout matches a fresh calculation");
+      }
+    }
 
 // Count only searches involving layout entries/groups; unrelated color lookups remain untouched.
 const originalFind = Array.prototype.find;

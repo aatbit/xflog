@@ -1,5 +1,5 @@
 import { eventTone } from "./format.js";
-import { groupEvents } from "./audience-groups.js";
+import { createJournalModel } from "./journal-model.js";
 
 export function createJournal({
   element,
@@ -10,61 +10,460 @@ export function createJournal({
   label,
   initials,
   onOpen,
+  onNearEnd = () => {},
 }) {
   const collapsed = new Set();
-  let lens = "none";
+  let track, model, events, options, selected, frame = 0;
+  let savedAnchor = null, inset = 0, width = 0;
+  let revealRow = null, revealScrollTop = 0;
+  let renderedScrollTop = null;
+  let measured = new Map();
+  const mounted = new Map(), groups = new Map(), observed = new Map();
+  const observer = new ResizeObserver(measure);
 
-  function rows(events, selected) {
-    let prior = "";
-    return events
-      .map((event) => {
-        const day = date.format(displayDate(event));
-        const heading =
-          day !== prior ? `<div class="date-group">${esc(day)}</div>` : "";
-        prior = day;
-        const tone = eventTone(event);
-        const lost = tone === "negative";
-        return `${heading}<article class="event ${lost ? "lost" : tone === "positive" ? "gain" : "neutral"}"><span class="event-dot" aria-hidden="true"></span><button type="button" class="event-button" data-event="${esc(event.event_id)}" aria-pressed="${selected === event.event_id}"><span class="avatar" aria-hidden="true">${esc(initials(event))}</span><span class="event-identity"><span class="event-name">${esc(event.name || event.handle || "X account")}</span><span class="event-handle">${esc(event.handle ? "@" + event.handle : "ID " + event.actor_id)}</span></span><span class="event-meta"><span class="event-kind"><span aria-hidden="true">${lost ? "↘" : tone === "neutral" ? "·" : "↗"}</span>${esc(label(event))}</span><span class="event-time">${esc(time.format(displayDate(event)))}${event.provider_at ? "" : " · received"}</span></span></button></article>`;
-      })
-      .join("");
+  function eventMarkup(row) {
+    const event = row.event;
+    const tone = eventTone(event);
+    const lost = tone === "negative";
+    return `<article aria-label="${eventPosition(row)}" class="event ${row.group && row.last ? "journal-last-event " : ""}${lost ? "lost" : tone === "positive" ? "gain" : "neutral"}"><span class="event-dot" aria-hidden="true"></span><button type="button" class="event-button" data-event="${esc(event.event_id)}" aria-pressed="${selected === event.event_id}"><span class="avatar" aria-hidden="true">${esc(initials(event))}</span><span class="event-identity"><span class="event-name">${esc(event.name || event.handle || "X account")}</span><span class="event-handle">${esc(event.handle ? "@" + event.handle : "ID " + event.actor_id)}</span></span><span class="event-meta"><span class="event-kind"><span aria-hidden="true">${lost ? "↘" : tone === "neutral" ? "·" : "↗"}</span>${esc(label(event))}</span><span class="event-time">${esc(time.format(displayDate(event)))}${event.provider_at ? "" : " · received"}</span></span></button></article>`;
   }
 
-  return {
-    render(events, options) {
-      lens = options.lens;
-      const groups = groupEvents(events, options.modules, lens);
-      element.innerHTML = groups
-        ? groups
-            .map(
-              (group) =>
-                `<details class="journal-group ${esc(group.tone)}" data-group="${esc(group.key)}" ${collapsed.has(`${lens}:${group.key}`) ? "" : "open"}><summary><span class="journal-group-name">${esc(group.label)}</span> <span class="journal-group-count">${group.events.length} ${group.events.length === 1 ? "event" : "events"}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></summary><div class="journal-group-content">${rows(group.events, options.selected)}</div></details>`,
-            )
-            .join("")
-        : rows(events, options.selected);
-      element.querySelectorAll("details[data-group]").forEach((group) => {
-        const key = `${lens}:${group.dataset.group}`;
-        group.addEventListener("toggle", () => {
-          if (group.open) collapsed.delete(key);
-          else collapsed.add(key);
-        });
-      });
-      element
-        .querySelectorAll("[data-event]")
-        .forEach((button) =>
-          button.addEventListener("click", () => onOpen(button.dataset.event)),
-        );
-    },
-    reveal(identity) {
-      const button = [...element.querySelectorAll("[data-event]")].find(
-        (item) => item.dataset.event === identity,
-      );
-      if (!button) return;
-      const group = button.closest("details[data-group]");
-      if (group) {
-        collapsed.delete(`${lens}:${group.dataset.group}`);
-        group.open = true;
+  const eventPosition = row => `Event ${row.position} of ${events.length} loaded`;
+
+  function groupCount(group) {
+    const total = group.eventCount ?? group.events.length;
+    const loaded = total === group.events.length ? "" : ` saved · ${group.events.length} loaded`;
+    const actors = group.distinctActors === undefined ? "" :
+      `<span class="sr-only"> · ${group.distinctActors} ${group.distinctActors === 1 ? "person" : "people"}</span>`;
+    return `${total} ${total === 1 ? "event" : "events"}${loaded}${actors}`;
+  }
+
+  function mountGroup(group) {
+    const summary = !group.events.length;
+    const node = document.createElement(summary ? "div" : "details");
+    node.className = `journal-group ${group.tone || ""}`;
+    node.dataset.group = group.key;
+    if (!summary) node.open = group.open;
+    const title = `<span class="journal-group-name">${esc(group.label)}</span> <span class="journal-group-count">${groupCount(group)}</span>`;
+    node.innerHTML = summary
+      ? `<div class="journal-group-summary">${title}</div>`
+      : `<summary>${title}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></summary><div class="journal-group-content"></div>`;
+    groups.set(group, node);
+    return node;
+  }
+
+  const isHeader = row => row.type === "group" || row.type === "summary";
+
+  function mountRow(row) {
+    let node;
+    if (isHeader(row)) {
+      node = groups.get(row.group).firstElementChild;
+    } else if (row.type === "date") {
+      node = document.createElement("div");
+      node.className = row.first && row.group ? "date-group journal-first-date" : "date-group";
+      node.textContent = row.text;
+    } else {
+      const template = document.createElement("template");
+      template.innerHTML = eventMarkup(row);
+      node = template.content.firstElementChild;
+    }
+    node.dataset.journalRow = row.key;
+    mounted.set(row, node);
+    observed.set(node, row);
+    observer.observe(node, {box: "border-box"});
+    return node;
+  }
+
+  function unmountRow(row, node) {
+    observer.unobserve(node);
+    observed.delete(node);
+    mounted.delete(row);
+    if (!isHeader(row)) node.remove();
+  }
+
+  function locate(key) {
+    const node = key?.closest?.("[data-journal-row]");
+    const row = model?.byKey.get(node?.dataset.journalRow);
+    return row && mounted.get(row) === node ? row : null;
+  }
+
+  function anchor() {
+    if (!model?.rows.length) return null;
+    const offset = element.scrollTop - inset;
+    let index = model.heights.at(offset);
+    const row = model.rows[index];
+    // If a date heading is at the edge, anchor its first event as well.
+    if (row.type === "date" && model.rows[index + 1]?.type === "event") index++;
+    const current = model.rows[index];
+    return {
+      key: current.key, identity: current.event?.event_id,
+      offset: offset - model.heights.prefix(index), top: element.scrollTop,
+    };
+  }
+
+  function restoreAnchor(previous) {
+    if (!previous) return;
+    const row = model.byKey.get(previous.key) ??
+      (previous.identity === undefined ? null : model.byEvent.get(previous.identity));
+    element.scrollTop = row && row.index >= 0
+      ? inset + model.heights.prefix(row.index) + previous.offset
+      : previous.top;
+  }
+
+  function setTop(node, top) {
+    const value = `${top}px`;
+    if (node.style.top !== value) node.style.top = value;
+  }
+
+  function placeMounted() {
+    track.style.height = `${model.heights.total}px`;
+    for (const [group, node] of groups) {
+      const top = model.heights.prefix(group.start);
+      setTop(node, top);
+      node.style.height = `${model.heights.prefix(group.end) - top - 20}px`;
+    }
+    for (const [row, node] of mounted) {
+      if (isHeader(row)) continue;
+      const base = row.group ? model.heights.prefix(row.group.start) + 1 : 0;
+      setTop(node, model.heights.prefix(row.index) - base);
+    }
+  }
+
+  function renderWindow(pinned = locate(document.activeElement)) {
+    if (!track?.isConnected || !element.clientHeight) return;
+    const overscan = Math.min(400, element.clientHeight);
+    const top = element.scrollTop - inset;
+    const from = model.heights.at(top - overscan);
+    const to = model.heights.at(top + element.clientHeight + overscan);
+    const wanted = new Set();
+    const wantedGroups = new Set();
+    function include(row) {
+      if (!row) return;
+      if (row.group && !wantedGroups.has(row.group)) {
+        wantedGroups.add(row.group);
+        wanted.add(model.rows[row.group.start]);
       }
-      button.scrollIntoView({ block: "nearest" });
+      if (row.type !== "gap") wanted.add(row);
+    }
+    for (let index = Math.max(0, from); index <= to; index++) include(model.rows[index]);
+    if (pinned?.index >= 0) include(pinned);
+
+    for (const [row, node] of mounted)
+      if (!wanted.has(row)) unmountRow(row, node);
+    for (const [group, node] of groups) {
+      if (!wantedGroups.has(group)) {
+        node.remove();
+        groups.delete(group);
+      }
+    }
+
+    // Insert new rows in logical DOM order without moving already mounted focused nodes.
+    const tails = new Map();
+    const ordered = [...wanted].sort((a, b) => b.index - a.index);
+    for (const row of ordered) {
+      let groupNode;
+      if (row.group) groupNode = groups.get(row.group) ?? mountGroup(row.group);
+      const node = mounted.get(row) ?? mountRow(row);
+      const parent = row.group && !isHeader(row) ? groupNode.lastElementChild : track;
+      const child = isHeader(row) ? groupNode : node;
+      if (child.parentNode !== parent) parent.insertBefore(child, tails.get(parent) ?? null);
+      tails.set(parent, child);
+    }
+    placeMounted();
+  }
+
+  function paintJournal() {
+    frame = 0;
+    if (revealRow && element.scrollTop !== revealScrollTop) revealRow = null;
+    renderWindow();
+  }
+
+  function queue() {
+    if (track?.isConnected && !frame) frame = requestAnimationFrame(paintJournal);
+  }
+
+  function measure(entries) {
+    if (!track?.isConnected) return;
+    const previous = anchor();
+    let changed = false;
+    for (const entry of entries) {
+      if (entry.target === element) {
+        const nextWidth = track.clientWidth;
+        if (width !== nextWidth) {
+          width = nextWidth;
+          // Keep last-known heights as estimates until those rows are visited again.
+          measured.clear();
+        }
+        inset = track.offsetTop;
+        queue();
+        continue;
+      }
+      const row = observed.get(entry.target);
+      if (!row || !track.contains(entry.target)) continue;
+      const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.target.offsetHeight;
+      if (!height) continue;
+      const occupied = height + (row.type === "event" ? 12 : isHeader(row) ? 1 : 0);
+      measured.set(row.key, {row, height: occupied});
+      if (model.heights.height(row.index) !== occupied) {
+        model.heights.update(row.index, occupied);
+        changed = true;
+      }
+    }
+    if (changed) {
+      const keepRevealed = revealRow && element.scrollTop === revealScrollTop;
+      placeMounted();
+      if (keepRevealed) alignRow(revealRow);
+      else restoreAnchor(previous);
+      renderedScrollTop = element.scrollTop;
+      queue();
+    }
+  }
+
+  function release() {
+    cancelAnimationFrame(frame);
+    frame = 0;
+    observer.disconnect();
+    mounted.clear();
+    groups.clear();
+    observed.clear();
+    track?.remove();
+    track = model = events = options = revealRow = null;
+    renderedScrollTop = null;
+    measured.clear();
+  }
+
+  function restoreMeasurements(previous) {
+    for (const [key, {row, height}] of previous) {
+      const next = model.byKey.get(key);
+      if (!next || !sameHeightInputs(row, next)) continue;
+      measured.set(key, {row: next, height});
+      if (next.index >= 0) model.heights.update(next.index, height);
+    }
+  }
+
+  function sameHeightInputs(row, next) {
+    if (row.type === "event") {
+      const fields = ["name", "handle", "actor_id", "kind", "received_at", "provider_at"];
+      return row.event === next.event || fields.every(field => row.event[field] === next.event[field]);
+    }
+    if (isHeader(row))
+      return row.type === next.type && row.group.label === next.group.label && groupCount(row.group) === groupCount(next.group);
+    return row.first === next.first;
+  }
+
+  function buildModel() {
+    return createJournalModel(events, {...options, collapsed, day: event => date.format(displayDate(event))});
+  }
+
+  function updateMountedEvent(row, node) {
+    node.setAttribute("aria-label", eventPosition(row));
+    node.classList.toggle("journal-last-event", Boolean(row.group && row.last));
+    node.querySelector("button").setAttribute("aria-pressed", String(row.event.event_id === selected));
+  }
+
+  function append(nextEvents, nextOptions) {
+    const previous = anchor();
+    const focused = locate(document.activeElement);
+    const priorLength = events.length;
+    events = nextEvents;
+    options = nextOptions;
+    selected = options.selected;
+    if (model.append) {
+      model.append(events.slice(priorLength));
+      for (const [row, node] of mounted)
+        if (row.type === "event") updateMountedEvent(row, node);
+    } else {
+      const previousHeights = measured;
+      measured = new Map();
+      model = buildModel();
+      restoreMeasurements(previousHeights);
+      for (const [group, node] of [...groups]) {
+        const header = node.firstElementChild;
+        const row = observed.get(header);
+        const replacement = model.byKey.get(row.key);
+        groups.delete(group);
+        if (replacement?.type !== row.type) {
+          unmountRow(row, header);
+          node.remove();
+          continue;
+        }
+        groups.set(replacement.group, node);
+        if (replacement.group.label !== group.label)
+          header.querySelector(".journal-group-name").textContent = replacement.group.label;
+        const count = groupCount(replacement.group);
+        if (count !== groupCount(group)) header.querySelector(".journal-group-count").innerHTML = count;
+      }
+      for (const [row, node] of [...mounted]) {
+        const replacement = model.byKey.get(row.key);
+        if (replacement?.type !== row.type || replacement.index < 0 ||
+            (row.type === "event" && !sameHeightInputs(row, replacement)) ||
+            (row.type === "date" && row.first !== replacement.first)) {
+          unmountRow(row, node);
+          continue;
+        }
+        mounted.delete(row);
+        mounted.set(replacement, node);
+        observed.set(node, replacement);
+        if (row.type === "event") updateMountedEvent(replacement, node);
+      }
+    }
+    revealRow = null;
+    track.style.height = `${model.heights.total}px`;
+    restoreAnchor(previous);
+    renderedScrollTop = element.scrollTop;
+    const pinned = focused && model.byKey.get(focused.key);
+    renderWindow(pinned);
+    if (focused && !locate(document.activeElement)) (control(pinned) ?? element).focus({preventScroll: true});
+  }
+
+  function render(nextEvents, nextOptions) {
+    if (nextOptions.append && track?.isConnected && nextOptions.lens === options.lens &&
+        nextEvents.length >= events.length && nextEvents[0] === events[0] &&
+        nextEvents[events.length - 1] === events.at(-1)) {
+      append(nextEvents, nextOptions);
+      return;
+    }
+    const previous = anchor() ?? savedAnchor;
+    const focused = locate(document.activeElement);
+    const previousWidth = width;
+    const previousHeights = measured;
+    measured = new Map();
+    savedAnchor = null;
+    release();
+    events = nextEvents;
+    options = nextOptions;
+    selected = options.selected;
+    model = buildModel();
+    track = document.createElement("div");
+    track.className = "journal-window";
+    element.replaceChildren(track);
+    inset = track.offsetTop;
+    width = track.clientWidth;
+    if (width === previousWidth) restoreMeasurements(previousHeights);
+    track.style.height = `${model.heights.total}px`;
+    restoreAnchor(previous);
+    if (!previous) element.scrollTop = 0;
+    renderedScrollTop = element.scrollTop;
+    observer.observe(element);
+    const row = focused && (model.byKey.get(focused.key) ?? model.byEvent.get(focused.event?.event_id));
+    renderWindow(row);
+    if (focused) (control(row) ?? element).focus({preventScroll: true});
+  }
+
+  function alignRow(row) {
+    const {heights} = model;
+    const top = inset + heights.prefix(row.index);
+    const bottom = top + heights.height(row.index);
+    const sticky = row.group && row.type !== "group" ? heights.height(row.group.start) : 0;
+    const visibleTop = element.scrollTop + (sticky ? inset + sticky : 0);
+    const visibleBottom = element.scrollTop + element.clientHeight;
+    const earliest = top - (sticky ? inset + sticky : 0);
+    if (top < visibleTop) element.scrollTop = earliest;
+    else if (bottom > visibleBottom)
+      element.scrollTop = Math.min(earliest, bottom - element.clientHeight);
+    revealScrollTop = element.scrollTop;
+  }
+
+  function scrollToRow(row) {
+    revealRow = row;
+    alignRow(row);
+    renderWindow();
+  }
+
+  function reveal(identity) {
+    let row = model?.byEvent.get(identity);
+    if (!row) return;
+    if (row.index < 0) {
+      collapsed.delete(`${options.lens}:${row.group.key}`);
+      render(events, {...options, selected, append:false});
+      row = model.byEvent.get(identity);
+    }
+    scrollToRow(row);
+  }
+
+  function setGroupOpen(row, open) {
+    const key = `${options.lens}:${row.group.key}`;
+    if (open) collapsed.delete(key);
+    else collapsed.add(key);
+    const inGroup = model.byKey.get(anchor()?.key)?.group === row.group;
+    render(events, {...options, selected, append:false});
+    if (!open && inGroup) scrollToRow(model.byKey.get(row.key));
+  }
+
+  function click(event) {
+    const target = event.target.closest("button[data-event], summary");
+    const row = locate(target);
+    if (row?.type === "event") onOpen(row.event.event_id);
+    else if (row?.type === "group" && !event.defaultPrevented) {
+      // Commit disclosure before a scroll frame can unmount the summary.
+      event.preventDefault();
+      setGroupOpen(row, !row.group.open);
+    }
+  }
+
+  function toggle(event) {
+    const node = event.target;
+    if (!node.matches("details[data-group]")) return;
+    const row = locate(node.firstElementChild);
+    if (row && node.open !== row.group.open) setGroupOpen(row, node.open);
+  }
+
+  function control(row) {
+    const node = mounted.get(row);
+    return row?.type === "event" ? node?.querySelector("button") : row?.type === "group" ? node : null;
+  }
+
+  function keydown(event) {
+    if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey) return;
+    const current = locate(event.target);
+    if (!current) return;
+    const direction = event.shiftKey ? -1 : 1;
+    for (let index = current.index + direction; model.rows[index]; index += direction) {
+      const row = model.rows[index];
+      if (row.type !== "group" && row.type !== "event") continue;
+      event.preventDefault();
+      scrollToRow(row);
+      control(row)?.focus({preventScroll: true});
+      return;
+    }
+  }
+
+  function scroll() {
+    if (!track?.isConnected) return;
+    queue();
+    if (renderedScrollTop === element.scrollTop) return;
+    renderedScrollTop = null;
+    if (element.scrollTop + element.clientHeight >= element.scrollHeight - 80) onNearEnd();
+  }
+
+  const listeners = [
+    ["scroll", scroll, {passive: true}],
+    ["click", click],
+    ["toggle", toggle, true],
+    ["keydown", keydown],
+    ["focusout", queue],
+  ];
+  listeners.forEach(([type, handler, settings]) => element.addEventListener(type, handler, settings));
+
+  return {
+    render,
+    reveal,
+    select(identity) {
+      if (selected === identity) return;
+      selected = identity;
+      for (const [row, node] of mounted)
+        if (row.type === "event")
+          node.querySelector("button").setAttribute("aria-pressed", String(row.event.event_id === selected));
+    },
+    clear({remember = false} = {}) {
+      savedAnchor = remember ? anchor() ?? savedAnchor : null;
+      release();
+    },
+    destroy() {
+      savedAnchor = null;
+      collapsed.clear();
+      release();
+      listeners.forEach(([type, handler, settings]) => element.removeEventListener(type, handler, settings));
     },
   };
 }

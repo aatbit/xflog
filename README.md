@@ -232,6 +232,8 @@ If saving shows a warning, follow it before assuming your change is active. If c
 
 Open timeline settings with the **sliders icon**. Choose Followers or Paid subscribers, filter All/Gained/Lost, or switch between **Constellation** (one star per recorded action) and **Journal** (every recorded event). These viewing choices do not change what you record.
 
+XFlog loads the newest activity first. Scroll toward the older edge or choose **Load older activity** to bring in another page. Both layouts show how many events and people are loaded alongside the totals for the selected filters and time range.
+
 Each star represents one recorded action. Repeated actions from the same person stay as separate entries; new activity does not replace an earlier action. In Constellation, scroll up for older history and down for newer history. The person nearest the center becomes highlighted as you move, and their details appear in the readout. You can also click any visible star or name to select and center that person; they stay selected until you move through history again. Click the selected person or their readout for details. Interaction details include a linked post excerpt of up to 280 characters when text is already saved; no extra X request is made. The side arrows move one recorded action at a time. Use the bottom sliders to move through history or change zoom, which starts at **80%**. You can also hold the middle mouse button and scroll up to zoom in, or down to zoom out. Journal uses normal vertical scrolling and hides the sliders.
 
 <details>
@@ -268,7 +270,7 @@ Use either **clock button** to change the shared time range for Constellation, J
 | **Verification** | Verified/unverified and blue, business or government badge types when supplied. |
 | **Profile location** | Similar location text, tidied for spacing, capitalization and clear aliases such as NYC → New York City and Bangalore → Bengaluru. |
 
-Zoom out to see every available group in Constellation. On smaller screens, scroll sideways or use the history slider to reach groups that do not fit. Journal uses collapsible sections. A person can appear in several groups: a later like or reply does not hide their earlier follow or unfollow. Group badges and legend counts show total actions within the selected range. Hover over a group badge or legend count for the number of unique people; screen readers announce both counts. Each matching action remains a separate star.
+Zoom out to see groups with loaded events in Constellation. The overview also reports how many groups have events still to load. On smaller screens, scroll sideways or use the history slider to reach groups that do not fit. Journal uses collapsible sections and shows a summary for groups whose events have yet to load. A person can appear in several groups. Group badges and legend counts show total actions within the selected range. Hover over a group badge or legend count for the number of unique people. Screen readers announce both counts. Each loaded action has its own star.
 
 Account size, age, verification and location use only details delivered with new events while enabled. Old missing details stay Unknown; turning a group off keeps saved history. Profile facts describe the recorded event, not a live profile check. When space allows, enabled Verification, Account size and Account age add facts to the selected-person readout. Known verified accounts get a checkmark beside their name in Constellation and the readout when Verification is enabled.
 

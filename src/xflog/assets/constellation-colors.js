@@ -33,10 +33,13 @@ export function colorGroups(groups, module) {
 }
 
 export function groupDescription(group) {
-  const actions = group.people.length;
-  return `${actions} ${actions === 1 ? "action" : "actions"} · ${group.personCount} ${group.personCount === 1 ? "person" : "people"}`;
+  const actions = group.eventCount ?? group.people.length;
+  const people = group.distinctActors ?? group.personCount;
+  const total = `${actions} ${actions === 1 ? "action" : "actions"} · ${people} ${people === 1 ? "person" : "people"}`;
+  return actions !== group.people.length || people !== group.personCount
+    ? `${total} saved · ${group.people.length} ${group.people.length === 1 ? "action" : "actions"} loaded` : total;
 }
 
 export function groupKey(groups, escape) {
-  return groups.map(group => `<span class="constellation-key-item" role="listitem" tabindex="0" title="${escape(groupDescription(group))}" aria-label="${escape(group.label)}, ${escape(groupDescription(group))}"><svg viewBox="0 0 22 12" aria-hidden="true" style="color:${group.color}"><path d="M1 6H21" stroke-dasharray="${group.dash}"/></svg><span class="constellation-key-label">${escape(group.label)}</span><span class="constellation-key-count">${group.people.length}</span></span>`).join("");
+  return groups.map(group => `<span class="constellation-key-item" role="listitem" tabindex="0" title="${escape(groupDescription(group))}" aria-label="${escape(group.label)}, ${escape(groupDescription(group))}"><svg viewBox="0 0 22 12" aria-hidden="true" style="color:${group.color}"><path d="M1 6H21" stroke-dasharray="${group.dash}"/></svg><span class="constellation-key-label">${escape(group.label)}</span><span class="constellation-key-count">${group.eventCount ?? group.people.length}</span></span>`).join("");
 }
