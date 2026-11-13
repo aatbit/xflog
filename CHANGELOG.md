@@ -3,6 +3,27 @@
 Each tagged release has an automatically generated list of merged pull requests
 and contributors on the [GitHub releases page](https://github.com/aatbit/xflog/releases).
 
+## 1.0.12 — 2026-11-13
+
+### Changed
+
+- Load the newest timeline page first and fetch older activity on demand.
+  Show exact saved totals alongside loaded records in Constellation and Journal.
+- Virtualize Journal rows and group headers while preserving scroll position,
+  selection, and keyboard focus as older pages load.
+- Keep Constellation nodes in place during zoom, limit label and animation work
+  to the viewport, and skip timeline label layout in the group overview.
+
+### Fixed
+
+- Keep the older-page cursor usable during live updates. Retry missed revisions
+  using the last committed timeline snapshot.
+- Refresh Previous Encounters classifications after backdated activity across
+  all lenses whenever the group is enabled.
+
+SQLite creates timeline indexes on startup. Existing history and environment
+settings carry forward.
+
 ## 1.0.11 — 2026-11-12
 
 ### Changed
