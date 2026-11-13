@@ -99,7 +99,8 @@ class Timeline:
             yield db
 
     async def revision(self, account: str) -> str:
-        return ":".join(map(str, await _revision(self.store.db, account)))
+        async with self._snapshot() as db:
+            return ":".join(map(str, await _revision(db, account)))
 
     async def current_history(self, query: dict) -> dict:
         return await self.history(_CURRENT_ACCOUNT, query)
@@ -133,8 +134,7 @@ class Timeline:
                 account = (settings.get("account") or {}).get("id")
             groups = audience_groups.preferences(settings.get("audience_groups"))
             module = audience_groups.MODULES.get(lens) if groups.get(lens) else None
-            active_encounters = bool(module and lens == ENCOUNTERS_KEY)
-            if context and not active_encounters:
+            if context and not groups[ENCOUNTERS_KEY]:
                 raise InvalidTimelineRequest(
                     "Encounter revision requires the Previous encounters group."
                 )
@@ -181,7 +181,6 @@ class Timeline:
                 selected,
                 limit,
                 context or watermarks,
-                active_encounters,
             )
             if result["next"] is not None:
                 result["next"] = Cursor(result["next"], watermarks, cursor_scope).encode()
@@ -194,14 +193,12 @@ class Timeline:
                 }
             return result
 
-    async def _page(
-        self, db, query, groups, before, after, selected, limit, context, active_encounters
-    ):
+    async def _page(self, db, query, groups, before, after, selected, limit, context):
         needs_context = groups[ENCOUNTERS_KEY]
         boundary_key = before.key if before else None
         sql, params = query.records(before=boundary_key, after=after, page_size=limit + 1)
         correction_sql = ""
-        if active_encounters and after and after != query.watermarks:
+        if needs_context and after and after != query.watermarks:
             prior_receipt = await _prior_backfill_boundary(db, query, after)
             if prior_receipt is not None:
                 await db.create_function(

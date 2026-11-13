@@ -173,41 +173,107 @@ const withEncounter = (id, bucket) => ({
   ...event(id), audience_groups: {"previous-encounters": bucket},
 });
 const corrected = id => ({...withEncounter(id, "seen-before"), encounter_correction: true});
-const encounter = fixture(params => {
-  const before = params.get("before");
-  if (!params.has("after_revision")) {
-    if (before === "0") return {...initial, events: [withEncounter(10, "first-appearance"), event(9)]};
-    assert.equal(params.get("encounter_revision"), "0:13::");
-    return before === "old-a"
-      ? {events:[withEncounter(8, "seen-before")], next:"old-b"}
-      : {events:[withEncounter(7, "seen-before")], next:null};
-  }
-  return ({
-    "0": {events:[event(13)], next:"delta-1", aggregate:aggregate("0:13::", 8, event(6).received_at)},
-    "delta-1": {events:[event(12)], next:"delta-2"},
-    "delta-2": {events:[event(11)], next:"delta-3"},
-    "delta-3": {events:[corrected(10), corrected(8), corrected(7)], next:null},
-  })[before];
+for (const lens of ["activity", "profile-location", "none", "previous-encounters"]) {
+  const encounter = fixture(params => {
+    const before = params.get("before");
+    if (!params.has("after_revision")) {
+      if (before === "0") return {...initial, events: [withEncounter(10, "first-appearance"), event(9)]};
+      assert.equal(params.get("encounter_revision"), "0:13::");
+      return before === "old-a"
+        ? {events:[withEncounter(8, "seen-before")], next:"old-b"}
+        : {events:[withEncounter(7, "seen-before")], next:null};
+    }
+    return ({
+      "0": {events:[event(13)], next:"delta-1", aggregate:aggregate("0:13::", 8, event(6).received_at)},
+      "delta-1": {events:[event(12)], next:"delta-2"},
+      "delta-2": {events:[event(11)], next:"delta-3"},
+      "delta-3": {events:[corrected(10), corrected(8), corrected(7)], next:null},
+    })[before];
+  });
+  encounter.state.lens = lens;
+  encounter.state.groups = [{key: "previous-encounters", enabled: true}];
+  await encounter.feed.load();
+  encounter.state.selected = event(9).event_id;
+  encounter.revision("0:13::");
+  await encounter.feed.refresh();
+  assert.equal(encounter.status.catchingUp, true);
+  await encounter.feed.older();
+  await encounter.feed.refresh();
+  const bucket = (id) => encounter.state.events.find(row => row.event_id === event(id).event_id)
+    ?.audience_groups?.["previous-encounters"];
+  assert.equal(bucket(10), "seen-before", "Live correction updates a loaded, unselected event");
+  assert.equal(bucket(8), "seen-before", "A page accepted between live batches uses the current context");
+  assert.equal(bucket(7), undefined, "A correction cannot load an unvisited row");
+  assert.equal(encounter.state.next, "old-b", "Live corrections do not take over the older cursor");
+  assert.equal(encounter.state.selected, event(9).event_id);
+  assert.equal(encounter.state.events.some(row => row.encounter_correction), false);
+  await encounter.feed.older();
+  assert.equal(bucket(7), "seen-before");
+}
+
+let committed = false;
+const mismatch = fixture(params => {
+  if (params.get("before") === "old-a") return {events:[event(8)], next:"old-b"};
+  if (!params.has("after_revision")) return initial;
+  assert.equal(params.get("after_revision"), "0:10::", "Retry starts from the observed revision");
+  return committed
+    ? {events:[event(11)], next:null, aggregate:aggregate("0:11::",6,event(6).received_at)}
+    : {events:[], next:null, aggregate:initial.aggregate};
 });
-encounter.state.lens = "previous-encounters";
-encounter.state.groups = [{key: "previous-encounters", enabled: true}];
-await encounter.feed.load();
-encounter.state.selected = event(9).event_id;
-encounter.revision("0:13::");
-await encounter.feed.refresh();
-assert.equal(encounter.status.catchingUp, true);
-await encounter.feed.older();
-await encounter.feed.refresh();
-const bucket = (id) => encounter.state.events.find(row => row.event_id === event(id).event_id)
-  ?.audience_groups?.["previous-encounters"];
-assert.equal(bucket(10), "seen-before", "Live correction updates a loaded, unselected event");
-assert.equal(bucket(8), "seen-before", "A page accepted between live batches uses the current context");
-assert.equal(bucket(7), undefined, "A correction cannot load an unvisited row");
-assert.equal(encounter.state.next, "old-b", "Live corrections do not take over the older cursor");
-assert.equal(encounter.state.selected, event(9).event_id);
-assert.equal(encounter.state.events.some(row => row.encounter_correction), false);
-await encounter.feed.older();
-assert.equal(bucket(7), "seen-before");
+await mismatch.feed.load();
+mismatch.revision("0:11::");
+await mismatch.feed.refresh();
+assert.equal(mismatch.state.aggregate.revision, "0:10::");
+assert.equal(mismatch.status.catchingUp, true, "A status hint cannot acknowledge unseen rows");
+assert.deepEqual(ids(mismatch.state.events), [10,9]);
+await mismatch.feed.older();
+assert.equal(mismatch.state.next, "old-b");
+committed = true;
+await mismatch.feed.refresh();
+assert.deepEqual(ids(mismatch.state.events), [11,10,9,8]);
+assert.equal(mismatch.state.next, "old-b");
+assert.equal(mismatch.status.catchingUp, false);
+const caughtUpCalls = mismatch.calls.length;
+await mismatch.feed.refresh();
+assert.equal(mismatch.calls.length, caughtUpCalls, "Matching snapshots stop catch-up");
+
+const rollback = fixture(params => params.has("after_revision")
+  ? {events:[], next:null, aggregate:initial.aggregate} : initial);
+await rollback.feed.load();
+rollback.revision("0:11::");
+await rollback.feed.refresh();
+assert.equal(rollback.status.catchingUp, true);
+rollback.revision(initial.aggregate.revision);
+const rollbackCalls = rollback.calls.length;
+await rollback.feed.refresh();
+assert.equal(rollback.status.catchingUp, false, "A withdrawn status hint settles without replay");
+assert.equal(rollback.calls.length, rollbackCalls);
+
+const newerSnapshot = fixture(params => params.has("after_revision")
+  ? {events:[event(11), event(12)], next:null, aggregate:aggregate("0:12::",7,event(6).received_at)}
+  : initial);
+await newerSnapshot.feed.load();
+newerSnapshot.revision("0:11::");
+await newerSnapshot.feed.refresh();
+assert.deepEqual(ids(newerSnapshot.state.events), [12,11,10,9]);
+assert.equal(newerSnapshot.status.catchingUp, false, "A newer page has caught up to an older status hint");
+newerSnapshot.revision("0:12::");
+await newerSnapshot.feed.refresh();
+assert.equal(newerSnapshot.calls.length, 2);
+
+const thread = fixture(params => params.has("after_revision")
+  ? {events:[], next:null, selected_event:{...event(9), post_text:"Saved thread"},
+    aggregate:aggregate("0:10::thread",5,event(6).received_at)}
+  : initial);
+await thread.feed.load();
+thread.state.selected = event(9).event_id;
+thread.revision("0:10::thread");
+await thread.feed.refresh();
+assert.equal(thread.state.events[1].post_text, "Saved thread");
+assert.equal(thread.state.next, "old-a");
+assert.equal(thread.status.catchingUp, false);
+await thread.feed.refresh();
+assert.equal(thread.calls.length, 2, "A thread-only revision settles without paging");
 
 const range = fixture(params => params.has("after_revision")
   ? {events:[],next:null,aggregate:aggregate("0:10::",0,null)}

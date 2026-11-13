@@ -46,11 +46,25 @@ function inRange(events, since) {
   return events.filter(event => Date.parse(event.received_at) >= cutoff);
 }
 
+function revisionPending(status, observed) {
+  if (!status || status === observed) return false;
+  const [events, interactions] = status.split(":");
+  const [seenEvents, seenInteractions] = observed.split(":");
+  const compare = (a, b) => a.length - b.length || (a < b ? -1 : Number(a !== b));
+  const eventOrder = compare(events, seenEvents);
+  const interactionOrder = compare(interactions, seenInteractions);
+  // Compare sequence bounds losslessly. Profile and thread changes use equality.
+  return eventOrder > 0 || interactionOrder > 0 || (!eventOrder && !interactionOrder);
+}
+
 const catchupPages = 3;
 export function createLiveHistory({ api, read, clear, apply, change, failure, refreshInteractions, connected }) {
   let active = null, accepted = null, catchup = null, olderError = false, liveError = false;
   const report = () => change({
-    phase: active?.phase, catchingUp: Boolean(catchup) || active?.phase === "live" || liveError, olderError,
+    phase: active?.phase,
+    catchingUp: Boolean(catchup) || active?.phase === "live" || liveError ||
+      Boolean(accepted?.revisionPending),
+    olderError,
   });
   function cancel() {
     active?.controller.abort();
@@ -115,11 +129,13 @@ export function createLiveHistory({ api, read, clear, apply, change, failure, re
       const since = groupSince(state);
       const result = await page(ticket, {...state, since}, "0", new Set());
       if (!result) return;
-      const revision = result.aggregate?.revision || state.status?.timeline_revision;
+      const revision = result.aggregate?.revision;
+      if (!state.demo && !revision)
+        throw new Error("Saved history snapshot revision is missing. Try again.");
       const events = inRange(mergeHistory(result.events), since);
       apply({...result, events}, "initial");
       accepted = {
-        scope: ticket.scope, since, revision, initialRevision: revision, lastSince: since, lastVersion: revision,
+        scope: ticket.scope, since, revision, initialRevision: revision, lastSince: since,
         cursors: new Set(result.next ? [result.next] : []),
       };
     });
@@ -131,8 +147,7 @@ export function createLiveHistory({ api, read, clear, apply, change, failure, re
     const ticket = start("older");
     await run(ticket, async () => {
       const revision = state.aggregate?.revision;
-      const encounters = state.lens === "previous-encounters" &&
-        state.groups?.some(group => group.key === state.lens && group.enabled);
+      const encounters = state.groups?.some(group => group.key === "previous-encounters" && group.enabled);
       const encounterRevision = !state.demo && encounters &&
         revision !== accepted.initialRevision ? revision : undefined;
       const result = await page(ticket, {...state, since: accepted.since}, state.next, accepted.cursors, {
@@ -166,15 +181,20 @@ export function createLiveHistory({ api, read, clear, apply, change, failure, re
       since && accepted.lastSince && Date.parse(since) >= Date.parse(accepted.lastSince) &&
       (empty || oldest && Date.parse(since) <= Date.parse(oldest))
     );
-    if (!catchup && !liveError && (version === accepted.lastVersion || version === accepted.revision) && stillInRange)
+    if (!catchup && !liveError && version === accepted.revision && stillInRange) {
+      if (accepted.revisionPending) {
+        accepted.revisionPending = false;
+        report();
+      }
       return;
+    }
     // A clock correction that widens a rolling range needs a new older snapshot.
     if (!catchup && since && accepted.lastSince &&
         Date.parse(since) < Date.parse(accepted.lastSince)) return load();
     const ticket = start("live");
     await run(ticket, async () => {
       const batch = catchup || {
-        before: "0", seen: new Set(), since, version, afterRevision: accepted.revision,
+        before: "0", seen: new Set(), since, afterRevision: accepted.revision,
       };
       const seen = new Set();
       let before = batch.before;
@@ -191,6 +211,8 @@ export function createLiveHistory({ api, read, clear, apply, change, failure, re
         if (result.next && batch.seen.has(result.next))
           throw new Error("Saved history pagination did not advance. Try again.");
         aggregate = result.aggregate || aggregate;
+        if (!aggregate?.revision)
+          throw new Error("Saved history snapshot revision is missing. Try again.");
         for (const event of result.events) {
           if (event.encounter_correction) {
             const {encounter_correction, ...record} = event;
@@ -232,8 +254,8 @@ export function createLiveHistory({ api, read, clear, apply, change, failure, re
       } else catchup = null;
       accepted.lastSince = batch.since;
       if (!before) {
-        accepted.revision = aggregate?.revision || batch.version;
-        accepted.lastVersion = batch.version;
+        accepted.revision = aggregate.revision;
+        accepted.revisionPending = revisionPending(current.status.timeline_revision, accepted.revision);
       }
       liveError = false;
       await refreshInteractions();
