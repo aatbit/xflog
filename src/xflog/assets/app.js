@@ -86,6 +86,10 @@
         scene.setZoom(1);
         return;
       }
+      overview = {
+        history: liveHistory.snapshot(), selected: state.selected, kind,
+        zoom: Number($("#scene-zoom").value), left: $("#history").scrollLeft,
+      };
       const events = state.events.filter(event => event.kind === kind).slice(0, HISTORY_PAGE_SIZE);
       const group = state.aggregate?.groups.find(group => group.key === kind);
       setActivityKind(kind);
@@ -168,6 +172,7 @@
   const historyStatus = $("#history-page-status");
   let historyPhase;
   let historyError;
+  let overview;
   const liveHistory = createLiveHistory({
     api: (path, signal) => api(path, undefined, signal),
     read: () => state,
@@ -371,6 +376,7 @@
     if (!$("#profile-view").hidden) profileControls.renderStatus(status);
     renderAudienceGroups(status.audience_groups || []);
     if (previous && historyScope(state) !== scope) {
+      overview = null;
       if (root.dataset.route === "timeline") void liveHistory.load();
       else {
         liveHistory.cancel();
@@ -409,12 +415,14 @@
     onRange: setTimeRange,
   });
   async function setTimeRange(range) {
+    if (range !== state.groupRange) overview = null;
     state.groupRange = range;
     groupControls.render(state.groups, state.lens, range);
     if (state.activityKind) setActivityKind(state.activityKind);
     await liveHistory.load(activityHud.refresh);
   }
   function setActivityKind(kind) {
+    if (!kind) overview = null;
     state.activityKind = kind;
     const label = state.groups.find(group => group.key === "activity")
       ?.buckets.find(bucket => bucket.key === kind)?.label;
@@ -423,10 +431,18 @@
     $("#activity-group-back").hidden = !kind;
   }
   $("#activity-group-back").addEventListener("click", () => {
+    const saved = overview;
     setActivityKind("");
-    void liveHistory.load();
-    scene.setZoom(0);
-    $("#history").focus({preventScroll:true});
+    scene.clear();
+    scene.setZoom(saved?.zoom ?? 0);
+    state.selected = saved?.selected ?? null;
+    if (!liveHistory.restore(saved?.history)) {
+      void liveHistory.load();
+      $("#history").focus({preventScroll:true});
+      return;
+    }
+    if (state.layout === "horizontal") scene.restoreOverview(saved.left, saved.kind);
+    else $("#history").focus({preventScroll:true});
   });
   function renderAudienceGroups(groups) {
     const signature = JSON.stringify(groups);

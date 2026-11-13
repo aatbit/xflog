@@ -3,6 +3,13 @@
 Each tagged release has an automatically generated list of merged pull requests
 and contributors on the [GitHub releases page](https://github.com/aatbit/xflog/releases).
 
+## 1.0.16 — 2026-11-13
+
+### Fixed
+
+- Return to the Activity overview instantly with its loaded pages, selection,
+  and scroll position intact.
+
 ## 1.0.15 — 2026-11-13
 
 ### Fixed
