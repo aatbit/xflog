@@ -123,8 +123,7 @@ export function prepareConstellation({
     1,
     Math.floor((height - upper - Math.max(80, upper + 1)) / rowHeight),
   );
-  const totals = aggregate?.groups;
-  const rawBuckets = groupEvents(events, modules, lens, {totals});
+  const rawBuckets = groupEvents(events, modules, lens, {totals: aggregate?.groups, summaries: true});
   const module = modules.find(module => module.key === lens && module.enabled);
   const groups = rawBuckets
     ? colorGroups(rawBuckets, module).map(({ events, ...bucket }) => ({
@@ -159,26 +158,28 @@ export function prepareConstellation({
       return {...person, group: group.key, tone: group.tone, color: group.color};
     }),
     groups: occupied,
+    overviewGroups: groups,
     grouped: rawBuckets !== null,
-    unloadedGroups: rawBuckets && totals ? totals.length - rawBuckets.filter(bucket => bucket.eventCount !== undefined).length : 0,
     upper,
   };
   const grouped = geometry.grouped;
   const count = geometry.people.length;
   return (zoom) => {
-    const columns = zoom <= 0.25 && grouped
-      ? Math.min(occupied.length, Math.max(availableColumns, Math.ceil(occupied.length / availableRows)))
-      : Math.min(occupied.length, availableColumns);
+    const overview = grouped && zoom <= 0.25;
+    const positioned = overview ? groups : occupied;
+    const columns = overview
+      ? Math.min(positioned.length, Math.max(availableColumns, Math.ceil(positioned.length / availableRows)))
+      : Math.min(positioned.length, availableColumns);
     const overviewWidth = grouped ? Math.max(width, columns * 160) : width;
-    const rows = zoom <= 0.25 ? Math.ceil(occupied.length / Math.max(1, columns)) : 1;
+    const rows = zoom <= 0.25 ? Math.ceil(positioned.length / Math.max(1, columns)) : 1;
     const lower = Math.max(
       upper + rows * rowHeight,
       height - Math.min(255, height * 0.36),
     );
     const areaHeight = lower - upper;
-    occupied.forEach((group, index) => {
+    positioned.forEach((group, index) => {
       const row = Math.floor(index / Math.max(1, columns));
-      const inRow = Math.min(columns, occupied.length - row * columns);
+      const inRow = Math.min(columns, positioned.length - row * columns);
       group.x = (zoom <= 0.25 ? overviewWidth : width) * (((index % columns) + 0.5) / inRow);
       group.y = zoom <= 0.25 ? upper + areaHeight * ((row + 0.5) / rows) : upper + areaHeight / 2;
     });
@@ -205,7 +206,7 @@ export function prepareConstellation({
     return Object.assign(geometry, {
       width: worldWidth,
       lower,
-      overview: grouped && zoom <= 0.25,
+      overview,
       canPan: worldWidth > width + 0.5,
       center: (upper + lower) / 2,
     });

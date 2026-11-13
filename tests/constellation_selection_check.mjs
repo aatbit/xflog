@@ -579,13 +579,15 @@ try {
     ],
   };
   scene.render(groupedRecords, "follow-A", aggregate);
-  expectCount("3 events · 2 people loaded · 17 events · 6 people saved");
+  expectCount("3 of 17 events loaded");
   scene.setZoom(0.25);
   assert.equal(nodes.length, 3, "Only fetched records have star geometry");
-  assert.equal(groupNodes.length, 2, "Groups without fetched records stay outside the interactive scene");
+  assert.equal(groupNodes.length, 3, "Overview includes every saved group");
   assert.match(groupMarkup, /12 actions · 5 people saved · 2 actions loaded/);
   assert.match(groupMarkup, /class="cluster-count">12</);
-  assert.match(controls.get("#constellation-key").innerHTML, /1 group with no events loaded/);
+  assert.match(groupMarkup, /data-group="unknown"[^>]*><span class="cluster-count">3<\/span><strong>Unknown<\/strong><small>0 loaded<\/small>/);
+  assert.equal(groupNodes.find(node => node.dataset.group === "unknown").handlers.click, undefined,
+    "A summary has no event to open");
   scene.setZoom(0.8);
   assert.match(controls.get("#constellation-key").innerHTML, /12 actions · 5 people saved · 2 actions loaded/);
   const beforeOldest = olderLoads;
