@@ -274,7 +274,21 @@ export function createLiveHistory({ api, read, clear, apply, change, failure, re
       await refreshInteractions();
     });
   }
-  return { load, older, refresh, cancel, needsLoad: () => {
+  function snapshot() {
+    const state = read();
+    if (accepted?.scope !== historyScope(state)) return null;
+    const {events, next, aggregate} = state;
+    return {events, next, aggregate, accepted, catchup, olderError, liveError};
+  }
+  function restore(saved) {
+    if (saved?.accepted.scope !== historyScope(read())) return false;
+    cancel();
+    ({accepted, catchup, olderError, liveError} = saved);
+    apply(saved, "initial");
+    report();
+    return true;
+  }
+  return { load, older, refresh, cancel, snapshot, restore, needsLoad: () => {
     const scope = historyScope(read());
     return accepted?.scope !== scope && active?.scope !== scope;
   }};

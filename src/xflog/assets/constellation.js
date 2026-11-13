@@ -544,6 +544,15 @@ export function createConstellation({
     scrubber();
     queue();
   }
+  function restoreOverview(left, kind) {
+    element.scrollLeft = left;
+    scrollPosition = element.scrollLeft;
+    scrubber();
+    if (kind) {
+      const card = groupButtons?.find(button => button.dataset.group === kind && button.matches("button"));
+      (card || element).focus({preventScroll: true});
+    }
+  }
   function ownsScene(version, node) {
     return version === sceneVersion && geometry && root.isConnected &&
       element.isConnected && element.contains(node);
@@ -859,7 +868,11 @@ export function createConstellation({
   const resize = new ResizeObserver((entries = []) => {
     if (geometry && element.clientWidth && element.clientHeight &&
         (element.clientWidth !== sceneWidth || element.clientHeight !== sceneHeight)) {
+      const overview = geometry.overview;
+      const left = element.scrollLeft;
+      const kind = groupButtons?.find(button => button === document.activeElement)?.dataset.group;
       render(events, selected);
+      if (overview) restoreOverview(left, kind);
     } else if (geometry && entries.some(entry => entry.target === context)) {
       labelInset = null;
       labelsDirty = true;
@@ -971,6 +984,7 @@ export function createConstellation({
       }
     },
     select,
+    restoreOverview,
     seek,
     scrub,
     setZoom,

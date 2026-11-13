@@ -1131,8 +1131,7 @@ def test_activity_card_loads_its_own_page_and_can_return_to_overview(paged_histo
     assert page.locator("#history .constellation-star[aria-pressed=true]").count() == 1
     assert page.locator("#scene-lens-label").inner_text() == "Unfollowed"
     page.locator("#activity-group-back").click()
-    receive_history_page(page, 2)
-    assert "activity_kind" not in page.evaluate("paged.requests().at(-1)")
+    assert page.evaluate("paged.requests().length") == 2
     assert card.is_visible()
 
 
@@ -1149,7 +1148,7 @@ def test_returning_to_overview_discards_inflight_activity_page(paged_history):
     card.click()
     page.wait_for_function("paged.requests().length === 2")
     page.locator("#activity-group-back").click()
-    receive_history_page(page, 2)
+    assert page.evaluate("paged.requests().length") == 2
     assert page.evaluate("paged.requests()[1].aborted")
     assert page.evaluate("""async () => {
       paged.send(1);
@@ -1158,6 +1157,56 @@ def test_returning_to_overview_discards_inflight_activity_page(paged_history):
         && document.querySelector('#activity-group-back').hidden;
     }""")
     assert card.is_visible()
+
+
+def test_all_groups_restores_loaded_pages_selection_zoom_and_cursor(paged_history):
+    page = paged_history
+    page.locator("#lens-trigger").click()
+    page.get_by_role("menuitemradio", name="Activity", exact=True).click()
+    receive_history_page(page, 0)
+    page.locator("#history-more").click()
+    receive_history_page(page, 1)
+    page.locator("#scene-zoom").evaluate(
+        "zoom => {zoom.value = '0.25'; zoom.dispatchEvent(new Event('input', {bubbles:true}));}"
+    )
+    selected = page.locator("#history [data-actor][aria-pressed=true]")
+    identity = selected.get_attribute("data-event")
+    card = page.get_by_role("button", name="Explore Unfollowed", exact=False)
+    card.click()
+    receive_history_page(page, 2)
+    page.locator("#activity-group-back").click()
+    assert page.evaluate("paged.requests().length") == 3
+    assert page.locator("#history [data-actor]").count() == 100
+    assert selected.get_attribute("data-event") == identity
+    assert page.locator("#scene-zoom").input_value() == "0.25"
+    assert card.evaluate("node => node === document.activeElement"), page.evaluate(
+        "document.activeElement.outerHTML.slice(0, 250)"
+    )
+    page.locator("#history-more").click()
+    receive_history_page(page, 3)
+    request = page.evaluate("paged.requests().at(-1)")
+    assert request["before"] == "page-100" and "activity_kind" not in request
+    assert page.locator("#history [data-actor]").count() == 114
+
+
+def test_all_groups_uses_new_range_if_range_changes_inside_group(paged_history):
+    page = paged_history
+    page.locator("#lens-trigger").click()
+    page.get_by_role("menuitemradio", name="Activity", exact=True).click()
+    receive_history_page(page, 0)
+    page.locator("#scene-zoom").evaluate(
+        "zoom => {zoom.value = '0'; zoom.dispatchEvent(new Event('input', {bubbles:true}));}"
+    )
+    page.get_by_role("button", name="Explore Unfollowed", exact=False).click()
+    receive_history_page(page, 1)
+    page.locator("#group-range-trigger").click()
+    page.get_by_role("menuitemradio", name="30d", exact=True).click()
+    receive_history_page(page, 2)
+    page.locator("#activity-group-back").click()
+    receive_history_page(page, 3)
+    request = page.evaluate("paged.requests().at(-1)")
+    assert request["since"] == page.evaluate("paged.requests()[2].since")
+    assert "activity_kind" not in request
 
 
 @pytest.mark.parametrize("paged_history", [True], indirect=True)
