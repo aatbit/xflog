@@ -141,10 +141,8 @@ export function createConstellation({
     const scope = geometry.overview ? "overview" : group;
     if (keyScope === scope) return;
     keyScope = scope;
-    const unloaded = geometry.unloadedGroups;
-    const overview = unloaded ? `Loaded constellations · ${unloaded} ${unloaded === 1 ? "group" : "groups"} with no events loaded` : "All constellations";
     key.innerHTML = geometry.grouped
-      ? geometry.overview ? `<span class="constellation-key-item">${overview}</span>`
+      ? geometry.overview ? '<span class="constellation-key-item">All constellations</span>'
         : groupKey(group ? [group] : [], esc)
       : "";
     key.setAttribute("aria-label", geometry.overview ? "Constellation groups" : "Current constellation");
@@ -579,12 +577,21 @@ export function createConstellation({
   }
   function prepareGroupButtons() {
     const renderedVersion = sceneVersion;
-    groupLayer.innerHTML = geometry.groups.map((group) => `<button type="button" class="constellation-group ${esc(group.tone)}" style="--group-color:${group.color};left:${group.x}px;top:${group.y}px" data-group="${esc(group.key)}" title="${esc(groupDescription(group))}" aria-label="Explore ${esc(group.label)}, ${esc(groupDescription(group))}"><span class="cluster-count">${group.eventCount ?? group.people.length}</span><strong title="${esc(group.label)}">${esc(group.label)}</strong></button>`).join("");
+    groupLayer.innerHTML = geometry.overviewGroups.map((group) => {
+      const loaded = group.people.length > 0;
+      const description = esc(groupDescription(group));
+      const attributes = `class="constellation-group ${esc(group.tone)}" style="--group-color:${group.color};left:${group.x}px;top:${group.y}px" data-group="${esc(group.key)}" title="${description}"`;
+      const count = `<span class="cluster-count">${group.eventCount ?? group.people.length}</span><strong>${esc(group.label)}</strong>`;
+      return loaded
+        ? `<button type="button" ${attributes} aria-label="Explore ${esc(group.label)}, ${description}">${count}</button>`
+        : `<div ${attributes}>${count}<small>0 loaded</small></div>`;
+    }).join("");
     groupButtons = [...groupLayer.querySelectorAll("[data-group]")];
     groupButtons.forEach((button, index) => {
+      const group = geometry.overviewGroups[index];
+      if (!group.people.length) return;
       button.addEventListener("click", () => {
         if (!ownsScene(renderedVersion, button) || !geometry.overview) return;
-        const group = geometry.groups[index];
         const identity = group.people[0].event.event_id;
         select(identity);
         setZoom(1);
@@ -680,7 +687,7 @@ export function createConstellation({
       groupHint();
     }
     if (geometry.overview) {
-      geometry.groups.forEach((group, index) => {
+      geometry.overviewGroups.forEach((group, index) => {
         groupButtons[index].style.left = `${group.x}px`;
         groupButtons[index].style.top = `${group.y}px`;
       });
@@ -929,7 +936,8 @@ export function createConstellation({
       scrollPosition = element.scrollLeft;
       scrubber();
       if (group || (geometry.overview && (star || label))) {
-        const button = geometry.overview && groupButtons.find(item => item.dataset.group === group?.dataset.group);
+        const button = geometry.overview && groupButtons.find(item =>
+          item.dataset.group === group?.dataset.group && item.matches("button"));
         (button || element).focus({preventScroll: true});
       } else if (star || label) {
         const replacement = selectionByEvent.get(star?.dataset.event ?? label.person.event.event_id);

@@ -3,6 +3,15 @@
 Each tagged release has an automatically generated list of merged pull requests
 and contributors on the [GitHub releases page](https://github.com/aatbit/xflog/releases).
 
+## 1.0.13 — 2026-11-13
+
+### Fixed
+
+- Show every group with saved activity in the Constellation overview, even
+  when the newest page has no events for that group.
+- Simplify the history counter to show how many events are loaded out of
+  the saved total for the selected range and filters.
+
 ## 1.0.12 — 2026-11-13
 
 ### Changed

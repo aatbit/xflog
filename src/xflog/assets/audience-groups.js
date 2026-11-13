@@ -3,9 +3,9 @@ export function historyCount(loadedEvents, loadedActors, aggregate) {
   const records = count => `${count} ${count === 1 ? "event" : "events"}`;
   const loaded = `${records(loadedEvents)} · ${people(loadedActors)}`;
   if (!aggregate) return `${loaded} loaded`;
-  const saved = `${records(aggregate.total_events)} · ${people(aggregate.distinct_actors)}`;
-  return loadedEvents === aggregate.total_events && loadedActors === aggregate.distinct_actors
-    ? `${saved} saved` : `${loaded} loaded · ${saved} saved`;
+  const saved = `${records(aggregate.total_events)} saved`;
+  return loadedEvents === aggregate.total_events
+    ? saved : `${loadedEvents} of ${records(aggregate.total_events)} loaded`;
 }
 
 export function groupEvents(events, modules, lens, {totals = [], summaries = false} = {}) {

@@ -472,8 +472,12 @@
   z-index: 5;
   transition: transform var(--quick) var(--ease);
 }
-.constellation-group:hover {
+button.constellation-group:hover {
   transform: translate(-50%, -50%) scale(1.04);
+}
+.constellation-group small {
+  margin-top: 3px;
+  font-size: 11px;
 }
 .cluster-count {
   display: grid;

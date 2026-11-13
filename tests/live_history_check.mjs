@@ -86,8 +86,9 @@ for (const update of [
   {status:{...scope.status, selection:{interactions:{replies:false}}}},
 ]) {
   const old = deferred();
+  const received = new Date().toISOString();
   const race = fixture(params => params.get("before") === "old-a" ? old.promise
-    : { ...initial, events: initial.events.map(row => ({...row, received_at: new Date().toISOString()})) });
+    : { ...initial, events: initial.events.map(row => ({...row, received_at: received})) });
   await race.feed.load();
   const request = race.feed.older();
   Object.assign(race.state, update);

@@ -1047,9 +1047,12 @@ def test_constellation_pages_preserve_selection_and_show_full_group_counts(paged
       zoom.value = '0'; zoom.dispatchEvent(new Event('input', {bubbles:true})); stepFrames();
     }""")
     assert page.locator("#history .constellation-group .cluster-count").all_text_contents() == [
-        "85"
+        "85",
+        "29",
     ]
-    assert "1 group with no events loaded" in page.locator("#constellation-key").text_content()
+    unloaded = page.locator('#history .constellation-group[data-group="follow.unfollow"]')
+    assert "0 loaded" in unloaded.inner_text()
+    assert unloaded.evaluate("node => node.tagName") == "DIV"
     assert page.locator("#history .constellation-star").count() == initial
     page.evaluate("document.querySelector('[data-layout=vertical]').click()")
     assert "85 events" in page.locator('#history [data-group="follow.follow"] summary').inner_text()
@@ -1084,6 +1087,14 @@ def test_constellation_pages_preserve_selection_and_show_full_group_counts(paged
         page.evaluate("paged.constellationEnd()")
         receive_history_page(page, count)
     assert page.locator("#history .constellation-star").count() == 114
+    page.evaluate("""() => {
+      const zoom = document.querySelector('#scene-zoom');
+      zoom.value = '0'; zoom.dispatchEvent(new Event('input', {bubbles:true})); stepFrames();
+    }""")
+    assert unloaded.evaluate("node => node.tagName") == "BUTTON"
+    assert unloaded.locator(".cluster-count").inner_text() == "29"
+    unloaded.click()
+    assert page.locator('#history [aria-pressed="true"][data-actor]').count() == 1
     assert "All matching activity loaded" in page.locator("#history-page-status").text_content()
     count = page.evaluate("paged.requests().length")
     page.evaluate("paged.constellationEnd()")
