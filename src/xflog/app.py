@@ -224,6 +224,7 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
         lens: str = "none",
         after_revision: str = "",
         selected: str = "",
+        encounter_revision: str = "",
     ):
         since = _history_scope(kind, subject, since, limit, lens)
         query = {
@@ -235,11 +236,15 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
             "lens": lens,
             "after_revision": after_revision,
             "selected": selected,
+            "encounter_revision": encounter_revision,
         }
         try:
             result = await timeline.current_history(query)
             if before in {"", "0"} and not local_only and result["events"]:
-                if await profile_names.ensure(result["events"]):
+                fresh = [
+                    event for event in result["events"] if not event.get("encounter_correction")
+                ]
+                if fresh and await profile_names.ensure(fresh):
                     result = await timeline.current_history(query)
         except InvalidTimelineRequest as error:
             raise HTTPException(422, str(error)) from None

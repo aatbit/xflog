@@ -1,8 +1,10 @@
 """Exercise timeline interactions and scene replacement against the real offline UI."""
 
 import importlib.util
+import json
 import os
 import socket
+import sqlite3
 import subprocess
 import sys
 import time
@@ -56,7 +58,7 @@ def offline_browser_app(tmp_path_factory):
                         raise RuntimeError("Temporary offline app failed to start") from None
                     time.sleep(0.05)
             browser = playwright.chromium.launch(headless=True)
-            yield browser, origin
+            yield browser, origin, directory / "history.sqlite3"
             browser.close()
         finally:
             process.terminate()
@@ -109,7 +111,7 @@ CONTROLLED_UI = r"""(() => {
 
 @pytest.fixture
 def offline_page(offline_browser_app):
-    browser, origin = offline_browser_app
+    browser, origin, _ = offline_browser_app
     page = browser.new_page(viewport={"width": 1280, "height": 900})
     errors, external = [], []
     page.on("pageerror", lambda error: errors.append(str(error)))
@@ -1461,6 +1463,18 @@ def test_journal_route_layout_and_empty_history_cancel_pending_work(journal_page
     assert 0 < page.locator("#history .event-button").count() < 35
 
 
+MANUAL_POLL = """(() => {
+  const nativeTimeout = window.setTimeout;
+  window.setTimeout = (callback, delay, ...args) => {
+    if (callback?.name === 'poll' && delay === 10000) {
+      window.runTimelinePoll = callback;
+      return 0;
+    }
+    return nativeTimeout(callback, delay, ...args);
+  };
+})()"""
+
+
 def test_journal_live_history_keeps_the_anchor_and_offscreen_focus(offline_page):
     page = offline_page
     records = journal_events(850)
@@ -1520,18 +1534,9 @@ def test_journal_live_history_keeps_the_anchor_and_offscreen_focus(offline_page)
 
     page.route("**/api/timeline?*", history)
     page.route("**/api/status", status)
-    page.add_init_script("""(() => {
-      const nativeTimeout = window.setTimeout;
-      window.setTimeout = (callback, delay, ...args) => {
-        if (callback?.name === 'poll' && delay === 10000) {
-          window.runJournalPoll = callback;
-          return 0;
-        }
-        return nativeTimeout(callback, delay, ...args);
-      };
-    })()""")
+    page.add_init_script(MANUAL_POLL)
     page.goto(urljoin(page.url, "/"), wait_until="networkidle")
-    assert page.evaluate("typeof window.runJournalPoll") == "function", page.locator(
+    assert page.evaluate("typeof window.runTimelinePoll") == "function", page.locator(
         "#notice"
     ).text_content()
     page.evaluate("window.enableFrames(); document.querySelector('[data-layout=vertical]').click()")
@@ -1551,7 +1556,7 @@ def test_journal_live_history_keeps_the_anchor_and_offscreen_focus(offline_page)
     assert [request.get("before", "0") for request in requests] == ["0"]
     revision = "1025:0::"
     result = page.evaluate("""async () => {
-      await runJournalPoll();
+      await runTimelinePoll();
       await journalTest.settle();
       const row = journalTest.visible()[0];
       return {identity: row?.dataset.event, offset: row?.getBoundingClientRect().top,
@@ -1580,10 +1585,136 @@ def test_journal_live_history_keeps_the_anchor_and_offscreen_focus(offline_page)
         pending_polls += 1
         assert pending_polls <= 3
         before = len(requests)
-        page.evaluate("runJournalPoll()")
+        page.evaluate("runTimelinePoll()")
         assert 0 < len(requests) - before <= 3
         assert all(request["before"].startswith("delta-") for request in requests[before:])
     assert "Catching up on new activity" not in page.locator("#history-page-status").text_content()
     assert page.evaluate("Number(document.querySelector('#memory-scrubber').max) + 1") == (
         int(older_page.removeprefix("older-")) * 2 + len(inserted)
     )
+
+
+INSERT_BROWSER_EVENT = """INSERT INTO events
+    (event_id,kind,account_id,actor_id,received_at) VALUES (?,?,?,?,?)"""
+
+
+@pytest.fixture
+def encounter_fixture(offline_browser_app):
+    _, _, database = offline_browser_app
+    account = "9001"
+    anchor = datetime.now(UTC).replace(microsecond=0) - timedelta(minutes=5)
+    events = [
+        (
+            f"gain-{index}",
+            "follow.follow",
+            account,
+            str(2000 + index),
+            (anchor - timedelta(minutes=index)).isoformat(),
+        )
+        for index in range(56)
+    ]
+    with sqlite3.connect(database) as db:
+        settings = dict(
+            db.execute("SELECT key,value FROM settings WHERE key IN ('account','audience_groups')")
+        )
+        db.executemany(
+            "INSERT OR REPLACE INTO settings (key,value) VALUES (?,?)",
+            [
+                ("account", json.dumps({"id": account})),
+                ("audience_groups", json.dumps({"previous-encounters": True})),
+            ],
+        )
+        db.executemany(INSERT_BROWSER_EVENT, events)
+        affected = dict(
+            db.execute(
+                "SELECT event_id,sequence FROM events WHERE account_id=? AND event_id IN ('gain-0','gain-55')",
+                (account,),
+            )
+        )
+    try:
+        yield database, events, affected
+    finally:
+        with sqlite3.connect(database) as db:
+            db.execute("DELETE FROM events WHERE account_id=?", (account,))
+            db.execute("DELETE FROM settings WHERE key IN ('account','audience_groups')")
+            db.executemany("INSERT INTO settings (key,value) VALUES (?,?)", settings.items())
+
+
+def test_real_live_encounters_reclassify_filtered_history_without_resetting_cursor(
+    encounter_fixture, offline_page
+):
+    page = offline_page
+    database, events, affected = encounter_fixture
+    page.add_init_script(MANUAL_POLL)
+    page.goto(urljoin(page.url, "/"), wait_until="networkidle")
+    page.evaluate("document.querySelector('[data-filter=gained]').click()")
+    page.wait_for_function(
+        "document.querySelector('#history').getAttribute('aria-busy') === 'false'"
+    )
+    page.locator("#lens-trigger").click()
+    with page.expect_response(lambda response: "lens=previous-encounters" in response.url) as first:
+        page.get_by_role("menuitemradio", name="Previous encounters", exact=True).click()
+    initial = first.value.json()
+    older = initial["next"]
+    assert len(initial["events"]) == 50 and older
+    assert initial["aggregate"]["groups"][0]["key"] == "first-appearance"
+    assert initial["aggregate"]["total_events"] == 56
+    page.wait_for_function(
+        "document.querySelector('#history').getAttribute('aria-busy') === 'false'"
+    )
+    selected = page.locator('#history [data-actor][aria-pressed="true"]')
+    selection = selected.get_attribute("data-event")
+    assert selection and selection not in {
+        f"timeline:event:{identity}" for identity in affected.values()
+    }
+
+    with sqlite3.connect(database) as db:
+        db.executemany(
+            INSERT_BROWSER_EVENT,
+            [
+                (
+                    f"unfollow-{index}",
+                    "follow.unfollow",
+                    events[index][2],
+                    events[index][3],
+                    (datetime.fromisoformat(events[index][4]) - timedelta(seconds=30)).isoformat(),
+                )
+                for index in (0, 55)
+            ],
+        )
+    with page.expect_response(lambda response: "after_revision=" in response.url) as live:
+        page.evaluate("runTimelinePoll()")
+    delta = live.value.json()
+    assert delta["aggregate"]["total_events"] == 56
+    assert {group["key"]: group["event_count"] for group in delta["aggregate"]["groups"]} == {
+        "first-appearance": 54,
+        "followed-again": 2,
+    }
+    assert page.locator("#history .constellation-star").count() == 50
+    assert selected.get_attribute("data-event") == selection
+    page.evaluate("""() => {
+      const zoom = document.querySelector('#scene-zoom');
+      zoom.value = '0';
+      zoom.dispatchEvent(new Event('input', {bubbles: true}));
+    }""")
+    followed_again = page.locator('#history [data-group="followed-again"]')
+    assert followed_again.locator(".cluster-count").inner_text() == "2"
+    assert "1 action loaded" in followed_again.get_attribute("title")
+    older_event = page.locator(f'#history [data-event="timeline:event:{affected["gain-55"]}"]')
+    assert older_event.count() == 0
+
+    with page.expect_response(lambda response: "/api/timeline?" in response.url) as next_page:
+        page.locator("#history-more").press("Enter")
+    continuation = next_page.value
+    assert continuation.ok
+    query = parse_qs(urlsplit(continuation.url).query)
+    assert query["before"] == [older]
+    assert query["local_only"] == ["true"]
+    assert query["encounter_revision"] == [delta["aggregate"]["revision"]]
+    page.wait_for_function(
+        "document.querySelectorAll('#history .constellation-star').length === 56"
+    )
+    assert selected.get_attribute("data-event") == selection
+    assert "loaded" not in followed_again.get_attribute("title")
+    assert older_event.count() == 1
+    assert page.locator("#history-more").is_hidden()

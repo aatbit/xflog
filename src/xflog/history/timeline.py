@@ -8,6 +8,7 @@ import aiosqlite
 
 from .. import audience_groups
 from ..audience_groups.previous_encounters import KEY as ENCOUNTERS_KEY
+from ..audience_groups.previous_encounters import encounter_bucket
 from ..interactions import choices
 from ..tracking.events import Event
 from .timeline_aggregate import aggregate_records, empty_aggregate, encounter_from_row
@@ -20,7 +21,14 @@ from .timeline_cursor import (
     scope_key,
     selected_position,
 )
-from .timeline_queries import ENCOUNTERS, REVISION_SQL, TimelineQuery, page_sql
+from .timeline_queries import (
+    ENCOUNTER_BOUNDARY_SQL,
+    REVISION_SQL,
+    TimelineQuery,
+    encounter_columns,
+    encounter_corrections,
+    page_sql,
+)
 
 _CURRENT_ACCOUNT = object()
 
@@ -28,6 +36,16 @@ _CURRENT_ACCOUNT = object()
 async def _revision(db, account):
     async with db.execute(REVISION_SQL, {"account": account}) as cursor:
         return tuple(await cursor.fetchone())
+
+
+async def _prior_backfill_boundary(db, query, after):
+    params = dict(zip(("old_event_max", "old_interaction_max"), after, strict=True))
+    params.update(
+        account=query.account, event_max=query.watermarks[0], interaction_max=query.watermarks[1]
+    )
+    async with db.execute(ENCOUNTER_BOUNDARY_SQL, params) as cursor:
+        row = await cursor.fetchone()
+        return row[0] if row else None
 
 
 def _sequence(row):
@@ -51,6 +69,11 @@ def _event(row):
             json.loads(row["group_data"]),
         ).public(),
         "sequence": sequence,
+        **(
+            {"encounter_correction": True}
+            if "encounter_correction" in row.keys() and row["encounter_correction"]
+            else {}
+        ),
         **({"post_id": row["post_id"], "post_text": row["post_text"]} if sequence < 0 else {}),
     }
 
@@ -87,6 +110,13 @@ class Timeline:
             revision_watermarks(query["after_revision"]) if query.get("after_revision") else None
         )
         selected = selected_position(query["selected"]) if query.get("selected") else None
+        context = (
+            revision_watermarks(query["encounter_revision"])
+            if query.get("encounter_revision")
+            else None
+        )
+        if context and (not before or after):
+            raise InvalidTimelineRequest("Encounter revision applies to an older history page.")
         if before and selected:
             raise InvalidTimelineRequest("Select a timeline event on the first page.")
         subject, kind = query.get("subject", "followers"), query.get("kind", "all")
@@ -103,6 +133,11 @@ class Timeline:
                 account = (settings.get("account") or {}).get("id")
             groups = audience_groups.preferences(settings.get("audience_groups"))
             module = audience_groups.MODULES.get(lens) if groups.get(lens) else None
+            active_encounters = bool(module and lens == ENCOUNTERS_KEY)
+            if context and not active_encounters:
+                raise InvalidTimelineRequest(
+                    "Encounter revision requires the Previous encounters group."
+                )
             enabled = choices(settings.get("selection", {}))
             interactions = (
                 tuple(key for key, on in enabled.items() if on)
@@ -127,8 +162,27 @@ class Timeline:
                 raise InvalidTimelineRequest(
                     "Timeline revision belongs to an unavailable snapshot."
                 )
+            if context and context != watermarks:
+                latest = (await _revision(db, account))[:2]
+                if any(
+                    not lower <= mark <= upper
+                    for lower, mark, upper in zip(watermarks, context, latest, strict=True)
+                ):
+                    raise InvalidTimelineRequest(
+                        "Encounter revision belongs to an unavailable snapshot."
+                    )
             scope_query = TimelineQuery(account, subject, kind, since, interactions, watermarks)
-            result = await self._page(db, scope_query, groups, before, after, selected, limit)
+            result = await self._page(
+                db,
+                scope_query,
+                groups,
+                before,
+                after,
+                selected,
+                limit,
+                context or watermarks,
+                active_encounters,
+            )
             if result["next"] is not None:
                 result["next"] = Cursor(result["next"], watermarks, cursor_scope).encode()
             if not before:
@@ -140,13 +194,30 @@ class Timeline:
                 }
             return result
 
-    async def _page(self, db, query, groups, before, after, selected, limit):
+    async def _page(
+        self, db, query, groups, before, after, selected, limit, context, active_encounters
+    ):
         needs_context = groups[ENCOUNTERS_KEY]
-        sql, params = query.records(
-            before=before.key if before else None, after=after, page_size=limit + 1
+        boundary_key = before.key if before else None
+        sql, params = query.records(before=boundary_key, after=after, page_size=limit + 1)
+        correction_sql = ""
+        if active_encounters and after and after != query.watermarks:
+            prior_receipt = await _prior_backfill_boundary(db, query, after)
+            if prior_receipt is not None:
+                await db.create_function(
+                    "encounter_bucket", 3, encounter_bucket, deterministic=True
+                )
+                correction_sql, correction_params = encounter_corrections(
+                    query, boundary_key, after, limit + 1
+                )
+                params.update(correction_params, prior_receipt=prior_receipt)
+                sql = f"SELECT fresh.*,0 AS encounter_correction FROM ({sql}) fresh UNION ALL SELECT corrections.*,1 FROM corrections"
+        context_params = dict(
+            zip(("context_event_max", "context_interaction_max"), context, strict=True)
         )
         async with db.execute(
-            page_sql(sql, encounters=needs_context), {**params, "limit": limit + 1}
+            page_sql(sql, encounters=needs_context, correction_sql=correction_sql),
+            {**params, **context_params},
         ) as cursor:
             rows = await cursor.fetchall()
         boundary = None
@@ -159,17 +230,21 @@ class Timeline:
             sql, params = query.records(selected=selected, page_size=1)
             if sql:
                 async with db.execute(
-                    page_sql(sql, encounters=needs_context), {**params, "limit": 1}
+                    page_sql(sql, encounters=needs_context), {**params, **context_params}
                 ) as cursor:
                     selected_rows = await cursor.fetchall()
         events = await _decorate(rows + selected_rows, groups)
         result = {"events": events[: len(rows)], "next": boundary}
         if selected:
             sequence = selected[1] if selected[0] else -selected[1]
-            result["selected_event"] = next(
+            selected_event = next(
                 (event for event in events if event["sequence"] == sequence),
                 None,
             )
+            if selected_event and selected_event.get("encounter_correction"):
+                selected_event = dict(selected_event)
+                del selected_event["encounter_correction"]
+            result["selected_event"] = selected_event
         return result
 
     async def encounter_context(self, events: list[dict]) -> dict:
@@ -192,6 +267,6 @@ class Timeline:
         slots = ",".join(f"(:p{i},:s{i},:a{i},:r{i})" for i in range(len(events)))
         # The legacy helper has no paging snapshot. It describes the current account history.
         sql = f"""WITH wanted(position,source,actor_id,received_at) AS (VALUES {slots})
-        SELECT r.position,r.source,{ENCOUNTERS} FROM wanted r"""
+        SELECT r.position,r.source,{encounter_columns()} FROM wanted r"""
         async with self.store.db.execute(sql, params) as cursor:
             return {_sequence(row): encounter_from_row(row) async for row in cursor}

@@ -12,28 +12,107 @@ REVISION_SQL = """SELECT
  (SELECT COALESCE(MAX(observed_at),'') FROM known_profiles WHERE account_id=:account),
  (SELECT COALESCE(MAX(checked_at),'') FROM thread_snapshots WHERE account_id=:account)"""
 
+_PRIOR_RECEIPT_SQL = """SELECT MAX(received_at) AS receipt FROM (
+ SELECT * FROM (SELECT received_at FROM events INDEXED BY event_timeline_receipt
+   WHERE account_id=:account AND sequence<=:old_event_max ORDER BY received_at DESC LIMIT 1)
+ UNION ALL SELECT * FROM (SELECT received_at FROM interactions INDEXED BY interaction_receipt
+   WHERE account_id=:account AND sequence<=:old_interaction_max ORDER BY received_at DESC LIMIT 1)
+)"""
+
+_ENCOUNTER_ARRIVALS = """SELECT actor_id,received_at,1 AS source,kind
+    FROM events INDEXED BY event_account_sequence
+    WHERE account_id=:account AND sequence>:old_event_max AND sequence<=:event_max
+      AND received_at<:prior_receipt
+ UNION ALL SELECT person_id,received_at,0,NULL FROM interactions INDEXED BY interaction_account_sequence
+    WHERE account_id=:account AND sequence>:old_interaction_max AND sequence<=:interaction_max
+      AND received_at<=:prior_receipt"""
+ENCOUNTER_BOUNDARY_SQL = f"""WITH previous AS ({_PRIOR_RECEIPT_SQL})
+ SELECT receipt FROM previous
+ WHERE receipt IS NOT NULL AND EXISTS ({_ENCOUNTER_ARRIVALS.replace(":prior_receipt", "receipt")})"""
+
 # Separate equal-receipt and earlier-receipt seeks to avoid rescanning large timestamp ties.
 _PRIOR_EVENT = """FROM events prior
- WHERE prior.account_id=:account AND prior.actor_id=r.actor_id AND prior.sequence<=:event_max"""
+ WHERE prior.account_id=:account AND prior.actor_id=r.actor_id
+ AND prior.sequence<=:{context}event_max"""
 _PRIOR_INTERACTION = """FROM interactions prior
- WHERE prior.account_id=:account AND prior.person_id=r.actor_id AND prior.sequence<=:interaction_max"""
+ WHERE prior.account_id=:account AND prior.person_id=r.actor_id
+ AND prior.sequence<=:{context}interaction_max"""
 _EARLIER = " AND prior.received_at<r.received_at"
 _TIED_EVENT = " AND r.source=1 AND prior.received_at=r.received_at AND prior.sequence<r.position"
 _TIED_INTERACTION = """ AND prior.received_at=r.received_at
- AND prior.sequence<=CASE WHEN r.source=0 THEN r.position-1 ELSE :interaction_max END"""
-_FOLLOW = " AND prior.kind IN ('follow.follow','follow.unfollow')"
-ENCOUNTERS = f"""(CASE
+ AND prior.sequence<=CASE WHEN r.source=0 THEN r.position-1 ELSE :{context}interaction_max END"""
+_FOLLOW_KINDS = "('follow.follow','follow.unfollow')"
+_SEEN_BEFORE = f"""CASE
  WHEN EXISTS (SELECT 1 {_PRIOR_INTERACTION}{_TIED_INTERACTION}) THEN 1
  WHEN EXISTS (SELECT 1 {_PRIOR_EVENT}{_TIED_EVENT}) THEN 1
  WHEN EXISTS (SELECT 1 {_PRIOR_EVENT}{_EARLIER}) THEN 1
- ELSE EXISTS (SELECT 1 {_PRIOR_INTERACTION}{_EARLIER}) END) AS seen_before,
- COALESCE((SELECT prior.kind {_PRIOR_EVENT}{_TIED_EVENT}{_FOLLOW} ORDER BY prior.sequence DESC LIMIT 1),
- (SELECT prior.kind {_PRIOR_EVENT}{_EARLIER}{_FOLLOW}
-  ORDER BY prior.received_at DESC,prior.sequence DESC LIMIT 1)) AS previous_follow_kind"""
+ ELSE EXISTS (SELECT 1 {_PRIOR_INTERACTION}{_EARLIER}) END"""
+_PREVIOUS_FOLLOW = f"""COALESCE(
+ (SELECT prior.kind {_PRIOR_EVENT}{_TIED_EVENT} AND prior.kind IN {_FOLLOW_KINDS}
+  ORDER BY prior.sequence DESC LIMIT 1),
+ (SELECT prior.kind {_PRIOR_EVENT}{_EARLIER} AND prior.kind IN {_FOLLOW_KINDS}
+  ORDER BY prior.received_at DESC,prior.sequence DESC LIMIT 1))"""
+
+
+def encounter_columns(context=""):
+    return (
+        f"({_SEEN_BEFORE.format(context=context)}) AS seen_before,"
+        f"({_PREVIOUS_FOLLOW.format(context=context)}) AS previous_follow_kind"
+    )
+
 
 SNAPSHOT = "COALESCE(e.group_data,json_extract(i.profile_data,'$.group_data'),'{}') AS group_data"
 RECORD_JOIN = """LEFT JOIN events e ON r.source=1 AND e.sequence=r.position
  LEFT JOIN interactions i ON r.source=0 AND i.sequence=r.position"""
+
+
+def _successor(table, actor, source, *, follow=False):
+    bound = "event" if source else "interaction"
+    index = "event_actor_receipt" if source else "interaction_actor_receipt"
+    # At a receipt tie, every older snapshot sequence is below a new row's sequence in that source.
+    later = "received_at>n.received_at"
+    if source:
+        later = "received_at>=n.received_at AND (received_at>n.received_at OR n.source=0)"
+    follow_only = f" AND n.kind IN {_FOLLOW_KINDS} AND kind IN {_FOLLOW_KINDS}" if follow else ""
+    return f"""SELECT (SELECT sequence FROM {table} INDEXED BY {index}
+        WHERE account_id=:account AND {actor}=n.actor_id
+        AND sequence<=:old_{bound}_max AND {later}{follow_only}
+        ORDER BY received_at,sequence LIMIT 1) AS position,{source} AS source FROM arrivals n"""
+
+
+def encounter_corrections(query, before, after, page_size):
+    scoped, params = query.records(before=before, page_size=page_size, candidates="changed")
+    params.update(zip(("old_event_max", "old_interaction_max"), after, strict=True))
+    successors = " UNION ".join(
+        (
+            _successor("events", "actor_id", 1),
+            _successor("interactions", "person_id", 0),
+            _successor("events", "actor_id", 1, follow=True),
+        )
+    )
+    # Only the first old encounter and the first old follow action after an arrival can change.
+    # Check both source successors, then compare actual classifications to discard unaffected rows.
+    return (
+        f"""arrivals AS MATERIALIZED ({_ENCOUNTER_ARRIVALS}),
+    candidates AS MATERIALIZED ({successors}),
+    old_context AS MATERIALIZED (
+      SELECT r.*,{encounter_columns("old_")} FROM (
+        SELECT e.sequence AS position,1 AS source,e.kind,e.actor_id,e.received_at
+          FROM candidates c JOIN events e ON c.source=1 AND e.sequence=c.position
+        UNION ALL SELECT i.sequence,0,'interaction.'||i.kind,i.person_id,i.received_at
+          FROM candidates c JOIN interactions i ON c.source=0 AND i.sequence=c.position
+      ) r
+    ), new_context AS MATERIALIZED (
+      SELECT r.position,r.source,r.kind,
+        encounter_bucket(r.kind,r.seen_before,r.previous_follow_kind) AS old_bucket,
+        {encounter_columns()}
+      FROM old_context r
+    ), changed AS (
+      SELECT position,source FROM new_context
+      WHERE encounter_bucket(kind,seen_before,previous_follow_kind)<>old_bucket
+    ), corrections AS ({scoped}),""",
+        params,
+    )
 
 
 def _slots(params, prefix, values):
@@ -52,7 +131,14 @@ class TimelineQuery:
     watermarks: tuple[int, int]
 
     def records(
-        self, *, before=None, after=None, selected=None, page_size=None, encounters=False
+        self,
+        *,
+        before=None,
+        after=None,
+        selected=None,
+        page_size=None,
+        encounters=False,
+        candidates=None,
     ) -> tuple[str, dict]:
         event_max, interaction_max = self.watermarks
         params = {
@@ -95,7 +181,7 @@ class TimelineQuery:
             slots = event_slots if source else interaction_slots
             kind = "kind" if source else "'interaction.'||kind"
             index = ""
-            if page_size and not selected:
+            if page_size and not selected and not candidates:
                 index = f" INDEXED BY {sequence_index if after is not None else receipt_index}"
             matches = f"kind IN ({slots})"
             if self.since:
@@ -104,6 +190,10 @@ class TimelineQuery:
             branch = f"""SELECT sequence AS position,{source} AS source,{kind} AS kind,
                 {actor} AS actor_id,received_at{projection} FROM {table}{index}
                 WHERE account_id=:account AND sequence<=:{upper}"""
+            if candidates:
+                branch += (
+                    f" AND sequence IN (SELECT position FROM {candidates} WHERE source={source})"
+                )
             if not encounters:
                 branch += f" AND {matches}"
             if before:
@@ -144,9 +234,9 @@ def _limited(branch, *, tied=False):
     return f"SELECT * FROM ({branch} ORDER BY {order} LIMIT :limit)"
 
 
-def page_sql(records, *, encounters):
-    context = f",{ENCOUNTERS}" if encounters else ""
-    return f"""WITH page AS MATERIALIZED (
+def page_sql(records, *, encounters, correction_sql=""):
+    context = f",{encounter_columns('context_')}" if encounters else ""
+    return f"""WITH {correction_sql} page AS MATERIALIZED (
         {records} ORDER BY received_at DESC,source DESC,position DESC LIMIT :limit
     ) SELECT r.*,:account AS account_id,
         COALESCE(NULLIF(p.handle,''),e.handle,json_extract(i.profile_data,'$.handle'),

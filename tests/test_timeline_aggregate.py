@@ -180,21 +180,115 @@ async def test_snapshot_survives_backdated_and_tied_inserts_and_delta_fetches_th
         "limit": 2,
     }
     delta = await page(browser, **query, selected=old_events[-1]["event_id"])
-    last = await page(browser, **query, before=delta["next"])
-    merged = delta["events"] + last["events"]
-    assert last["next"] is None
-    assert {event["event_id"] for event in merged}.isdisjoint(
+    result, merged = delta, []
+    while True:
+        merged += result["events"]
+        if not result["next"]:
+            break
+        result = await page(browser, **query, before=result["next"])
+    new_rows = [event for event in merged if not event.get("encounter_correction")]
+    corrected = [event for event in merged if event.get("encounter_correction")]
+    assert {event["event_id"] for event in new_rows}.isdisjoint(
         event["event_id"] for event in old_events
     )
-    assert [event["kind"] for event in merged] == [
+    assert [event["kind"] for event in new_rows] == [
         "follow.follow",
         "interaction.replies",
         "follow.follow",
     ]
+    assert [event["event_id"] for event in corrected] == [old_events[-1]["event_id"]]
     assert delta["aggregate"]["scope"] == old["aggregate"]["scope"]
     assert delta["aggregate"]["total_events"] == len(old_events) + 3
     assert delta["selected_event"]["event_id"] == old_events[-1]["event_id"]
+    assert "encounter_correction" not in delta["selected_event"]
     assert delta["selected_event"]["audience_groups"]["previous-encounters"] == "seen-before"
+
+
+async def test_backdated_filtered_activity_reclassifies_old_pages_without_adding_rows(
+    instance, monkeypatch
+):
+    app, browser, _ = instance
+    store = app.state.store
+    await store.db.execute("DELETE FROM events")
+    await store.db.commit()
+    await store.save_setting("selection", {"profile_names": True})
+    await store.save_setting("audience_groups", {"previous-encounters": True})
+    await store.insert(record("earlier-follow", actor="333", received="2026-11-01T10:00:00+00:00"))
+    await store.insert(record("return", actor="333", received="2026-11-06T10:00:00+00:00"))
+    await store.insert(record("unrelated", actor="444", received="2026-11-07T10:00:00+00:00"))
+    scope = {"lens": "previous-encounters", "kind": "gained", "limit": 1, "since": STAMP}
+    first = await page(browser, **scope)
+    await store.insert(
+        record("backdated-unfollow", "follow.unfollow", "333", received="2026-11-04T10:00:00+00:00")
+    )
+
+    lookup = AsyncMock(return_value=[])
+    monkeypatch.setattr(app.state.client, "lookup_users", lookup)
+    response = await browser.get(
+        "/api/timeline", params={**scope, "after_revision": first["aggregate"]["revision"]}
+    )
+    assert response.status_code == 200, response.text
+    delta = response.json()
+    assert delta["next"] is None
+    (corrected,) = delta["events"]
+    assert corrected["encounter_correction"] is True
+    assert corrected["actor_id"] == "333"
+    assert corrected["audience_groups"]["previous-encounters"] == "followed-again"
+    assert delta["aggregate"]["total_events"] == first["aggregate"]["total_events"]
+    lookup.assert_not_awaited()
+
+    original = await page(browser, **scope, before=first["next"])
+    rebound = await page(
+        browser, **scope, before=first["next"], encounter_revision=delta["aggregate"]["revision"]
+    )
+    assert [event["event_id"] for event in original["events"]] == [corrected["event_id"]]
+    assert rebound["events"][0]["event_id"] == corrected["event_id"]
+    assert original["events"][0]["audience_groups"]["previous-encounters"] == "seen-before"
+    assert rebound["events"][0]["audience_groups"]["previous-encounters"] == "followed-again"
+    assert "encounter_correction" not in rebound["events"][0]
+    assert original["next"] == rebound["next"] is None
+    for invalid in ("0:0", "900000:0"):
+        response = await browser.get(
+            "/api/timeline",
+            params={**scope, "before": first["next"], "encounter_revision": invalid},
+        )
+        assert response.status_code == 422
+
+
+async def test_encounter_delta_keyset_is_bounded_across_interleaved_corrections(instance):
+    app, browser, _ = instance
+    store = app.state.store
+    await store.save_setting("audience_groups", {"previous-encounters": True})
+    for index in range(57):
+        await store.insert(record(f"follow-{index}", actor=str(1000 + index)))
+    scope = {"lens": "previous-encounters", "kind": "gained", "limit": 50, "since": STAMP}
+    initial = await page(browser, **scope)
+    for index in range(57):
+        await store.insert(
+            record(
+                f"old-unfollow-{index}",
+                "follow.unfollow",
+                str(1000 + index),
+                "2026-11-04T10:00:00+00:00",
+            )
+        )
+    await store.insert(record("newest", actor="777", received="2026-11-07T10:00:00+00:00"))
+    params = {**scope, "after_revision": initial["aggregate"]["revision"]}
+    first = await page(browser, **params)
+    await store.insert(
+        record("arrived-mid-delta", actor="778", received="2026-11-06T10:00:00+00:00")
+    )
+    second = await page(browser, **params, before=first["next"])
+    events = first["events"] + second["events"]
+    assert [len(first["events"]), len(second["events"])] == [50, 8]
+    assert second["next"] is None
+    assert len({event["event_id"] for event in events}) == 58
+    assert [event["actor_id"] for event in events if not event.get("encounter_correction")] == [
+        "777"
+    ]
+    assert all(
+        event["audience_groups"]["previous-encounters"] == "followed-again" for event in events[1:]
+    )
 
 
 async def test_previous_follow_uses_receipt_order_before_sequence(instance):

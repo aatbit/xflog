@@ -169,6 +169,46 @@ liveHold.resolve({events:[event(11)],next:null});
 await pending;
 assert.deepEqual(ids(priority.state.events), [10,9,8]);
 
+const withEncounter = (id, bucket) => ({
+  ...event(id), audience_groups: {"previous-encounters": bucket},
+});
+const corrected = id => ({...withEncounter(id, "seen-before"), encounter_correction: true});
+const encounter = fixture(params => {
+  const before = params.get("before");
+  if (!params.has("after_revision")) {
+    if (before === "0") return {...initial, events: [withEncounter(10, "first-appearance"), event(9)]};
+    assert.equal(params.get("encounter_revision"), "0:13::");
+    return before === "old-a"
+      ? {events:[withEncounter(8, "seen-before")], next:"old-b"}
+      : {events:[withEncounter(7, "seen-before")], next:null};
+  }
+  return ({
+    "0": {events:[event(13)], next:"delta-1", aggregate:aggregate("0:13::", 8, event(6).received_at)},
+    "delta-1": {events:[event(12)], next:"delta-2"},
+    "delta-2": {events:[event(11)], next:"delta-3"},
+    "delta-3": {events:[corrected(10), corrected(8), corrected(7)], next:null},
+  })[before];
+});
+encounter.state.lens = "previous-encounters";
+encounter.state.groups = [{key: "previous-encounters", enabled: true}];
+await encounter.feed.load();
+encounter.state.selected = event(9).event_id;
+encounter.revision("0:13::");
+await encounter.feed.refresh();
+assert.equal(encounter.status.catchingUp, true);
+await encounter.feed.older();
+await encounter.feed.refresh();
+const bucket = (id) => encounter.state.events.find(row => row.event_id === event(id).event_id)
+  ?.audience_groups?.["previous-encounters"];
+assert.equal(bucket(10), "seen-before", "Live correction updates a loaded, unselected event");
+assert.equal(bucket(8), "seen-before", "A page accepted between live batches uses the current context");
+assert.equal(bucket(7), undefined, "A correction cannot load an unvisited row");
+assert.equal(encounter.state.next, "old-b", "Live corrections do not take over the older cursor");
+assert.equal(encounter.state.selected, event(9).event_id);
+assert.equal(encounter.state.events.some(row => row.encounter_correction), false);
+await encounter.feed.older();
+assert.equal(bucket(7), "seen-before");
+
 const range = fixture(params => params.has("after_revision")
   ? {events:[],next:null,aggregate:aggregate("0:10::",0,null)}
   : {events:[event(10)],next:"expired-cursor",aggregate:aggregate("0:10::",2,event(9).received_at)});

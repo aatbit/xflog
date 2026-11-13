@@ -20,6 +20,7 @@ export function historyPath(state, before = "0", options = {}) {
   if (state.since) params.set("since", state.since);
   if (options.afterRevision) params.set("after_revision", options.afterRevision);
   if (options.selected && before === "0") params.set("selected", options.selected);
+  if (options.encounterRevision) params.set("encounter_revision", options.encounterRevision);
   return `/api/${state.demo ? "demo" : "timeline"}?${params}`;
 }
 
@@ -118,7 +119,7 @@ export function createLiveHistory({ api, read, clear, apply, change, failure, re
       const events = inRange(mergeHistory(result.events), since);
       apply({...result, events}, "initial");
       accepted = {
-        scope: ticket.scope, since, revision, lastSince: since, lastVersion: revision,
+        scope: ticket.scope, since, revision, initialRevision: revision, lastSince: since, lastVersion: revision,
         cursors: new Set(result.next ? [result.next] : []),
       };
     });
@@ -129,7 +130,14 @@ export function createLiveHistory({ api, read, clear, apply, change, failure, re
         active?.phase === "initial" || active?.phase === "older" || (olderError && !retry)) return;
     const ticket = start("older");
     await run(ticket, async () => {
-      const result = await page(ticket, {...state, since: accepted.since}, state.next, accepted.cursors);
+      const revision = state.aggregate?.revision;
+      const encounters = state.lens === "previous-encounters" &&
+        state.groups?.some(group => group.key === state.lens && group.enabled);
+      const encounterRevision = !state.demo && encounters &&
+        revision !== accepted.initialRevision ? revision : undefined;
+      const result = await page(ticket, {...state, since: accepted.since}, state.next, accepted.cursors, {
+        encounterRevision,
+      });
       if (!result) return;
       const current = read();
       const rows = inRange(result.events, accepted.lastSince);
@@ -172,6 +180,8 @@ export function createLiveHistory({ api, read, clear, apply, change, failure, re
       let before = batch.before;
       let aggregate = batch.aggregate;
       const incoming = [];
+      const corrections = new Map();
+      let selectedRecord;
       const rows = {...state, since: batch.since};
       for (let count = 0; before && count < catchupPages; count++) {
         const result = await page(ticket, rows, before, seen, {
@@ -181,24 +191,35 @@ export function createLiveHistory({ api, read, clear, apply, change, failure, re
         if (result.next && batch.seen.has(result.next))
           throw new Error("Saved history pagination did not advance. Try again.");
         aggregate = result.aggregate || aggregate;
-        incoming.push(...result.events);
-        if (result.selected_event) incoming.push(result.selected_event);
+        for (const event of result.events) {
+          if (event.encounter_correction) {
+            const {encounter_correction, ...record} = event;
+            corrections.set(record.event_id, record);
+          } else incoming.push(event);
+        }
+        if (result.selected_event) {
+          selectedRecord = result.selected_event;
+          corrections.set(selectedRecord.event_id, selectedRecord);
+        }
         before = result.next;
         if (before) seen.add(before);
       }
       // A profile-only revision can change cached names on loaded rows without a new event.
       let profileRows = [];
-      if (batch.before === "0" && !before &&
-          !incoming.some(event => event.event_id !== state.selected) &&
+      if (batch.before === "0" && !before && !incoming.length &&
           aggregate?.profile_revision !== state.aggregate?.profile_revision) {
         const result = await page(ticket, rows, "0", new Set(), {localOnly: true});
         if (!result) return;
         profileRows = result.events;
       }
       const current = read();
+      // Corrections update loaded rows. They never expand the loaded window.
+      const prior = corrections.size
+        ? current.events.map(event => corrections.get(event.event_id) ?? event)
+        : current.events;
       const events = syncProfiles(
-        inRange(mergeHistory([...incoming, ...current.events]), batch.since),
-        [...profileRows, ...incoming],
+        inRange(mergeHistory([...incoming, ...prior]), batch.since),
+        [...profileRows, ...incoming, ...(selectedRecord ? [selectedRecord] : [])],
       );
       const metadata = aggregate || current.aggregate;
       const next = metadata?.total_events === events.length ? null : current.next;

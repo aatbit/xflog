@@ -7,12 +7,15 @@ def assign(event: dict) -> str:
     context = event.get("group_data", {}).get(KEY, {})
     if not isinstance(context, dict) or type(context.get("seen_before")) is not bool:
         return "unknown"
-    if not context["seen_before"]:
+    return encounter_bucket(
+        event.get("kind"), context["seen_before"], context.get("previous_follow_kind")
+    )
+
+
+def encounter_bucket(kind, seen_before, previous_follow_kind) -> str:
+    if not seen_before:
         return "first-appearance"
-    if (
-        event.get("kind") == "follow.follow"
-        and context.get("previous_follow_kind") == "follow.unfollow"
-    ):
+    if kind == "follow.follow" and previous_follow_kind == "follow.unfollow":
         return "followed-again"
     return "seen-before"
 
