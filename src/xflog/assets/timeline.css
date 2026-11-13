@@ -153,9 +153,18 @@
   padding: 16px 0 12px;
   flex-shrink: 0;
 }
+.journal-window {
+  position: relative;
+  overflow-anchor: none;
+}
+.journal-window > .journal-group,
+.journal-window .date-group,
+.journal-window .event {
+  position: absolute;
+  inset-inline: 0;
+}
 .journal-group {
   border-top: 1px solid var(--border);
-  margin-bottom: 20px;
 }
 .journal-group summary {
   display: flex;
@@ -205,10 +214,10 @@
   outline: 2px solid var(--accent);
   outline-offset: 4px;
 }
-.journal-group .date-group:first-child {
+.journal-group .journal-first-date {
   padding-top: 8px;
 }
-.journal-group .event:last-child:before {
+.journal-group .journal-last-event:before {
   bottom: 20px;
 }
 .date-group {

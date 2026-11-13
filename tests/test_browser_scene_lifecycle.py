@@ -1,4 +1,4 @@
-"""Exercise Constellation zoom and scene replacement against the real offline UI."""
+"""Exercise timeline interactions and scene replacement against the real offline UI."""
 
 import importlib.util
 import os
@@ -6,7 +6,7 @@ import socket
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -81,6 +81,7 @@ CONTROLLED_UI = r"""(() => {
   window.enableFrames = () => { controlled = true; };
   window.paintIds = () => [...frames].filter(([, cb]) => cb.name === 'paint').map(([id]) => id);
   window.paintCount = () => window.paintIds().length;
+  window.journalFrameCount = () => [...frames.values()].filter(cb => cb.name === 'paintJournal').length;
   window.stepFrames = (now = performance.now()) => {
     const callbacks = [...frames.values()]; frames.clear();
     callbacks.forEach(cb => cb(now));
@@ -828,3 +829,390 @@ def test_zoom_reuses_grouped_scene_and_rebinds_animation(offline_page, motion):
     page.evaluate("zoomProbe.finish()")
     page.set_viewport_size({"width": 1050, "height": 800})
     page.wait_for_function("!zoomProbe.unchanged()", polling=50)
+
+
+def journal_events(size):
+    anchor = datetime.now(UTC).replace(microsecond=0) - timedelta(minutes=1)
+    events = []
+    for index in range(size):
+        kind = "follow.follow" if index < size * 3 // 4 else "follow.unfollow"
+        city = f"city-{index // 3:03}"
+        city_name = f"City {index // 3:03}"
+        if index < 3:
+            city_name += ' <img src=x onerror="bad()">'
+        location = (
+            {
+                "audience_groups": {"activity": kind, "profile-location": city},
+                "audience_group_buckets": {"profile-location": {"key": city, "label": city_name}},
+            }
+            if index < size - 3
+            else {"audience_groups": {"activity": kind}}
+        )
+        events.append(
+            {
+                "event_id": f"journal-{index}",
+                "actor_id": str(index % 31 + 1000),
+                "account_id": "demo",
+                "sequence": size - index,
+                "kind": kind,
+                "name": (
+                    'Name <img src=x onerror="bad()">'
+                    if index == 0
+                    else f"Dummy actor {index}" + " long name" * (30 if index % 11 == 0 else 0)
+                ),
+                "handle": f"actor_{index % 31}",
+                "received_at": (anchor - timedelta(seconds=index)).isoformat(),
+                "provider_at": (anchor - timedelta(days=index // 12)).isoformat(),
+                **location,
+            }
+        )
+    return events
+
+
+JOURNAL_CONTROLS = """() => {
+  const history = document.querySelector('#history');
+  const viewport = () => history.getBoundingClientRect();
+  const buttons = () => [...history.querySelectorAll('.event-button')];
+  const visible = () => buttons().filter(button => {
+    const rect = button.getBoundingClientRect();
+    return rect.height > 0 && rect.bottom > viewport().top && rect.top < viewport().bottom;
+  });
+  const settle = async () => {
+    for (let index = 0; index < 4; index++) {
+      stepFrames();
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  };
+  window.journalTest = {
+    history, buttons, visible, viewport, settle,
+    async scroll(top) {
+      history.scrollTop = top;
+      history.dispatchEvent(new Event('scroll'));
+      await settle();
+    },
+    async reveal(index) {
+      const scrubber = document.querySelector('#memory-scrubber');
+      scrubber.value = String(index);
+      scrubber.dispatchEvent(new Event('input', {bubbles: true}));
+      await settle();
+    },
+  };
+}"""
+
+
+@pytest.fixture
+def journal_page(offline_page):
+    page = offline_page
+    page.evaluate("document.querySelector('[data-layout=vertical]').click()")
+
+    def history(route):
+        kind = route.request.url.split("kind=", 1)[1].split("&", 1)[0]
+        route.fulfill(json={"events": events if kind == "all" else [], "next": None})
+
+    events = journal_events(2400)
+    page.route("**/api/demo?*", history)
+    page.evaluate("document.querySelector('[data-filter=all]').click()")
+    page.wait_for_function(
+        """() => document.querySelector('#history [data-event="journal-0"]')
+        && document.querySelector('#history').getAttribute('aria-busy') === 'false'""",
+        polling=50,
+    )
+    page.evaluate(JOURNAL_CONTROLS)
+    page.evaluate("journalTest.settle()")
+    return page
+
+
+def test_journal_mounts_bounded_rows_and_reveals_a_record_after_a_jump(journal_page):
+    page = journal_page
+    result = page.evaluate("""async () => {
+      const {history, buttons, visible, scroll, reveal} = journalTest;
+      const first = visible()[0]?.dataset.event;
+      const escapedName = buttons()[0]?.querySelector('.event-name')?.textContent;
+      const escapedMarkup = !history.querySelector('img');
+      const initialExtent = history.scrollHeight;
+      const initialCount = buttons().length;
+      const initialHeadings = history.querySelectorAll('.date-group').length;
+
+      await scroll(initialExtent / 2);
+      const middle = visible().map(button => Number(button.dataset.event.split('-')[1]));
+      const middleCount = buttons().length;
+      const oldRemoved = !history.querySelector('[data-event=journal-0]');
+
+      await scroll(history.scrollHeight);
+      const last = visible().at(-1)?.dataset.event;
+      const endCount = buttons().length;
+
+      await reveal(601);
+      const selected = visible().find(button => button.dataset.event === 'journal-601');
+      const pressed = selected?.getAttribute('aria-pressed');
+      const ordinal = selected?.closest('article')?.getAttribute('aria-label');
+      const nearDate = history.querySelectorAll('.date-group').length;
+
+      await scroll(0);
+      const restored = visible()[0]?.dataset.event;
+      return {first, escapedName, escapedMarkup, initialExtent, initialCount, initialHeadings,
+        middle, middleCount, oldRemoved, last, endCount, pressed, ordinal, nearDate,
+        restored, unmountedSelection: !history.querySelector('[aria-pressed=true][data-event]')};
+    }""")
+    assert result["first"] == result["restored"] == "journal-0"
+    assert result["escapedName"] == 'Name <img src=x onerror="bad()">'
+    assert result["escapedMarkup"]
+    assert result["initialExtent"] > 200_000
+    assert max(result[key] for key in ("initialCount", "middleCount", "endCount")) < 35
+    assert result["initialHeadings"] > 0 and result["nearDate"] > 0
+    assert result["middle"] and all(1000 < index < 1400 for index in result["middle"])
+    assert result["oldRemoved"] and result["last"] == "journal-2399"
+    assert result["pressed"] == "true" and result["ordinal"] == "Event 602 of 2400"
+    assert result["unmountedSelection"]
+    page.evaluate("journalTest.reveal(601)")
+    assert (
+        page.locator('#history [data-event="journal-601"]').get_attribute("aria-pressed") == "true"
+    )
+
+
+def test_journal_preserves_keyboard_focus_across_window_boundaries(journal_page):
+    page = journal_page
+    page.evaluate("""async () => {
+      await journalTest.scroll(0);
+      window.journalFocused = journalTest.buttons().at(-1);
+      journalFocused.focus({preventScroll: true});
+    }""")
+    original = page.evaluate("Number(journalFocused.dataset.event.split('-')[1])")
+    page.evaluate("journalTest.scroll(journalTest.history.scrollHeight * 0.65)")
+    assert page.evaluate("journalFocused.isConnected && document.activeElement === journalFocused")
+    assert page.evaluate("journalTest.buttons().length") < 35
+    page.keyboard.press("Tab")
+    assert page.evaluate("document.activeElement.dataset.event") == f"journal-{original + 1}"
+    page.keyboard.press("Shift+Tab")
+    assert page.evaluate("document.activeElement.dataset.event") == f"journal-{original}"
+    page.keyboard.press("Enter")
+    assert page.locator("#detail-dialog").evaluate("dialog => dialog.open")
+    assert (
+        page.locator(f'#history [data-event="journal-{original}"]').get_attribute("aria-pressed")
+        == "true"
+    )
+
+
+def test_journal_bounds_group_headers_and_reveals_a_collapsed_group(journal_page):
+    page = journal_page
+    page.locator("#lens-trigger").click()
+    page.get_by_role("menuitemradio", name="Activity", exact=True).click()
+    page.wait_for_function(
+        """() => document.querySelector('#history details[data-group]')
+        && document.querySelector('#history').getAttribute('aria-busy') === 'false'""",
+        polling=50,
+    )
+    page.evaluate("journalTest.scroll(0)")
+    summary = page.locator('#history details[data-group="follow.follow"] summary')
+    assert "1800 events" in summary.inner_text()
+    assert page.locator("#history .event-button").count() < 35
+    page.evaluate("journalTest.scroll(journalTest.history.scrollHeight * 0.4)")
+    assert (
+        abs(
+            summary.evaluate("node => node.getBoundingClientRect().top")
+            - page.evaluate(
+                "journalTest.viewport().top + parseFloat(getComputedStyle(journalTest.history).paddingTop)"
+            )
+        )
+        <= 1
+    )
+    summary.press("Space")
+    page.wait_for_function(
+        """() => document.activeElement.matches('summary')
+        && !document.activeElement.parentElement.open
+        && document.activeElement.parentElement.dataset.group === 'follow.follow'""",
+        polling=50,
+    )
+    assert page.locator('#history details[data-group="follow.follow"] .event-button').count() == 0
+    page.evaluate("journalTest.reveal(900)")
+    assert page.locator('#history details[data-group="follow.follow"]').evaluate(
+        "node => node.open"
+    )
+    assert (
+        page.locator('#history [data-event="journal-900"]').get_attribute("aria-pressed") == "true"
+    )
+    assert page.evaluate("""() => {
+      const row = document.querySelector('[data-event=journal-900]').getBoundingClientRect();
+      const summary = document.querySelector('#history details[data-group="follow.follow"] summary');
+      return row.top >= summary.getBoundingClientRect().bottom - 1
+        && row.bottom <= journalTest.viewport().bottom + 1;
+    }""")
+
+    # Enable a dynamic lens using the same preference response shape as the app.
+    groups = page.evaluate("fetch('/api/status').then(response => response.json())")[
+        "audience_groups"
+    ]
+    for group in groups:
+        if group["key"] == "profile-location":
+            group["enabled"] = True
+    page.route(
+        "**/api/audience-groups", lambda route: route.fulfill(json={"audience_groups": groups})
+    )
+    page.evaluate("""() => {
+      const input = document.querySelector('#group-profile-location');
+      input.checked = true;
+      input.dispatchEvent(new Event('change'));
+    }""")
+    page.wait_for_function(
+        """() => document.querySelector('#audience-lens').textContent.includes('Profile location')
+        && document.querySelector('#history').getAttribute('aria-busy') === 'false'""",
+        polling=50,
+    )
+    page.locator("#lens-trigger").click()
+    page.get_by_role("menuitemradio", name="Profile location", exact=True).click()
+    page.wait_for_function(
+        """() => document.querySelector('#history details[data-group^=city-]')
+        && document.querySelector('#history').getAttribute('aria-busy') === 'false'""",
+        polling=50,
+    )
+    page.evaluate("journalTest.scroll(0)")
+    assert page.locator("#history details[data-group]").count() < 20
+    first = page.locator("#history details[data-group]").first
+    assert first.get_attribute("data-group") == "city-000"
+    assert '<img src=x onerror="bad()">' in first.locator("summary").inner_text()
+    assert page.locator("#history img").count() == 0
+    page.evaluate("journalTest.scroll(journalTest.history.scrollHeight)")
+    assert page.locator("#history details[data-group]").count() < 20
+    assert (
+        page.locator("#history details[data-group]").last.get_attribute("data-group") == "unknown"
+    )
+    assert page.locator('#history [data-event="journal-2399"]').count() == 1
+
+
+def test_journal_height_correction_preserves_the_visible_anchor(journal_page):
+    page = journal_page
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.evaluate("journalTest.scroll(journalTest.history.scrollHeight * 0.5)")
+    result = page.evaluate("""async () => {
+      const {buttons, visible, history, viewport, settle} = journalTest;
+      const rect = node => node.getBoundingClientRect();
+      const before = visible()[0];
+      const top = rect(before).top;
+      const above = buttons().findLast(button => rect(button).bottom <= viewport().top);
+      const oldHeight = rect(above).height;
+      const scrollTop = history.scrollTop;
+      above.querySelector('.event-name').textContent = 'Wrapped name '.repeat(65);
+      await settle();
+      return {same: visible()[0]?.dataset.event === before.dataset.event,
+        growth: rect(above).height - oldHeight, scrollDelta: history.scrollTop - scrollTop,
+        offsetDelta: rect(before).top - top};
+    }""")
+    assert result["growth"] > 100, result
+    assert result["same"] and abs(result["offsetDelta"]) <= 2, result
+    assert abs(result["growth"] - result["scrollDelta"]) <= 2, result
+
+
+def test_journal_route_layout_and_empty_history_cancel_pending_work(journal_page):
+    page = journal_page
+    result = page.evaluate("""async () => {
+      const {history, scroll} = journalTest;
+      await scroll(history.scrollHeight * 0.4);
+      const transitions = [];
+      for (const selector of ['[data-nav=profile]', '[data-layout=horizontal]', '[data-filter=lost]']) {
+        const old = history.querySelector('.journal-window');
+        const observer = new MutationObserver(() => {});
+        observer.observe(old, {attributes: true, childList: true, subtree: true});
+        history.scrollTop += 190;
+        history.dispatchEvent(new Event('scroll'));
+        const queued = journalFrameCount();
+        document.querySelector(selector).click();
+        stepFrames();
+        transitions.push({queued, pending: journalFrameCount(), detached: !old.isConnected,
+          writes: observer.takeRecords().length});
+        observer.disconnect();
+        if (selector === '[data-nav=profile]') document.querySelector('[data-nav=timeline]').click();
+        if (selector === '[data-layout=horizontal]') document.querySelector('[data-layout=vertical]').click();
+        if (selector !== '[data-filter=lost]') await journalTest.settle();
+      }
+      return transitions;
+    }""")
+    assert result == [{"queued": 1, "pending": 0, "detached": True, "writes": 0}] * 3
+    page.wait_for_function(
+        """() => document.querySelector('#history .empty-state')
+        && document.querySelector('#history').getAttribute('aria-busy') === 'false'""",
+        polling=50,
+    )
+    page.evaluate("document.querySelector('[data-filter=all]').click()")
+    page.wait_for_selector("#history .event-button")
+    assert 0 < page.locator("#history .event-button").count() < 35
+
+
+def test_journal_live_history_keeps_the_anchor_and_offscreen_focus(offline_page):
+    page = offline_page
+    records = journal_events(850)
+    first_arrival = datetime.fromisoformat(records[0]["received_at"])
+    inserted = [
+        {
+            **records[0],
+            "event_id": f"new-{index}",
+            "sequence": 851 + index,
+            "received_at": (first_arrival + timedelta(seconds=index + 1)).isoformat(),
+        }
+        for index in range(25)
+    ]
+    appended = [
+        {
+            **records[-1],
+            "event_id": f"old-{index}",
+            "sequence": -index - 1,
+            "received_at": (first_arrival - timedelta(seconds=1000 + index)).isoformat(),
+        }
+        for index in range(12)
+    ]
+    revision = "initial"
+
+    def history(route):
+        route.fulfill(json={"events": records, "next": None})
+
+    def status(route):
+        response = route.fetch()
+        payload = response.json()
+        payload["timeline_revision"] = revision
+        route.fulfill(response=response, json=payload)
+
+    page.route("**/api/timeline?*", history)
+    page.route("**/api/status", status)
+    page.add_init_script("""(() => {
+      const nativeTimeout = window.setTimeout;
+      window.setTimeout = (callback, delay, ...args) => {
+        if (callback?.name === 'poll' && delay === 10000) {
+          window.runJournalPoll = callback;
+          return 0;
+        }
+        return nativeTimeout(callback, delay, ...args);
+      };
+    })()""")
+    page.goto(page.url.split("/#", 1)[0], wait_until="networkidle")
+    assert page.evaluate("typeof window.runJournalPoll") == "function", page.locator(
+        "#notice"
+    ).text_content()
+    page.evaluate("window.enableFrames(); document.querySelector('[data-layout=vertical]').click()")
+    page.evaluate(JOURNAL_CONTROLS)
+    page.evaluate("""async () => {
+      await journalTest.scroll(0);
+      journalTest.buttons()[0].focus({preventScroll: true});
+      await journalTest.scroll(journalTest.history.scrollHeight * 0.55);
+    }""")
+    assert page.evaluate("document.activeElement.dataset.event") == "journal-0"
+    anchor = page.evaluate("""() => {
+      const row = journalTest.visible()[0];
+      return {identity: row.dataset.event, offset: row.getBoundingClientRect().top};
+    }""")
+
+    records[:0] = inserted
+    records.extend(appended)
+    revision = "updated"
+    result = page.evaluate("""async () => {
+      await runJournalPoll();
+      await journalTest.settle();
+      const row = journalTest.visible()[0];
+      return {identity: row?.dataset.event, offset: row?.getBoundingClientRect().top,
+        focus: document.activeElement.dataset.event, extent: journalTest.history.scrollHeight,
+        count: journalTest.buttons().length};
+    }""")
+    assert result["identity"] == anchor["identity"]
+    assert abs(result["offset"] - anchor["offset"]) <= 2
+    assert result["focus"] == "journal-0"
+    assert result["count"] < 35
+    page.evaluate("journalTest.scroll(journalTest.history.scrollHeight)")
+    assert page.evaluate("journalTest.visible().at(-1).dataset.event") == "old-11"

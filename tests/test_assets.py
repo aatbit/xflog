@@ -104,7 +104,7 @@ def test_selected_constellation_record_is_the_one_opened():
     assert result.returncode == 0, result.stderr
 
 
-def test_journal_groups_keep_records_order_and_collapsed_selection():
+def test_journal_model_preserves_order_and_indexes_variable_height_rows():
     import json
 
     from xflog import audience_groups

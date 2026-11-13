@@ -94,6 +94,7 @@
     label: eventLabel,
     initials,
     onOpen: (identity) => selectEvent(identity, true),
+    onNearEnd: requestOlder,
   });
   const { createActivityHud } = await import("/static/xf/activity-hud.js");
   const activityHud = createActivityHud({
@@ -203,6 +204,7 @@
     }
   }
   function view(name) {
+    if (name !== "timeline") journal.clear({remember: true});
     for (const page of ["timeline", "profile", "about"])
       $(`#${page}-view`).hidden = page !== name;
     $$("[data-nav]").forEach((button) => {
@@ -348,9 +350,12 @@
     if (state.layout === "vertical") renderEvents();
   }
   function renderEvents(renderScene = scene.render) {
+    if ($("#timeline-view").hidden) return;
     const list = $("#history");
     $(".scene-context").hidden = !state.events.length && state.lens === "none";
     $("#timeline-view").dataset.layout = state.layout;
+    if (state.layout === "horizontal" || !state.events.length)
+      journal.clear({remember: state.layout === "horizontal" && Boolean(state.events.length)});
     list.className = `history ${state.layout}`;
     list.setAttribute(
       "aria-label",
@@ -406,9 +411,7 @@
     state.selected = identity;
     selectedSignal.render(event, state.groups);
     if (state.layout === "horizontal") scene.select(identity);
-    else $$("[data-event]").forEach((button) =>
-      button.setAttribute("aria-pressed", button.dataset.event === identity),
-    );
+    else journal.select(identity);
     renderPersonDetail(root, event);
     const index = state.events.findIndex((item) => item.event_id === identity);
     $("#journey-position").textContent =
@@ -445,6 +448,7 @@
       selectedSignal.render(null);
       followControls.select(null);
       scene.clear();
+      journal.clear();
       $("#history").innerHTML =
         '<div class="loading-state"><span class="loading-dot" aria-hidden="true"></span>Loading local history…</div>';
     }
@@ -476,6 +480,7 @@
       notice(error.message, "error");
       if (!state.events.length) {
         scene.clear();
+        journal.clear();
         $("#history").innerHTML =
           '<div class="empty-state"><h2>History couldn’t be loaded.</h2><p>Check your local database and connection, then refresh to retry.</p><button class="button" type="button" data-retry>Retry</button></div>';
         $("#history [data-retry]").addEventListener("click", () => load());
@@ -655,14 +660,6 @@
     const end = state.layout === "horizontal" ? 1000 : state.events.length - 1;
     if (Number(event.target.value) >= end) requestOlder();
   });
-  $("#history").addEventListener("scroll", () => {
-    const history = $("#history");
-    if (
-      state.layout === "vertical" &&
-      history.scrollTop + history.clientHeight >= history.scrollHeight - 80
-    )
-      requestOlder();
-  });
 
   $("#motion-toggle").addEventListener("click", (event) => {
     const enabled = root.dataset.motion !== "on";
@@ -676,6 +673,7 @@
     if (!root.isConnected) {
       historyLoad?.abort();
       scene.destroy();
+      journal.destroy();
       groupControls.destroy();
       activityHud.destroy();
       selectedSignal.destroy();
