@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "xflog"
-version = "1.0.14"
+version = "1.0.15"
 description = "A local-first X follower event journal"
 readme = "README.md"
 license = "Apache-2.0"

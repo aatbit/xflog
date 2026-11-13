@@ -578,8 +578,7 @@ export function createConstellation({
   }
   function prepareGroupButtons() {
     const renderedVersion = sceneVersion;
-    const canDrillDown = group =>
-      !group.people.length && onGroup && lens === "activity" && group.key !== "unknown";
+    const canDrillDown = group => onGroup && lens === "activity" && group.key !== "unknown";
     groupLayer.innerHTML = geometry.overviewGroups.map((group) => {
       const loaded = group.people.length > 0;
       const description = esc(groupDescription(group));
@@ -595,7 +594,7 @@ export function createConstellation({
       if (!group.people.length && !canDrillDown(group)) return;
       button.addEventListener("click", () => {
         if (!ownsScene(renderedVersion, button) || !geometry.overview) return;
-        if (!group.people.length) {
+        if (canDrillDown(group)) {
           onGroup(group.key);
           return;
         }
