@@ -15,6 +15,7 @@
     csrf: "",
     groups: [],
     lens: "none",
+    activityKind: "",
     groupRange: "24h",
     groupSignature: "",
   };
@@ -80,6 +81,12 @@
     onSelect: (identity) => selectEvent(identity),
     onPreview: (identity) => selectEvent(identity, false, followControls.update),
     onOpen: (identity) => selectEvent(identity, true),
+    onGroup: (kind) => {
+      setActivityKind(kind);
+      void liveHistory.load();
+      scene.setZoom(1);
+      $("#activity-group-back").focus({preventScroll:true});
+    },
     hasOlder: () => Boolean(state.next),
     onOlder: () => requestOlder(),
   });
@@ -155,7 +162,7 @@
       historyError = null;
       const olderControl = document.activeElement === $("#memory-next");
       if (!events.some(event => event.event_id === state.selected))
-        state.selected = events[Math.min(reason === "initial" ? 2 : 0, events.length - 1)]?.event_id || null;
+        state.selected = events[Math.min(reason === "initial" && !state.activityKind ? 2 : 0, events.length - 1)]?.event_id || null;
       state.events = events;
       state.next = next;
       state.aggregate = aggregate;
@@ -313,6 +320,7 @@
     $("#tracking-button").disabled =
       state.demo || pendingActions.has($("#tracking-button"));
     const account = status.account;
+    if (previous && account?.id !== previous.account?.id) setActivityKind("");
     $("#scope-name").textContent = state.demo
       ? "Mira Studio"
       : account?.name ||
@@ -377,6 +385,7 @@
         }
       }),
     onLens: (lens) => {
+      setActivityKind("");
       state.lens = lens;
       groupControls.render(state.groups, lens, state.groupRange);
       void liveHistory.load();
@@ -386,15 +395,32 @@
   async function setTimeRange(range) {
     state.groupRange = range;
     groupControls.render(state.groups, state.lens, range);
+    if (state.activityKind) setActivityKind(state.activityKind);
     await liveHistory.load(activityHud.refresh);
   }
+  function setActivityKind(kind) {
+    state.activityKind = kind;
+    const label = state.groups.find(group => group.key === "activity")
+      ?.buckets.find(bucket => bucket.key === kind)?.label;
+    $("#scene-lens-label").textContent = label ||
+      state.groups.find(group => group.key === state.lens)?.label || "Ungrouped";
+    $("#activity-group-back").hidden = !kind;
+  }
+  $("#activity-group-back").addEventListener("click", () => {
+    setActivityKind("");
+    void liveHistory.load();
+    scene.setZoom(0);
+    $("#history").focus({preventScroll:true});
+  });
   function renderAudienceGroups(groups) {
     const signature = JSON.stringify(groups);
     if (signature === state.groupSignature) return;
     state.groupSignature = signature;
     state.lens = resolveLens(groups, state.lens);
     state.groups = groups;
+    if (state.lens !== "activity") setActivityKind("");
     groupControls.render(groups, state.lens, state.groupRange);
+    if (state.activityKind) setActivityKind(state.activityKind);
   }
   function renderEvents(renderScene = scene.render, append = false) {
     if ($("#timeline-view").hidden) return;
@@ -499,6 +525,7 @@
     else address.searchParams.delete("demo");
     history.replaceState(null, "", address);
     state.demo = enabled;
+    setActivityKind("");
     $("#demo-toggle").textContent = enabled
       ? "Leave demo ↗"
       : "Explore demo ↗";
@@ -553,6 +580,7 @@
   $$("[data-filter]").forEach((button) =>
     button.addEventListener("click", () => {
       state.filter = button.dataset.filter;
+      setActivityKind("");
       $$("[data-filter]").forEach((item) =>
         item.setAttribute("aria-pressed", item === button),
       );
@@ -562,6 +590,7 @@
   $$("[data-subject]").forEach((button) =>
     button.addEventListener("click", () => {
       state.subject = button.dataset.subject;
+      setActivityKind("");
       $$("[data-subject]").forEach((item) =>
         item.setAttribute("aria-pressed", item === button),
       );

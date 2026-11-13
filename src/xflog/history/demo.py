@@ -177,7 +177,9 @@ async def demo_timeline(query, saved):
     groups = audience_groups.preferences(saved)
     lens = query["lens"]
     module = audience_groups.MODULES.get(lens) if groups.get(lens) else None
-    scope = scope_key(("demo", query["subject"], query["kind"], query["since"], lens, groups))
+    activity_kind = query.get("activity_kind", "")
+    scope_parts = ("demo", query["subject"], query["kind"], query["since"], lens, groups)
+    scope = scope_key((*scope_parts, activity_kind) if activity_kind else scope_parts)
     if before and (before.scope != scope or before.key[1] != 1):
         raise InvalidTimelineRequest("Timeline cursor does not match this history scope.")
     if before:
@@ -199,6 +201,8 @@ async def demo_timeline(query, saved):
         return _encounters(rows, records)
 
     filtered = _filtered(records, query)
+    if activity_kind:
+        filtered = [event for event in filtered if event["kind"] == activity_kind]
     if before:
         if not any(
             (event["received_at"], 1, event["sequence"]) == before.key for event in filtered

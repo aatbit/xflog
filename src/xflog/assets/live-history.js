@@ -18,6 +18,7 @@ export function historyPath(state, before = "0", options = {}) {
   if (before !== "0" || options.localOnly || state.lens && state.lens !== "none")
     params.set("local_only", "true");
   if (state.since) params.set("since", state.since);
+  if (state.activityKind) params.set("activity_kind", state.activityKind);
   if (options.afterRevision) params.set("after_revision", options.afterRevision);
   if (options.selected && before === "0") params.set("selected", options.selected);
   if (options.encounterRevision) params.set("encounter_revision", options.encounterRevision);
@@ -35,7 +36,7 @@ export function historyScope(state) {
   const selection = state.status?.selection;
   return JSON.stringify([
     state.demo, state.demo ? null : state.status?.account?.id, state.subject,
-    state.filter, state.lens, state.groupRange, state.groupSignature,
+    state.filter, state.lens, state.activityKind, state.groupRange, state.groupSignature,
     state.demo ? null : selection?.interactions, state.demo ? null : selection?.profile_names,
   ]);
 }

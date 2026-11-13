@@ -93,6 +93,18 @@
   gap: 8px;
   pointer-events: auto;
 }
+.activity-group-back {
+  width: fit-content;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  pointer-events: auto;
+}
 #group-range-control[hidden] { display: none; }
 #group-range-trigger {
   display: flex;

@@ -38,11 +38,17 @@ from .web.models import (
 from .web.ui import mount_ui as mount_browser_ui
 
 
-def _history_scope(kind, subject, since, limit, lens):
+def _history_scope(kind, subject, since, limit, lens, activity_kind=""):
     if not valid_filters(kind, subject, 0):
         raise HTTPException(422, "Invalid timeline filter.")
     if lens != "none" and lens not in audience_groups.MODULES:
         raise HTTPException(422, "Invalid audience group.")
+    if activity_kind and (
+        lens != "activity"
+        or activity_kind == "unknown"
+        or not any(bucket.key == activity_kind for bucket in audience_groups.MODULES[lens].buckets)
+    ):
+        raise HTTPException(422, "Invalid activity group.")
     if not 1 <= limit <= 50:
         raise HTTPException(422, "History page size must be between 1 and 50.")
     try:
@@ -225,8 +231,9 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
         after_revision: str = "",
         selected: str = "",
         encounter_revision: str = "",
+        activity_kind: str = "",
     ):
-        since = _history_scope(kind, subject, since, limit, lens)
+        since = _history_scope(kind, subject, since, limit, lens, activity_kind)
         query = {
             "kind": kind,
             "subject": subject,
@@ -237,10 +244,11 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
             "after_revision": after_revision,
             "selected": selected,
             "encounter_revision": encounter_revision,
+            "activity_kind": activity_kind,
         }
         try:
             result = await timeline.current_history(query)
-            if before in {"", "0"} and not local_only and result["events"]:
+            if before in {"", "0"} and not (local_only or activity_kind) and result["events"]:
                 fresh = [
                     event for event in result["events"] if not event.get("encounter_correction")
                 ]
@@ -274,8 +282,11 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
         since: str = "",
         limit: int | None = None,
         lens: str = "none",
+        activity_kind: str = "",
     ):
-        since = _history_scope(kind, subject, since, 25 if limit is None else limit, lens)
+        since = _history_scope(
+            kind, subject, since, 25 if limit is None else limit, lens, activity_kind
+        )
         groups = await store.setting("audience_groups", {})
         if (
             limit is not None
@@ -293,6 +304,7 @@ def create_app(config: Config | None = None, *, transport=None, mount_ui=True):
                         "since": since,
                         "limit": 25 if limit is None else limit,
                         "lens": lens,
+                        "activity_kind": activity_kind,
                     },
                     groups,
                 )

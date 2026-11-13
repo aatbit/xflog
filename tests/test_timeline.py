@@ -166,6 +166,53 @@ async def test_grouped_pages_include_older_audience_changes_without_x_reads(inst
     assert len(provider.calls) == calls
 
 
+async def test_activity_drilldown_reads_matching_saved_rows_and_scopes_cursor(instance):
+    app, browser, provider = instance
+    selection = await only_interactions(app, browser)
+    store = app.state.store
+    await store.save_setting("selection", {**selection, "profile_names": True})
+    for index in range(3):
+        await app.state.interactions.ingest(
+            envelope(event_uuid=f"saved-{index}", payload=post(str(900 + index))), selection
+        )
+    await store.db.execute(
+        """UPDATE interactions SET received_at=CASE
+             WHEN sequence=(SELECT MIN(sequence) FROM interactions)
+             THEN '2026-11-01T12:00:00+00:00' ELSE '2026-11-06T12:00:00+00:00' END"""
+    )
+    await store.db.commit()
+    for index in range(51):
+        await store.insert(
+            Event(
+                f"newer-{index}",
+                "follow.follow",
+                "111",
+                "222",
+                None,
+                None,
+                None,
+                "2026-11-07T12:00:00+00:00",
+            )
+        )
+    calls = len(provider.calls)
+    scope = {"lens": "activity", "since": "2026-11-05T00:00:00Z"}
+    overview = (
+        await browser.get("/api/timeline", params={**scope, "limit": 50, "local_only": True})
+    ).json()
+    assert {event["kind"] for event in overview["events"]} == {"follow.follow"}
+    query = {**scope, "limit": 1, "activity_kind": "interaction.replies"}
+    first = (await browser.get("/api/timeline", params=query)).json()
+    second = (await browser.get("/api/timeline", params={**query, "before": first["next"]})).json()
+    assert [event["post_id"] for event in first["events"] + second["events"]] == ["902", "901"]
+    assert first["aggregate"]["total_events"] == 2 and second["next"] is None
+    wrong = {**query, "before": first["next"], "activity_kind": "follow.follow"}
+    assert (await browser.get("/api/timeline", params=wrong)).status_code == 422
+    assert (await browser.get("/api/timeline", params={**query, "lens": "none"})).status_code == 422
+    await store.save_setting("selection", {**selection, "interactions": {}})
+    assert not (await browser.get("/api/timeline", params=query)).json()["events"]
+    assert len(provider.calls) == calls
+
+
 @pytest.mark.parametrize(
     "params",
     [

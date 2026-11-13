@@ -24,6 +24,7 @@ export function createConstellation({
   onSelect,
   onPreview = onSelect,
   onOpen,
+  onGroup,
   hasOlder = () => false,
   onOlder = () => {},
 }) {
@@ -577,21 +578,27 @@ export function createConstellation({
   }
   function prepareGroupButtons() {
     const renderedVersion = sceneVersion;
+    const canDrillDown = group =>
+      !group.people.length && onGroup && lens === "activity" && group.key !== "unknown";
     groupLayer.innerHTML = geometry.overviewGroups.map((group) => {
       const loaded = group.people.length > 0;
       const description = esc(groupDescription(group));
       const attributes = `class="constellation-group ${esc(group.tone)}" style="--group-color:${group.color};left:${group.x}px;top:${group.y}px" data-group="${esc(group.key)}" title="${description}"`;
       const count = `<span class="cluster-count">${group.eventCount ?? group.people.length}</span><strong>${esc(group.label)}</strong>`;
-      return loaded
+      return loaded || canDrillDown(group)
         ? `<button type="button" ${attributes} aria-label="Explore ${esc(group.label)}, ${description}">${count}</button>`
         : `<div ${attributes}>${count}<small>0 loaded</small></div>`;
     }).join("");
     groupButtons = [...groupLayer.querySelectorAll("[data-group]")];
     groupButtons.forEach((button, index) => {
       const group = geometry.overviewGroups[index];
-      if (!group.people.length) return;
+      if (!group.people.length && !canDrillDown(group)) return;
       button.addEventListener("click", () => {
         if (!ownsScene(renderedVersion, button) || !geometry.overview) return;
+        if (!group.people.length) {
+          onGroup(group.key);
+          return;
+        }
         const identity = group.people[0].event.event_id;
         select(identity);
         setZoom(1);
@@ -666,10 +673,14 @@ export function createConstellation({
     queue();
   }
   function setZoom(value) {
-    if (!layoutAtZoom || !events.length || !ownsScene(sceneVersion, canvas)) return;
-    wheelZoom = null;
     const nextZoom = clamp(Math.round(value * 20) / 20, 0, 2);
     if (nextZoom === zoom || !Number.isFinite(nextZoom)) return;
+    if (!geometry) {
+      zoom = nextZoom;
+      return;
+    }
+    if (!ownsScene(sceneVersion, canvas)) return;
+    wheelZoom = null;
     const wasOverview = geometry.overview;
     const coordinatesChanged = zoom > 0.25 || nextZoom > 0.25;
     zoom = nextZoom;
