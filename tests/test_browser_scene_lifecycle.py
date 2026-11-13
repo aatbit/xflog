@@ -322,8 +322,11 @@ def test_ambient_frames_reuse_label_layout_and_navigation(offline_page):
         history.dispatchEvent(new Event('scroll'));
         advance();
         const expected = Math.round((1 - history.scrollLeft / (history.scrollWidth - history.clientWidth)) * 1000);
-        const scroll = history.scrollLeft !== previousLeft && labels.takeRecords().length > 0
-          && Number(scrubber.value) === expected;
+        const labelBox = label().getBoundingClientRect();
+        const viewport = history.getBoundingClientRect();
+        const scroll = history.scrollLeft !== previousLeft && Number(scrubber.value) === expected
+          && label().getAttribute('aria-hidden') === 'false'
+          && labelBox.left >= viewport.left && labelBox.right <= viewport.right;
 
         const originalPreview = preview().textContent, originalHeight = preview().offsetHeight;
         reads.boxes = reads.previews = 0;
@@ -391,6 +394,237 @@ def test_reduced_motion_remeasures_labels_after_fonts_and_resize(offline_page):
       stepFrames();
       return window.sceneLabelReads > 0 && paintCount() === 0
         && document.querySelector('.is-selected .star-label').getAttribute('aria-hidden') === 'false';
+    }""")
+
+
+@pytest.fixture
+def viewport_page(offline_page):
+    page = offline_page
+
+    def long_demo(route):
+        response = route.fetch()
+        payload = response.json()
+        template = payload["events"][0]
+        anchor = datetime.fromisoformat(template["received_at"])
+        payload["events"] = [
+            {
+                **template,
+                "event_id": f"viewport-{index}",
+                "name": f"Dummy actor {index}",
+                "sequence": 120 - index,
+                "received_at": (anchor - timedelta(seconds=index)).isoformat(),
+                "kind": "interaction.replies",
+                "post_id": str(10000 + index),
+                "post_text": f"Synthetic reply {index}",
+            }
+            for index in range(120)
+        ]
+        payload["next"] = None
+        route.fulfill(response=response, json=payload)
+
+    page.route("**/api/demo?*", long_demo)
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.evaluate("document.querySelector('[data-filter=lost]').click()")
+    page.wait_for_function(
+        """() => document.querySelectorAll('.constellation-star').length === 120
+        && document.querySelector('#history').getAttribute('aria-busy') === 'false'""",
+        polling=50,
+    )
+    page.evaluate("""() => {
+      window.viewportTime = 1000;
+      window.viewportStep = () => stepFrames(viewportTime += 16);
+      const zoom = document.querySelector('#scene-zoom');
+      zoom.value = '2';
+      zoom.dispatchEvent(new Event('input', {bubbles: true}));
+      viewportStep();
+    }""")
+    return page
+
+
+def test_viewport_limits_label_and_spark_work_across_scroll_jumps(viewport_page):
+    page = viewport_page
+    # At 2× zoom a segment can cross this entire viewport and its overscan.
+    page.set_viewport_size({"width": 230, "height": 844})
+    page.wait_for_function(
+        """() => {
+          const history = document.querySelector('#history');
+          return history.clientWidth < 234
+            && history.querySelector('.constellation-sky').viewBox.baseVal.width === history.clientWidth;
+        }""",
+        polling=50,
+    )
+    result = page.evaluate("""async () => {
+      const {seed} = await import('/static/xf/constellation-layout.js');
+      const history = document.querySelector('#history');
+      const canvas = history.querySelector('.constellation-canvas');
+      const actors = [...history.querySelectorAll('[data-actor]')];
+      const labels = [...history.querySelectorAll('.star-label')];
+      const linkLayer = history.querySelector('.constellation-links');
+      const links = [...linkLayer.querySelectorAll('[data-link-group]')].map((group, index) => {
+        const [x1, y1, x2, y2] = group.querySelector('path').getAttribute('d').slice(1).split(/[,L]/).map(Number);
+        return {index, x1, y1, x2, y2, spark: group.querySelector('.sequence-spark'),
+          trail: group.querySelector('.sequence-trail')};
+      });
+      const jump = left => {
+        history.scrollLeft = left;
+        history.dispatchEvent(new Event('scroll'));
+        viewportStep();
+      };
+      const cross = links[Math.floor(links.length / 2)];
+      const center = (cross.x1 + cross.x2) / 2;
+      const old = links[0];
+      jump((old.x1 + old.x2 - history.clientWidth) / 2);
+      const phase = link => (Number(link.spark.getAttribute('cx')) - link.x1) / (link.x2 - link.x1);
+      const oldLeft = history.scrollLeft;
+      const oldPhase = phase(old);
+      const oldLabel = history.querySelector('.is-selected .star-label');
+      const oldSparkPosition = old.spark.getAttribute('cx');
+      const labelObserver = new MutationObserver(() => {});
+      const sparkObserver = new MutationObserver(() => {});
+      const childObserver = new MutationObserver(() => {});
+      for (const label of labels)
+        labelObserver.observe(label, {attributes: true, attributeFilter: ['style']});
+      sparkObserver.observe(linkLayer, {subtree: true, attributes: true, attributeFilter: ['cx']});
+      childObserver.observe(canvas, {subtree: true, childList: true});
+      const nativeAdd = EventTarget.prototype.addEventListener;
+      let listenerWrites = 0;
+      EventTarget.prototype.addEventListener = function(type, ...args) {
+        if (this instanceof Node && canvas.contains(this)) listenerWrites++;
+        return nativeAdd.call(this, type, ...args);
+      };
+      try {
+        jump(center - history.clientWidth / 2);
+        const left = history.scrollLeft, right = left + history.clientWidth;
+        const margin = 128;
+        const expectedSparks = links.filter(link => Math.min(link.x1, link.x2) <= right + margin
+          && Math.max(link.x1, link.x2) >= left - margin).map(link => link.spark);
+        const sparkWrites = sparkObserver.takeRecords().map(record => record.target);
+        const labelWrites = new Set(labelObserver.takeRecords().map(record => record.target));
+        const selected = actors.find(actor => actor.getAttribute('aria-pressed') === 'true');
+        const nearest = actors.reduce((best, actor) =>
+          Math.abs(parseFloat(actor.style.left) - (left + history.clientWidth / 2))
+          < Math.abs(parseFloat(best.style.left) - (left + history.clientWidth / 2)) ? actor : best);
+        const selectedLabel = selected.parentElement.querySelector('.star-label');
+        const eligibleWrites = actors.filter(actor => {
+          const x = parseFloat(actor.style.left);
+          return (x >= left - margin && x <= right + margin)
+            || (x >= oldLeft - margin && x <= oldLeft + history.clientWidth + margin);
+        }).map(actor => actor.parentElement.querySelector('.star-label'));
+        const labelBudget = new Set([...eligibleWrites, oldLabel, selectedLabel]);
+        const expectedPhase = ((oldPhase - seed(old.index) + seed(cross.index) + 0.0016) % 1 + 1) % 1;
+        const crossWrites = sparkWrites.includes(cross.spark);
+        const initialPhase = phase(cross);
+        const worldY = cross.y1 + (cross.y2 - cross.y1) * initialPhase;
+        const trailMatches = cross.spark.getAttribute('cx') === cross.trail.getAttribute('x2')
+          && cross.spark.getAttribute('cy') === cross.trail.getAttribute('y2')
+          && Math.abs(worldY - Number(cross.spark.getAttribute('cy'))) < 0.05;
+        const newActors = canvas.querySelectorAll('[data-actor]');
+        const newLabels = canvas.querySelectorAll('.star-label');
+        viewportStep();
+        const nextSparkWrites = sparkObserver.takeRecords().map(record => record.target);
+        const withinRange = (writes) => writes.length === expectedSparks.length
+          && expectedSparks.every(spark => writes.includes(spark));
+        return {
+          cross: Math.min(cross.x1, cross.x2) < left - margin && Math.max(cross.x1, cross.x2) > right + margin && crossWrites,
+          phase: Math.abs(initialPhase - expectedPhase) < 0.0001
+            && Math.abs(phase(cross) - ((expectedPhase + 0.0016) % 1)) < 0.0001,
+          alignment: trailMatches,
+          sparkRange: withinRange(sparkWrites) && withinRange(nextSparkWrites),
+          offscreenUnchanged: old.spark.getAttribute('cx') === oldSparkPosition,
+          labels: labelWrites.has(selectedLabel) && [...labelWrites].every(label => labelBudget.has(label)),
+          leavingHidden: oldLabel.getAttribute('aria-hidden') === 'true'
+            && oldLabel.querySelector('button').tabIndex === -1,
+          selected: selected === nearest && selectedLabel.getAttribute('aria-hidden') === 'false',
+          nodes: childObserver.takeRecords().length === 0 && listenerWrites === 0
+            && actors.every((actor, index) => actor === newActors[index])
+            && labels.every((label, index) => label === newLabels[index])
+            && canvas === history.querySelector('.constellation-canvas')
+            && linkLayer === canvas.querySelector('.constellation-links'),
+        };
+      } finally {
+        EventTarget.prototype.addEventListener = nativeAdd;
+        labelObserver.disconnect();
+        sparkObserver.disconnect();
+        childObserver.disconnect();
+      }
+    }""")
+    assert all(result.values()), result
+
+    page.emulate_media(reduced_motion="reduce")
+    page.wait_for_function("matchMedia('(prefers-reduced-motion: reduce)').matches")
+    result = page.evaluate("""() => {
+      const history = document.querySelector('#history');
+      viewportStep();
+      const group = history.querySelector('[data-link-group]');
+      const path = group.querySelector('path');
+      const spark = group.querySelector('.sequence-spark');
+      const trail = group.querySelector('.sequence-trail');
+      const stale = spark.getAttribute('cx');
+      const [x1, y1, x2, y2] = path.getAttribute('d').slice(1).split(/[,L]/).map(Number);
+      history.scrollLeft = (x1 + x2 - history.clientWidth) / 2;
+      history.dispatchEvent(new Event('scroll'));
+      viewportStep();
+      const x = Number(spark.getAttribute('cx'));
+      const y = Number(spark.getAttribute('cy'));
+      const progress = (x - x1) / (x2 - x1);
+      return {
+        reentered: getComputedStyle(spark).visibility === 'visible'
+          && spark.getAttribute('cx') !== stale && progress >= 0 && progress <= 1
+          && Math.abs(y - (y1 + (y2 - y1) * progress)) < 0.05
+          && spark.getAttribute('cx') === trail.getAttribute('x2'),
+        paused: paintCount() === 0,
+      };
+    }""")
+    assert result == {"reentered": True, "paused": True}
+
+
+def test_viewport_keeps_offscreen_selection_and_focused_preview_usable(viewport_page):
+    page = viewport_page
+    result = page.evaluate("""() => {
+      const history = document.querySelector('#history');
+      const actors = [...history.querySelectorAll('[data-actor]')];
+      const label = actor => actor.parentElement.querySelector('.star-label');
+      const first = actors[0], last = actors.at(-1);
+      const selected = () => history.querySelector('[aria-pressed=true][data-actor]');
+      const isUsable = (item, control) => getComputedStyle(control).visibility === 'visible'
+        && getComputedStyle(control).display !== 'none'
+        && item.getAttribute('aria-hidden') === 'false' && control.tabIndex === 0;
+      const outside = actor => {
+        const x = parseFloat(actor.style.left);
+        return x < history.scrollLeft - 128 || x > history.scrollLeft + history.clientWidth + 128;
+      };
+
+      last.click();
+      viewportStep();
+      const pinnedSelection = selected() === last && outside(last)
+        && isUsable(label(last), label(last).querySelector('button'));
+      for (let i = 0; i < 160; i++) viewportStep();
+      const preview = label(last).querySelector('.star-post');
+      preview.focus({preventScroll: true});
+      const focusedInitially = document.activeElement === preview;
+      history.scrollLeft = history.scrollWidth - history.clientWidth;
+      history.dispatchEvent(new Event('scroll'));
+      viewportStep();
+      const pinnedFocus = focusedInitially && selected() === first && outside(last)
+        && document.activeElement === preview && isUsable(label(last), preview);
+
+      preview.blur();
+      viewportStep();
+      const removedFromTabOrder = label(last).getAttribute('aria-hidden') === 'true'
+        && preview.tabIndex === -1;
+      const actorAccessible = last.tabIndex === 0 && last.getAttribute('aria-hidden') === 'false';
+      return {pinnedSelection, pinnedFocus, removedFromTabOrder, actorAccessible};
+    }""")
+    assert all(result.values()), result
+
+    # A real key action enables :focus-visible before focusing the far actor without native scrolling.
+    page.keyboard.press("Tab")
+    assert page.evaluate("""() => {
+      const actor = [...document.querySelectorAll('#history [data-actor]')].at(-1);
+      actor.focus({preventScroll: true});
+      viewportStep();
+      return document.activeElement === actor && actor.matches(':focus-visible')
+        && actor.getAttribute('aria-pressed') === 'true';
     }""")
 
 
@@ -551,9 +785,14 @@ def test_zoom_reuses_grouped_scene_and_rebinds_animation(offline_page, motion):
       const {history, selected, path} = zoomProbe;
       const expected = Math.max(0, Math.min(parseFloat(selected.style.left) - history.clientWidth / 2,
         history.scrollWidth - history.clientWidth));
-      const spark = path.parentNode.querySelector('.sequence-spark');
-      const trail = path.parentNode.querySelector('.sequence-trail');
-      const [ax, ay, bx, by] = path.getAttribute('d').slice(1).split(/[,L]/).map(Number);
+      const center = history.scrollLeft + history.clientWidth / 2;
+      const visiblePath = [...history.querySelectorAll('.constellation-links path')].find(path => {
+        const [x1, , x2] = path.getAttribute('d').slice(1).split(/[,L]/).map(Number);
+        return Math.min(x1, x2) <= center && Math.max(x1, x2) >= center;
+      });
+      const spark = visiblePath.parentNode.querySelector('.sequence-spark');
+      const trail = visiblePath.parentNode.querySelector('.sequence-trail');
+      const [ax, ay, bx, by] = visiblePath.getAttribute('d').slice(1).split(/[,L]/).map(Number);
       const cx = Number(spark.getAttribute('cx')), cy = Number(spark.getAttribute('cy'));
       const progress = (cx - ax) / (bx - ax);
       const label = selected.parentElement.querySelector('.star-label');

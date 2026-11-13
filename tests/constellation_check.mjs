@@ -14,6 +14,7 @@ const {
   normalizeMotionSpeed,
 } = await import(new URL("constellation-layout.js", base));
 const { createConstellation } = await import(new URL("constellation.js", base));
+const { createViewportIndex, overscan } = await import(new URL("constellation-viewport.js", base));
 const { resolveLens } = await import(new URL("audience-ui.js", base));
 const { groupKey, groupDescription } = await import(new URL("constellation-colors.js", base));
 const { groupEvents } = await import(new URL("audience-groups.js", base));
@@ -57,6 +58,33 @@ for (const width of [320, 390, 798, 1440])
       );
       assert.ok(layout.center < height / 2);
     }
+const points = [160, 0, 160, 320, 80, 640].map((x, index) => ({
+  person: {x, event: {event_id: index === 2 ? "0" : String(index)}},
+}));
+const segments = [
+  {a:{x:-500}, b:{x:700}},
+  {a:{x:480}, b:{x:320}},
+  {a:{x:80}, b:{x:80}},
+  {a:{x:1200}, b:{x:1400}},
+];
+const indexed = createViewportIndex(points, segments);
+assert.equal(createViewportIndex([], []).nearest(40), undefined);
+assert.equal(createViewportIndex(points.slice(0, 1), []).nearest(-100), points[0].person);
+for (const center of [-100, 0, 40, 80, 120, 160, 240, 480, 640, 1000]) {
+  const expected = points.reduce((best, item) =>
+    Math.abs(item.person.x - center) < Math.abs(best.person.x - center) ? item : best);
+  assert.equal(indexed.nearest(center), expected.person, "Nearest selection keeps original tie priority");
+}
+for (const [left, width] of [[0, 64], [100, 128], [320, 390], [900, 1200], [2500, 1600]]) {
+  const start = left - overscan, end = left + width + overscan;
+  const {labels, connections} = indexed.range(start, end);
+  assert.deepEqual(labels, points.filter(({person}) => start <= person.x && person.x <= end));
+  assert.deepEqual(new Set(connections), new Set(segments.filter(({a,b}) =>
+    Math.min(a.x, b.x) <= end && Math.max(a.x, b.x) >= start)));
+}
+assert.ok(indexed.range(200, 220).connections.includes(segments[0]),
+  "A connection spanning the viewport is active with neither endpoint in range");
+
 const inactive = modules.map((module) => ({ ...module, enabled: false }));
 assert.equal(
   resolveLens(modules, "none"),

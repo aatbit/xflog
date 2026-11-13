@@ -86,6 +86,7 @@ function button(dataset) {
       this.attributeWrites = (this.attributeWrites || 0) + 1;
       this.attributes[k] = v;
     },
+    removeAttribute(k) { delete this.attributes[k]; },
     addEventListener(k, v) {
       listenerWrites++;
       this.handlers[k] = v;
@@ -988,7 +989,14 @@ try {
   const {links: animatedLinks} = verifyConnections(connectionEvents, [activity], "activity", 1);
   assert.ok(animatedLinks.length > 2, "The animation fixture has multiple indexed links");
   frame(30000);
+  const inRange = ({a,b}) => Math.max(a.x, b.x) >= element.scrollLeft - 128 &&
+    Math.min(a.x, b.x) <= element.scrollLeft + element.clientWidth + 128;
+  assert.ok(animatedLinks.some(inRange) && animatedLinks.some(link => !inRange(link)));
   animatedLinks.forEach(({a,b}, index) => {
+    if (!inRange({a,b})) {
+      assert.equal(renderedSparks[index].attributes.cx, undefined);
+      return;
+    }
     const part = seed(index) % 1, tail = Math.max(0, part - 0.06);
     assert.equal(renderedSparks[index].attributes.cx, (a.x + (b.x - a.x) * part).toFixed(2));
     assert.equal(renderedSparks[index].attributes.cy, (a.y + (b.y - a.y) * part).toFixed(2));
@@ -1016,8 +1024,9 @@ try {
     group:a.group, style:color ? `color:${color}` : "", d:`M${a.x},${a.y}L${b.x},${b.y}`, dash:dash || "",
   })), "Leaving overview restores the exact ordered connections and styles");
   frame(30032);
-  assert.ok(renderedTrails.every(trail => trail.attributes.x1 !== undefined), "Recreated trails animate");
   expanded.links.forEach(({a,b}, index) => {
+    if (!inRange({a,b})) return;
+    assert.notEqual(renderedTrails[index].attributes.x1, undefined, "Active retained trails animate");
     const part = (seed(index) + 32 / 10000) % 1;
     assert.equal(renderedSparks[index].attributes.cx, (a.x + (b.x - a.x) * part).toFixed(2));
     assert.equal(renderedSparks[index].attributes.cy, (a.y + (b.y - a.y) * part).toFixed(2));

@@ -9,6 +9,7 @@ import {
   visibleLabels,
   seed,
 } from "./constellation-layout.js";
+import { createViewportIndex, overscan } from "./constellation-viewport.js";
 import { createShootingStar } from "./shooting-star.js";
 import { verificationBadge } from "./verification-badge.js";
 import { groupKey, groupDescription } from "./constellation-colors.js";
@@ -30,7 +31,7 @@ export function createConstellation({
     zoomIn = $("#zoom-in"), zoomOut = $("#zoom-out"),
     history = $("#memory-scrubber"), peopleCount = $("#scene-people-count"),
     next = $("#memory-next"), previous = $("#memory-previous"),
-    key = $("#constellation-key"), context = $(".scene-context");
+    key = $("#constellation-key"), context = $(".scene-context"), signal = $("#selected-signal");
   const shootingStar = createShootingStar();
   let events = [],
     selected = null,
@@ -38,7 +39,9 @@ export function createConstellation({
     lens = "none",
     geometry = null,
     layoutAtZoom = null;
-  let selectionByEvent = null, selection = null;
+  let selectionByEvent = null, selection = null, bindingsByEvent = null;
+  let viewportIndex = null, viewportLabels = [], activeSparks = [],
+    positionedLabels = new Set(), labelsByNode = null;
   let sceneVersion = 0;
   // History is deduplicated by event ID before grouping, so only data changes alter membership.
   let personCount = 0, countDirty = true;
@@ -96,7 +99,10 @@ export function createConstellation({
     actorButtons = [];
     sky = meteor = meteorTail = canvas = linkLayer = groupLayer = null;
     groupButtons = connections = layoutAtZoom = null;
-    selectionByEvent = selection = keyScope = null;
+    selectionByEvent = selection = keyScope = bindingsByEvent = labelsByNode = null;
+    viewportIndex = null;
+    viewportLabels = activeSparks = [];
+    positionedLabels.clear();
     viewportLeft = browseLeft = labelInset = null;
     labelsDirty = animationDirty = true;
     lastMotion = null;
@@ -141,11 +147,8 @@ export function createConstellation({
   }
   function selectVisibleProfile(notify = onSelect, duringPaint = false) {
     const center = element.scrollLeft + element.clientWidth / 2;
-    const closest = geometry.people.reduce(
-      (best, person) =>
-        Math.abs(person.x - center) < Math.abs(best.x - center) ? person : best,
-      geometry.people[0],
-    );
+    // Pannable group overviews retain their existing browsing behavior.
+    const closest = viewportIndex.nearest(center);
     if (closest && closest !== position()) {
       applySelection(closest.event.event_id);
       if (!duringPaint) queue();
@@ -176,30 +179,31 @@ export function createConstellation({
     selected = identity;
     selection = selectionByEvent.get(identity);
     const chosenPerson = position();
-    const current = events.find(event => event.event_id === identity);
-    actorButtons.forEach(({button, personElement, person}) => {
+    const updateBinding = (item, index) => {
+      const {button, personElement, person} = actorButtons[index];
       const chosen = button.dataset.event === chosenPerson?.event.event_id;
-      const event = chosen ? current : person.event;
+      const event = chosen ? selection.event : person.event;
       button.setAttribute("aria-pressed", String(chosen));
       button.setAttribute(
         "aria-label",
         `${event.name || event.handle || "X account"}, ${label(event)}, recorded event`,
       );
       personElement.classList.toggle("is-selected", chosen);
-    });
-    for (const item of labels) {
-      const event = item.person === chosenPerson ? current : item.person.event;
-      item.label.setAttribute("aria-label", `${item.person === chosenPerson ? "Open recorded event for" : "Select"} ${event.name || event.handle || "X account"}`);
-      if (item.identity !== event.event_id) {
-        item.label.innerHTML = personLabel(item.person, event);
-        item.identity = event.event_id;
-        item.controls = item.label.querySelectorAll?.("button,a") || [];
-        item.preview = item.label.querySelector?.(".star-post");
-        item.width = undefined;
+      const chosenLabel = item.person === chosenPerson;
+      const labelEvent = chosenLabel ? selection.event : item.person.event;
+      item.label.setAttribute("aria-label", `${chosenLabel ? "Open recorded event for" : "Select"} ${labelEvent.name || labelEvent.handle || "X account"}`);
+      if (initial) {
+        item.label.innerHTML = personLabel(item.person, labelEvent);
+        item.controls = item.label.querySelectorAll("button,a");
+        item.preview = item.label.querySelector(".star-post");
+        showLabel(item, false);
       }
-      const id = item.person.event.event_id;
-      if (id === previous?.event.event_id || id === chosenPerson?.event.event_id)
-        item.width = undefined;
+      item.width = undefined;
+    };
+    if (initial) labels.forEach(updateBinding);
+    else {
+      for (const id of new Set([previous?.event.event_id, chosenPerson?.event.event_id]))
+        for (const index of bindingsByEvent.get(id) ?? []) updateBinding(labels[index], index);
     }
     if (initial || previous?.group !== chosenPerson?.group) groupHint();
     travelControls();
@@ -211,27 +215,62 @@ export function createConstellation({
       queue();
   }
   function showLabel(item, visible) {
+    if (item.visible === visible) return;
+    item.visible = visible;
     item.label.style.visibility = visible ? "visible" : "hidden";
     item.label.setAttribute("aria-hidden", String(!visible));
     item.label.tabIndex = -1;
     item.controls?.forEach(control => { control.tabIndex = visible ? 0 : -1; });
   }
+  function resetViewport() {
+    viewportIndex = createViewportIndex(labels, geometry.overview ? [] : sparks);
+    viewportLeft = null;
+  }
+  function updateViewport(left) {
+    const range = viewportIndex.range(left - overscan, left + element.clientWidth + overscan);
+    viewportLabels = range.labels;
+    const next = range.connections;
+    if (next.length === activeSparks.length && next.every((spark, index) => spark === activeSparks[index]))
+      return false;
+    const retained = new Set(next);
+    for (const spark of activeSparks) {
+      if (!retained.has(spark)) {
+        spark.element.setAttribute("display", "none");
+        spark.trail.setAttribute("display", "none");
+        spark.hidden = true;
+      }
+    }
+    activeSparks = next;
+    return true;
+  }
   function layoutLabels(left) {
     const chosenPerson = position();
+    const chosenLabel = labels[selectedProfileIndex()];
+    const focusedLabel = labelsByNode.get(document.activeElement?.closest("[data-label]"));
+    const relevant = new Set(viewportLabels);
+    if (chosenLabel) relevant.add(chosenLabel);
+    if (focusedLabel) relevant.add(focusedLabel);
     const viewportWidth = element.clientWidth;
     const bottom = geometry.lower + 25;
+    // The signal can grow with the selected event; reserve its actual space only for a pinned label.
+    const focusBottom = focusedLabel && focusedLabel !== chosenLabel
+      ? Math.min(element.clientHeight - 80, (signal?.offsetHeight ? signal.offsetTop - element.offsetTop - 8 : Infinity))
+      : 0;
     labelInset ??= (context?.offsetHeight || 0) + 28;
     // Read invalidated sizes together before positioning any label.
-    for (const item of labels) {
-      if (item.width === undefined) {
+    for (const item of relevant) {
+      const previewShown = item.preview &&
+        (item === chosenLabel || item.preview === document.activeElement);
+      if (item.width === undefined || item.previewShown !== previewShown) {
+        item.previewShown = previewShown;
         const box = item.label.getBoundingClientRect();
         item.width = box.width;
         item.height = box.height;
-        item.previewHeight = item.person === chosenPerson && item.preview ? item.preview.offsetHeight : 0;
+        item.previewHeight = previewShown ? item.preview.offsetHeight : 0;
       }
     }
     const candidates = [];
-    for (const item of labels) {
+    for (const item of [...relevant].sort((a, b) => a.index - b.index)) {
       const chosen = item.person === chosenPerson;
       const x = item.person.x - left;
       const width = item.width,
@@ -241,16 +280,22 @@ export function createConstellation({
       if (top + height + (previewHeight ? previewHeight + 8 : 0) > bottom)
         top = item.person.y - height - (previewHeight ? 40 : 25);
       top = clamp(top, labelInset, Math.max(labelInset, bottom - height));
-      const previewTop = Math.max(item.person.y + 40, top < item.person.y ? 0 : top + height + 8);
-      if (chosen && item.preview) item.preview.style.top = `${previewTop - top}px`;
-      const previewBottom = chosen && item.preview ? previewTop + previewHeight : top + height;
+      const pinnedFocus = item === focusedLabel && !chosen;
+      const previewTop = pinnedFocus
+        ? top + height + 8
+        : Math.max(item.person.y + 40, top < item.person.y ? 0 : top + height + 8);
+      if (item.previewShown) item.preview.style.top = `${previewTop - top}px`;
+      const previewBottom = item.previewShown ? previewTop + previewHeight : top + height;
+      const blockHeight = Math.max(height, previewBottom - top);
+      const limit = pinnedFocus ? Math.max(labelInset, focusBottom - blockHeight) : top;
+      top = Math.min(top, limit);
       const center = clamp(
         x, width / 2 + 16, viewportWidth - width / 2 - 16,
       );
       item.label.style.left = `${center + left}px`;
       item.label.style.top = `${top}px`;
       if (
-        (chosen || (x >= 12 && x <= viewportWidth - 12)) &&
+        (chosen || item === focusedLabel || (x >= 12 && x <= viewportWidth - 12)) &&
         center - width / 2 >= 12 &&
         center + width / 2 <= viewportWidth - 12
       ) {
@@ -259,29 +304,52 @@ export function createConstellation({
           left: center - width / 2,
           right: center + width / 2,
           top,
-          bottom: Math.max(top + height, previewBottom),
+          bottom: top + blockHeight,
           minTop: labelInset,
-          maxBottom: Math.max(bottom, previewBottom),
-          distance: Math.abs(center - viewportWidth / 2),
+          maxBottom: pinnedFocus ? focusBottom : Math.max(bottom, previewBottom),
+          distance: pinnedFocus ? -1 : Math.abs(center - viewportWidth / 2),
         };
         const alternateTop = clamp(
           top < item.person.y ? item.person.y + 27 : item.person.y - height - 25,
           labelInset,
-          Math.max(labelInset, bottom - height),
+          Math.max(labelInset, pinnedFocus ? candidate.maxBottom - blockHeight : bottom - height),
         );
-        if (!chosen)
-          candidate.alternates = [
-            { ...candidate, top: alternateTop, bottom: alternateTop + height },
-          ];
+        if (!chosen) {
+          const extent = pinnedFocus ? blockHeight : height;
+          candidate.alternates = [{ ...candidate, top: alternateTop, bottom: alternateTop + extent }];
+          if (pinnedFocus) {
+            // A pinned label can also use the opposite edge because it no longer follows its star.
+            const otherLeft = center > viewportWidth / 2 ? 16 : viewportWidth - width - 16;
+            const edge = Math.max(labelInset, candidate.maxBottom - extent);
+            for (const left of [candidate.left, otherLeft]) {
+              for (const alternate of [labelInset, edge]) {
+                candidate.alternates.push({
+                  ...candidate, left, right: left + width, top: alternate, bottom: alternate + extent,
+                });
+              }
+            }
+          }
+        }
         candidates.push(candidate);
       }
     }
     const shown = visibleLabels(candidates, chosenPerson);
-    labels.forEach((item) => {
+    for (const item of positionedLabels) {
+      if (relevant.has(item)) continue;
+      showLabel(item, false);
+      // Old positions can otherwise extend the scroll area after zooming out.
+      item.label.style.left = "";
+    }
+    for (const item of relevant) {
       const placement = shown.get(item.person);
-      if (placement) item.label.style.top = `${placement.top}px`;
-      showLabel(item, Boolean(placement));
-    });
+      if (placement) {
+        item.label.style.top = `${placement.top}px`;
+        if (item === focusedLabel && item !== chosenLabel)
+          item.label.style.left = `${left + (placement.left + placement.right) / 2}px`;
+      }
+      showLabel(item, Boolean(placement) || item === focusedLabel);
+    }
+    positionedLabels = relevant;
   }
   function animate(motion) {
     const shot = motion ? shootingStar(clock, sceneWidth, sceneHeight) : null;
@@ -299,8 +367,11 @@ export function createConstellation({
           : 0.22,
       );
     });
-    if (!geometry.overview) sparks.forEach(({ element: spark, trail, a, b }, index) => {
-      const part = (clock / 10000 + seed(index)) % 1;
+  }
+  function animateConnections() {
+    for (const connection of activeSparks) {
+      const {element: spark, trail, a, b, phase} = connection;
+      const part = (clock / 10000 + phase) % 1;
       const tail = Math.max(0, part - 0.06);
       spark.setAttribute("cx", (a.x + (b.x - a.x) * part).toFixed(2));
       spark.setAttribute("cy", (a.y + (b.y - a.y) * part).toFixed(2));
@@ -308,7 +379,12 @@ export function createConstellation({
       trail.setAttribute("y1", (a.y + (b.y - a.y) * tail).toFixed(2));
       trail.setAttribute("x2", (a.x + (b.x - a.x) * part).toFixed(2));
       trail.setAttribute("y2", (a.y + (b.y - a.y) * part).toFixed(2));
-    });
+      if (connection.hidden) {
+        spark.removeAttribute("display");
+        trail.removeAttribute("display");
+        connection.hidden = false;
+      }
+    }
   }
   function paint(now) {
     frame = 0;
@@ -344,6 +420,7 @@ export function createConstellation({
     }
     if (!browsing) browseLeft = null;
     if (scrolled) sky.style.transform = `translateX(${left}px)`;
+    const connectionsChanged = scrolled && !geometry.overview && updateViewport(left);
     if (scrolled || labelsDirty) {
       if (!geometry.overview) layoutLabels(left);
       scrubber();
@@ -351,11 +428,11 @@ export function createConstellation({
       labelsDirty = false;
     }
     const animating = String(motion);
-    if (motion || animationDirty || lastMotion !== motion) {
-      animate(motion);
-      animationDirty = false;
-      lastMotion = motion;
-    }
+    if (motion || animationDirty || lastMotion !== motion) animate(motion);
+    if (!geometry.overview && (motion || animationDirty || connectionsChanged))
+      animateConnections();
+    animationDirty = false;
+    lastMotion = motion;
     if (browsing && target === null && !drag) {
       browseLeft = null;
       delete element.dataset.userScrolling;
@@ -405,13 +482,16 @@ export function createConstellation({
     sky = element.querySelector(".constellation-sky");
     meteor = element.querySelector(".shooting-star");
     meteorTail = element.querySelector(".shooting-tail");
+    const firstEvents = new Map();
+    for (const event of events)
+      if (!firstEvents.has(event.event_id)) firstEvents.set(event.event_id, event);
     selectionByEvent = new Map();
     selection = null;
     let index = 0;
     for (const person of geometry.people) {
       for (const event of person.events)
         if (!selectionByEvent.has(event.event_id))
-          selectionByEvent.set(event.event_id, {person, index});
+          selectionByEvent.set(event.event_id, {person, index, event: firstEvents.get(event.event_id)});
       index++;
     }
     actorButtons = [...element.querySelectorAll("[data-actor]")].map(button => ({
@@ -420,7 +500,16 @@ export function createConstellation({
     }));
     stars = [...element.querySelectorAll(".sky-star")];
     const labelNodes = element.querySelectorAll("[data-label]");
-    labels = geometry.people.map((person, index) => ({person, label: labelNodes[index]}));
+    labels = geometry.people.map((person, index) => ({person, index, label: labelNodes[index]}));
+    labelsByNode = new WeakMap(labels.map(item => [item.label, item]));
+    bindingsByEvent = new Map();
+    actorButtons.forEach(({button}, index) => {
+      const id = button.dataset.event;
+      if (!bindingsByEvent.has(id)) bindingsByEvent.set(id, []);
+      bindingsByEvent.get(id).push(index);
+    });
+    viewportLabels = activeSparks = [];
+    positionedLabels.clear();
     canvas = element.querySelector(".constellation-canvas");
     linkLayer = element.querySelector(".constellation-links");
     groupLayer = element.querySelector(".constellation-groups");
@@ -442,6 +531,7 @@ export function createConstellation({
     });
     applySelection(identity, true);
     updateMode();
+    resetViewport();
     anchor();
     scrubber();
     queue();
@@ -471,11 +561,11 @@ export function createConstellation({
           links.push({ a: people[index], b: people[index - 1], color: group.color, dash: group.dash });
       }
     }
-    linkLayer.innerHTML = links.map(({ a, b, color, dash }) => `<g data-link-group="${esc(a.group)}" style="${color ? `color:${color}` : ""}"><path d="M${a.x},${a.y}L${b.x},${b.y}" stroke-dasharray="${dash || ""}"/><line class="sequence-trail"/><circle class="sequence-spark" r="2"/></g>`).join("");
+    linkLayer.innerHTML = links.map(({ a, b, color, dash }) => `<g data-link-group="${esc(a.group)}" style="${color ? `color:${color}` : ""}"><path d="M${a.x},${a.y}L${b.x},${b.y}" stroke-dasharray="${dash || ""}"/><line class="sequence-trail" display="none"/><circle class="sequence-spark" r="2" display="none"/></g>`).join("");
     connections = linkLayer.querySelectorAll("path");
     const trails = linkLayer.querySelectorAll(".sequence-trail");
     sparks = [...linkLayer.querySelectorAll(".sequence-spark")].map(
-      (spark, index) => ({element: spark, trail: trails[index], ...links[index]}),
+      (spark, index) => ({element: spark, trail: trails[index], ...links[index], phase: seed(index), hidden: true}),
     );
   }
   function prepareGroupButtons() {
@@ -510,7 +600,10 @@ export function createConstellation({
       button.tabIndex = overview ? -1 : 0;
       button.setAttribute("aria-hidden", String(overview));
     }
-    if (overview) for (const item of labels) showLabel(item, false);
+    if (overview) {
+      for (const item of positionedLabels) showLabel(item, false);
+      viewportLabels = [];
+    }
   }
   function anchor() {
     const point = position();
@@ -562,6 +655,7 @@ export function createConstellation({
     const nextZoom = clamp(Math.round(value * 20) / 20, 0, 2);
     if (nextZoom === zoom || !Number.isFinite(nextZoom)) return;
     const wasOverview = geometry.overview;
+    const coordinatesChanged = zoom > 0.25 || nextZoom > 0.25;
     zoom = nextZoom;
     layoutAtZoom(zoom);
     element.dataset.canPan = String(geometry.canPan);
@@ -587,6 +681,7 @@ export function createConstellation({
         path.setAttribute("d", `M${a.x},${a.y}L${b.x},${b.y}`);
       });
     }
+    if (coordinatesChanged) resetViewport();
     anchor();
     zoomControls();
     travelControls();
@@ -750,7 +845,13 @@ export function createConstellation({
     scrollPosition = element.scrollLeft;
     queue();
   };
+  const labelFocus = (event) => {
+    if (!event.target.closest("[data-label]")) return;
+    labelsDirty = true;
+    queue();
+  };
   const focus = (event) => {
+    labelFocus(event);
     const button = event.target.closest("[data-actor]");
     if (button?.matches(":focus-visible"))
       seek(events.findIndex((item) => item.event_id === button.dataset.event));
@@ -762,6 +863,7 @@ export function createConstellation({
     [element, "auxclick", middleButton],
     [element, "keydown", onKey],
     [element, "focusin", focus],
+    [element, "focusout", labelFocus],
     [element, "pointerdown", down],
     [element, "pointermove", move],
     [element, "pointerup", up],
