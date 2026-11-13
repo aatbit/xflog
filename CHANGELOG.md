@@ -3,6 +3,13 @@
 Each tagged release has an automatically generated list of merged pull requests
 and contributors on the [GitHub releases page](https://github.com/aatbit/xflog/releases).
 
+## 1.0.14 — 2026-11-13
+
+### Fixed
+
+- Open Activity constellations from local history when none of their events
+  are on the loaded timeline page.
+
 ## 1.0.13 — 2026-11-13
 
 ### Fixed

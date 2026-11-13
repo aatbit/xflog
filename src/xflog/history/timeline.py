@@ -122,6 +122,7 @@ class Timeline:
             raise InvalidTimelineRequest("Select a timeline event on the first page.")
         subject, kind = query.get("subject", "followers"), query.get("kind", "all")
         lens, since = query.get("lens", "none"), query.get("since", "")
+        activity_kind = query.get("activity_kind", "")
         if lens != "none" and lens not in audience_groups.MODULES:
             raise InvalidTimelineRequest("Invalid audience group.")
         limit = min(50, max(1, int(query.get("limit", 25))))
@@ -144,7 +145,8 @@ class Timeline:
                 if subject == "followers" and kind == "all"
                 else ()
             )
-            scope = scope_key((account, subject, kind, since, lens, interactions, groups))
+            scope_parts = (account, subject, kind, since, lens, interactions, groups)
+            scope = scope_key((*scope_parts, activity_kind) if activity_kind else scope_parts)
             cursor_scope = scope_key((scope, after))
             if before and before.scope != cursor_scope:
                 raise InvalidTimelineRequest("Timeline cursor does not match this history scope.")
@@ -171,7 +173,9 @@ class Timeline:
                     raise InvalidTimelineRequest(
                         "Encounter revision belongs to an unavailable snapshot."
                     )
-            scope_query = TimelineQuery(account, subject, kind, since, interactions, watermarks)
+            scope_query = TimelineQuery(
+                account, subject, kind, since, interactions, watermarks, activity_kind
+            )
             result = await self._page(
                 db,
                 scope_query,

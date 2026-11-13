@@ -903,11 +903,12 @@ def paged_history(offline_page):
               const scope = Object.fromEntries(url.searchParams);
               const offset = before === '0' ? 0 : Number(before.split('-').at(-1));
               const limit = Math.min(50, Number(url.searchParams.get('limit') || 25));
-              const scopedRows = scope.kind === 'lost' ? byKind('follow.unfollow') : events;
+              const scopedRows = scope.activity_kind ? byKind(scope.activity_kind)
+                : scope.kind === 'lost' ? byKind('follow.unfollow') : events;
               const groups = ['follow.follow', 'follow.unfollow'].map((key, index) => ({
                 key, label: index ? 'Unfollowed' : 'Followed you', tone: index ? 'negative' : 'positive',
                 event_count: byKind(key).length, distinct_actors: actors(byKind(key)),
-              }));
+              })).filter(group => !scope.activity_kind || group.key === scope.activity_kind);
               const end = Math.min(offset + limit, scopedRows.length);
               const payload = mode === 'fail' ? {detail: 'Synthetic older-page failure'} : {
                 events: scopedRows.slice(offset, end),
@@ -962,11 +963,16 @@ def test_constellation_scrubber_requests_older_once_on_commit(paged_history):
     page = paged_history
     page.evaluate("document.querySelector('[data-filter=all]').click()")
     receive_history_page(page, 0)
-    scrubber = page.locator("#memory-scrubber")
-    scrubber.evaluate("input => { input.value = '1000'; }")
-    scrubber.dispatch_event("input")
-    assert page.evaluate("paged.requests().length") == 1
-    scrubber.dispatch_event("change")
+    assert (
+        page.locator("#memory-scrubber").evaluate("""input => {
+      input.value = '1000';
+      input.dispatchEvent(new Event('input', {bubbles:true}));
+      const previewRequests = paged.requests().length;
+      input.dispatchEvent(new Event('change', {bubbles:true}));
+      return previewRequests;
+    }""")
+        == 1
+    )
     receive_history_page(page, 1, "fail")
     assert page.evaluate("paged.requests().length") == 2
     assert page.locator("#history-more").inner_text() == "Retry older activity"
@@ -1051,8 +1057,8 @@ def test_constellation_pages_preserve_selection_and_show_full_group_counts(paged
         "29",
     ]
     unloaded = page.locator('#history .constellation-group[data-group="follow.unfollow"]')
-    assert "0 loaded" in unloaded.inner_text()
-    assert unloaded.evaluate("node => node.tagName") == "DIV"
+    assert "0 actions loaded" in unloaded.get_attribute("title")
+    assert unloaded.evaluate("node => node.tagName") == "BUTTON"
     assert page.locator("#history .constellation-star").count() == initial
     page.evaluate("document.querySelector('[data-layout=vertical]').click()")
     assert "85 events" in page.locator('#history [data-group="follow.follow"] summary').inner_text()
@@ -1093,12 +1099,60 @@ def test_constellation_pages_preserve_selection_and_show_full_group_counts(paged
     }""")
     assert unloaded.evaluate("node => node.tagName") == "BUTTON"
     assert unloaded.locator(".cluster-count").inner_text() == "29"
-    unloaded.click()
-    assert page.locator('#history [aria-pressed="true"][data-actor]').count() == 1
     assert "All matching activity loaded" in page.locator("#history-page-status").text_content()
     count = page.evaluate("paged.requests().length")
     page.evaluate("paged.constellationEnd()")
     assert page.evaluate("paged.requests().length") == count
+
+
+def test_activity_card_loads_its_own_page_and_can_return_to_overview(paged_history):
+    page = paged_history
+    page.locator("#lens-trigger").click()
+    page.get_by_role("menuitemradio", name="Activity", exact=True).click()
+    receive_history_page(page, 0)
+    page.locator("#scene-zoom").evaluate(
+        "zoom => {zoom.value = '0'; zoom.dispatchEvent(new Event('input', {bubbles:true}));}"
+    )
+    card = page.get_by_role("button", name="Explore Unfollowed", exact=False)
+    assert "0 actions loaded" in card.get_attribute("title")
+    card.press("Enter")
+    receive_history_page(page, 1)
+    request = page.evaluate("paged.requests().at(-1)")
+    assert (request["before"], request["activity_kind"], request["local_only"]) == (
+        "0",
+        "follow.unfollow",
+        "true",
+    )
+    assert page.locator("#history .constellation-star").count() == 29
+    assert page.locator("#history .constellation-star[aria-pressed=true]").count() == 1
+    assert page.locator("#scene-lens-label").inner_text() == "Unfollowed"
+    page.locator("#activity-group-back").click()
+    receive_history_page(page, 2)
+    assert "activity_kind" not in page.evaluate("paged.requests().at(-1)")
+    assert card.is_visible()
+
+
+def test_returning_to_overview_discards_inflight_activity_page(paged_history):
+    page = paged_history
+    page.locator("#lens-trigger").click()
+    page.get_by_role("menuitemradio", name="Activity", exact=True).click()
+    receive_history_page(page, 0)
+    page.locator("#scene-zoom").evaluate(
+        "zoom => {zoom.value = '0'; zoom.dispatchEvent(new Event('input', {bubbles:true}));}"
+    )
+    card = page.get_by_role("button", name="Explore Unfollowed", exact=False)
+    card.click()
+    page.wait_for_function("paged.requests().length === 2")
+    page.locator("#activity-group-back").click()
+    receive_history_page(page, 2)
+    assert page.evaluate("paged.requests()[1].aborted")
+    assert page.evaluate("""async () => {
+      paged.send(1);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      return document.querySelector('#scene-lens-label').textContent === 'Activity'
+        && document.querySelector('#activity-group-back').hidden;
+    }""")
+    assert card.is_visible()
 
 
 def test_grouped_journal_replaces_unloaded_summary_in_row_order(paged_history):
@@ -1649,6 +1703,49 @@ def encounter_fixture(offline_browser_app):
             db.execute("DELETE FROM events WHERE account_id=?", (account,))
             db.execute("DELETE FROM settings WHERE key IN ('account','audience_groups')")
             db.executemany("INSERT INTO settings (key,value) VALUES (?,?)", settings.items())
+
+
+@pytest.mark.parametrize(("kind", "label"), [("mentions", "Mentions"), ("quotes", "Quotes")])
+def test_real_activity_drilldown_finds_older_activity(encounter_fixture, offline_page, kind, label):
+    page = offline_page
+    database, events, _ = encounter_fixture
+    account = events[0][2]
+    receipt = (datetime.fromisoformat(events[-1][4]) - timedelta(minutes=1)).isoformat()
+    with sqlite3.connect(database) as db:
+        selection = db.execute("SELECT value FROM settings WHERE key='selection'").fetchone()
+        saved = json.loads(selection[0]) if selection else {}
+        db.execute(
+            "INSERT OR REPLACE INTO settings VALUES ('selection',?)",
+            (json.dumps({**saved, "interactions": {kind: True}}),),
+        )
+        db.execute(
+            """INSERT INTO interactions
+               (account_id,event_id,person_id,kind,post_id,provider_at,received_at)
+               VALUES (?,?,?,?,?,?,?)""",
+            (account, f"old-{kind}", "777", kind, "123", receipt, receipt),
+        )
+    try:
+        page.goto(urljoin(page.url, "/"), wait_until="networkidle")
+        page.locator("#lens-trigger").click()
+        page.get_by_role("menuitemradio", name="Activity", exact=True).click()
+        page.wait_for_function("document.querySelectorAll('#history [data-actor]').length === 50")
+        page.locator("#scene-zoom").evaluate(
+            "zoom => {zoom.value = '0'; zoom.dispatchEvent(new Event('input', {bubbles:true}));}"
+        )
+        card = page.get_by_role("button", name=f"Explore {label}", exact=False)
+        assert "0 actions loaded" in card.get_attribute("title")
+        with page.expect_response(lambda r: f"activity_kind=interaction.{kind}" in r.url) as hit:
+            card.click()
+        assert [event["post_id"] for event in hit.value.json()["events"]] == ["123"]
+        page.wait_for_selector("#history [data-actor='777'][aria-pressed=true]")
+        assert page.locator("#history [data-actor]").count() == 1
+        assert page.locator("#scene-lens-label").inner_text() == label
+    finally:
+        with sqlite3.connect(database) as db:
+            db.execute("DELETE FROM interactions WHERE account_id=?", (account,))
+            db.execute("DELETE FROM settings WHERE key='selection'")
+            if selection:
+                db.execute("INSERT INTO settings VALUES ('selection',?)", selection)
 
 
 def test_real_live_encounters_reclassify_filtered_history_without_resetting_cursor(

@@ -129,6 +129,7 @@ class TimelineQuery:
     since: str
     interactions: tuple[str, ...]
     watermarks: tuple[int, int]
+    activity_kind: str = ""
 
     def records(
         self,
@@ -149,8 +150,14 @@ class TimelineQuery:
         types = SUBSCRIPTION_TYPES if self.subject == "subscriptions" else FOLLOW_TYPES
         if self.kind != "all":
             types = types[:1] if self.kind == "gained" else types[1:]
+        interactions = self.interactions
+        if self.activity_kind:
+            types = tuple(kind for kind in types if kind == self.activity_kind)
+            interactions = tuple(
+                kind for kind in interactions if f"interaction.{kind}" == self.activity_kind
+            )
         event_slots = _slots(params, "event_kind", types)
-        interaction_slots = _slots(params, "interaction_kind", self.interactions)
+        interaction_slots = _slots(params, "interaction_kind", interactions)
         branches = []
         if before:
             params["before_at"] = before[0]
@@ -174,7 +181,7 @@ class TimelineQuery:
                 "interaction_account_sequence",
             ),
         ):
-            if (not source and not self.interactions and not encounters) or (
+            if (not source and not interactions and not encounters) or (
                 selected and source != selected[0]
             ):
                 continue
@@ -183,7 +190,7 @@ class TimelineQuery:
             index = ""
             if page_size and not selected and not candidates:
                 index = f" INDEXED BY {sequence_index if after is not None else receipt_index}"
-            matches = f"kind IN ({slots})"
+            matches = f"kind IN ({slots})" if (types if source else interactions) else "0"
             if self.since:
                 matches += " AND received_at>=:since"
             projection = f",({matches}) AS matches_scope" if encounters else ""
